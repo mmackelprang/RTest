@@ -18,7 +18,7 @@ namespace Radio.Fingerprinting.Tests.Services;
 public class FingerprintCallPolicyTests
 {
   private static readonly DateTimeOffset T0 = new(2026, 10, 7, 12, 0, 0, TimeSpan.Zero);
-  private static readonly TimeSpan Capture = TimeSpan.FromSeconds(15);
+  private static readonly TimeSpan Capture = TimeSpan.FromSeconds(13); // the default SampleDurationSeconds
 
   private readonly List<(LogLevel Level, string Message)> _logs = new();
 
@@ -48,7 +48,7 @@ public class FingerprintCallPolicyTests
   /// <param name="source">The active source; callbacks may change it.</param>
   /// <param name="outcomeFor">The outcome of the n-th call (0-based), given its capture start.</param>
   /// <param name="duration">How much simulated time to run.</param>
-  /// <param name="captureLength">How long each capture takes (default 15 s).</param>
+  /// <param name="captureLength">How long each capture takes (default 13 s).</param>
   /// <param name="onSecond">Called before each decision, to change the source over time.</param>
   /// <param name="from">Simulated start (default <see cref="T0"/>).</param>
   /// <param name="afterOutcome">Called after each recorded outcome — the source reacting to it.</param>
@@ -99,7 +99,7 @@ public class FingerprintCallPolicyTests
   // --- Unknown-start sources ---------------------------------------------------------------------------
 
   [Fact]
-  public void Radio_CallsEvery40sStartToStart_WhetherOrNotTheLastCallMatched()
+  public void Radio_CallsEvery15sStartToStart_WhetherOrNotTheLastCallMatched()
   {
     var policy = Create();
 
@@ -107,27 +107,28 @@ public class FingerprintCallPolicyTests
       TimeSpan.FromMinutes(10));
 
     Assert.Equal(0, calls[0]);
-    Assert.All(Gaps(calls), gap => Assert.Equal(40, gap));
-    Assert.Equal(15, calls.Count); // 0, 40, ..., 560
+    Assert.All(Gaps(calls), gap => Assert.Equal(15, gap));
+    Assert.Equal(40, calls.Count); // 0, 15, ..., 585 — 4/minute, the 240/hour budget
   }
 
   [Fact]
-  public void Radio_ReTune_MakesTheNextCallImmediate()
+  public void Radio_ReTune_MakesTheNextCallImmediate_AndRestartsTheSchedule()
   {
     var policy = Create();
     var radio = Radio();
 
-    var calls = Simulate(policy, radio, (_, _) => CallOutcome.Match, TimeSpan.FromSeconds(100),
+    var calls = Simulate(policy, radio, (_, _) => CallOutcome.Match, TimeSpan.FromSeconds(50),
       onSecond: now =>
       {
-        if (now == T0 + TimeSpan.FromSeconds(22))
+        if (now == T0 + TimeSpan.FromSeconds(14))
         {
           policy.RequestImmediate();
         }
       });
 
-    // 0 (start); the request at 22 lands after that capture ended (15) → immediate at 22; then 40 later.
-    Assert.Equal(new[] { 0, 22, 62 }, calls);
+    // 0 (start); the capture ends at 13 and the next attempt is due at 15; the re-tune at 14 makes it
+    // immediate. The schedule restarts from there: 29, 44 — NOT 15, 30, 45 with the re-tune's call added.
+    Assert.Equal(new[] { 0, 14, 29, 44 }, calls);
   }
 
   [Fact]
@@ -136,16 +137,16 @@ public class FingerprintCallPolicyTests
     var policy = Create();
     var radio = Radio();
 
-    var calls = Simulate(policy, radio, (_, _) => CallOutcome.Match, TimeSpan.FromSeconds(60),
+    var calls = Simulate(policy, radio, (_, _) => CallOutcome.Match, TimeSpan.FromSeconds(50),
       onSecond: now =>
       {
-        if (now == T0 + TimeSpan.FromSeconds(25))
+        if (now == T0 + TimeSpan.FromSeconds(14))
         {
           policy.ResetSegment();
         }
       });
 
-    Assert.Equal(new[] { 0, 25 }, calls);
+    Assert.Equal(new[] { 0, 14, 29, 44 }, calls);
   }
 
   [Fact]
@@ -158,8 +159,14 @@ public class FingerprintCallPolicyTests
     Assert.Equal(CallDecisionKind.CallNow, first.Kind);
 
     // The loop captured, found silence, and recorded nothing. Audio returns: the next pass calls at once.
-    var afterSilence = policy.Decide(radio.Snapshot, T0 + Capture);
+    var returnedAt = T0 + Capture;
+    var afterSilence = policy.Decide(radio.Snapshot, returnedAt);
     Assert.Equal(CallDecisionKind.CallNow, afterSilence.Kind);
+
+    // ...and that call restarts the schedule: the next is 15 s after it.
+    policy.RecordCallStarted(returnedAt + Capture);
+    policy.RecordOutcome(afterSilence.Segment, returnedAt, CallOutcome.NoMatch, returnedAt + Capture);
+    Assert.Equal(returnedAt + TimeSpan.FromSeconds(15), policy.Decide(radio.Snapshot, returnedAt + Capture).NotBefore);
   }
 
   // --- Known-start sources -----------------------------------------------------------------------------
@@ -261,22 +268,22 @@ public class FingerprintCallPolicyTests
   // --- Hourly cap --------------------------------------------------------------------------------------
 
   [Fact]
-  public void Cap_The121stCallInARollingHourWaits_UntilTheOldestAgesOut_AndWarnsOncePerEpisode()
+  public void Cap_The241stCallInARollingHourWaits_UntilTheOldestAgesOut_AndWarnsOncePerEpisode()
   {
-    // A radio interval of 1 s would make ~3,600 calls an hour; the cap must hold it to 120 in any hour.
+    // A radio interval of 1 s would make ~3,600 calls an hour; the default cap must hold it to 240.
     var policy = Create(new FingerprintingOptions { UnknownStartIntervalSeconds = 1 });
 
     var calls = Simulate(policy, Radio(), (_, _) => CallOutcome.Match, TimeSpan.FromHours(2),
       captureLength: TimeSpan.Zero);
 
-    // The first 120 go at once (one per simulated second); the 121st waits until the first is an hour old.
-    Assert.Equal(Enumerable.Range(0, 120), calls.Take(120));
-    Assert.Equal(3600, calls[120]);
+    // The first 240 go at once (one per simulated second); the 241st waits until the first is an hour old.
+    Assert.Equal(Enumerable.Range(0, 240), calls.Take(240));
+    Assert.Equal(3600, calls[240]);
 
-    // Every rolling hour holds at most 120 calls.
-    for (var i = 120; i < calls.Count; i++)
+    // Every rolling hour holds at most 240 calls.
+    for (var i = 240; i < calls.Count; i++)
     {
-      Assert.True(calls[i] - calls[i - 120] >= 3600, $"calls {i - 120}..{i} fit in under an hour");
+      Assert.True(calls[i] - calls[i - 240] >= 3600, $"calls {i - 240}..{i} fit in under an hour");
     }
 
     // Saturated for the whole run: one episode, one Warning — not one per held attempt or freed slot.
@@ -412,6 +419,25 @@ public class FingerprintCallPolicyTests
   }
 
   // --- Options -----------------------------------------------------------------------------------------
+
+  /// <summary>The owner's numbers (2026-10-07, as revised the same day), pinned so a default cannot drift.</summary>
+  [Fact]
+  public void Defaults_AreTheOwnersPolicy()
+  {
+    var o = new FingerprintingOptions();
+
+    Assert.Equal(13, o.SampleDurationSeconds);
+    Assert.Equal(15, o.UnknownStartIntervalSeconds);
+    Assert.Equal(240, o.MaxCallsPerHour);
+    Assert.Equal(5, o.KnownStartFirstCallDelaySeconds);
+    Assert.Equal(30, o.KnownStartFirstRetryDelaySeconds);
+    Assert.Equal(60, o.KnownStartRetryIntervalSeconds);
+    Assert.Equal(60, o.KnownStartValidationIntervalSeconds);
+    Assert.Equal(30, o.ErrorBackoffInitialSeconds);
+    Assert.Equal(600, o.ErrorBackoffMaxSeconds);
+    Assert.Equal(5, o.ErrorWarnThreshold);
+  }
+
 
   [Fact]
   public void Options_AreReadLive_ByTheNextDecision()

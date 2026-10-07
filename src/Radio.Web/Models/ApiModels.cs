@@ -973,7 +973,8 @@ public class FingerprintingConfigDto
 {
   public bool Enabled { get; set; } = true;
   public bool UseShazamForAllSources { get; set; } = false;
-  public int SampleDurationSeconds { get; set; } = 15;
+  // Matches FingerprintingOptions' default: the 13 s capture of the 15 s unknown-start schedule.
+  public int SampleDurationSeconds { get; set; } = 13;
   public double MinimumConfidenceThreshold { get; set; } = 0.5;
   public int DuplicateSuppressionMinutes { get; set; } = 5;
   public string DatabasePath { get; set; } = "./data/fingerprints.db";

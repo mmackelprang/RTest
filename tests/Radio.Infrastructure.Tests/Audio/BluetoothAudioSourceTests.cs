@@ -71,15 +71,17 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   [Fact]
-  public void MetadataChanged_WithCompleteMetadata_ClearsNeedsFingerprintingLookup()
+  public void MetadataChanged_TitleAndArtistWithoutArt_StillNeedsFingerprintingLookup()
   {
-    // First set incomplete metadata
+    // Call policy: "metadata missing" includes album art, which AVRCP never supplies on the appliance
+    // (AUD-17) — so filling in title and artist does not clear the flag; the identification that fetches
+    // the art is still wanted. (A track whose art is already resolved does clear it — see
+    // MetadataChanged_TrackWhoseArtIsAlreadyResolved_DoesNotNeedFingerprinting.)
     _mockBluetooth.SimulateMetadataChange("", "");
     Assert.True(_source.NeedsFingerprintingLookup);
 
-    // Then set complete metadata
     _mockBluetooth.SimulateMetadataChange("Song", "Artist");
-    Assert.False(_source.NeedsFingerprintingLookup);
+    Assert.True(_source.NeedsFingerprintingLookup);
   }
 
   [Fact]

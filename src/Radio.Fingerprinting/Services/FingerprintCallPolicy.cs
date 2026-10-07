@@ -82,8 +82,8 @@ internal readonly record struct CallDecision(
 
 /// <summary>
 /// Decides when the identification loop may capture audio and call SongRec (Shazam): the owner's call
-/// policy of 2026-10-07, written to stop the appliance over-calling Shazam (measured ~235 calls/hour on
-/// radio, nonstop, with no limiter at all).
+/// policy of 2026-10-07 (unknown-start schedule revised the same day to a 13 s capture every 15 s), written to stop the appliance
+/// over-calling Shazam (measured ~235 calls/hour on radio, nonstop, with no limiter at all).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -99,7 +99,9 @@ internal readonly record struct CallDecision(
 /// <b>Unknown-start sources</b> (radio, vinyl, USB, anything else) get an attempt every
 /// <see cref="FingerprintingOptions.UnknownStartIntervalSeconds"/> whether or not the last one matched. A
 /// new source, <see cref="RequestImmediate"/> (a re-tune), or a capture that found only silence (nothing is
-/// recorded, so the attempt stays due) makes the next attempt immediate.
+/// recorded, so the attempt stays due) makes the next attempt immediate — and because every recorded attempt
+/// sets the next due time from its own start, that immediate attempt restarts the schedule instead of adding
+/// a call on top of it. At the 15 s default that holds sustained use to ~240 calls/hour, the cap's budget.
 /// </para>
 /// <para>
 /// Every interval is measured from the start of one attempt's capture to the start of the next. Two global

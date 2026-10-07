@@ -51,7 +51,7 @@ public class BackgroundIdentificationServiceCallPolicyTests
   }
 
   [Fact]
-  public async Task Radio_CallsAt0And40_NotAt39()
+  public async Task Radio_CallsAt0And15_NotAt14()
   {
     _tap.SourceType = PlaySource.Radio;
     _songRec.Next = _ => SongRecRecognitionResult.Matched(Track("Boys of Summer"));
@@ -59,14 +59,14 @@ public class BackgroundIdentificationServiceCallPolicyTests
     var start = _clock.GetUtcNow();
 
     var first = await service.RunOneCycleWithResultForTestingAsync();
-    _clock.Advance(TimeSpan.FromSeconds(39));
+    _clock.Advance(TimeSpan.FromSeconds(14));
     var early = await service.RunOneCycleWithResultForTestingAsync();
     _clock.Advance(TimeSpan.FromSeconds(1));
     var due = await service.RunOneCycleWithResultForTestingAsync();
 
     Assert.True(first.CalledRecognizer);
     Assert.False(early.CalledRecognizer);
-    Assert.Equal(start + TimeSpan.FromSeconds(40), early.NextAttemptAt);
+    Assert.Equal(start + TimeSpan.FromSeconds(15), early.NextAttemptAt);
     Assert.True(due.CalledRecognizer);
     Assert.Equal(2, _songRec.Calls);
   }
@@ -213,7 +213,7 @@ public class BackgroundIdentificationServiceCallPolicyTests
     service.TrackIdentified += (_, _) => raised++;
 
     Assert.True((await service.RunOneCycleWithResultForTestingAsync()).CalledRecognizer);
-    _clock.Advance(TimeSpan.FromSeconds(40));
+    _clock.Advance(TimeSpan.FromSeconds(15));
     Assert.True((await service.RunOneCycleWithResultForTestingAsync()).CalledRecognizer);
 
     Assert.Equal(1, raised);

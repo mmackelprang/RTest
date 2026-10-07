@@ -35,7 +35,7 @@ public sealed class FingerprintingOptions
   /// an older setting read by nothing but a start-up log line, was removed by AUD-36; the call policy
   /// settings replace it under new names, so that orphaned store row stays unread.)
   /// </summary>
-  public int SampleDurationSeconds { get; set; } = 15;
+  public int SampleDurationSeconds { get; set; } = 13;
 
   /// <summary>
   /// The longest (ms, minimum 100) the identification loop waits before re-checking the active source when
@@ -81,17 +81,22 @@ public sealed class FingerprintingOptions
 
   /// <summary>
   /// Unknown-start sources (radio, vinyl, USB and anything else): seconds between attempts, whether or not
-  /// the last one matched. A source change, a re-tune, or a capture that found only silence makes the next
-  /// attempt immediate instead. Minimum 1.
+  /// the last one matched. The default 15 s is the 13 s <see cref="SampleDurationSeconds"/> capture plus ~2 s
+  /// for the SongRec call: 4 calls/minute, ~240/hour — the whole <see cref="MaxCallsPerHour"/> budget. A
+  /// source change, a re-tune, or a capture that found only silence makes the next attempt immediate, and
+  /// that attempt RESTARTS the schedule (the following one is this interval after it) rather than adding a
+  /// call on top, so sustained use stays within the budget and the cap is only a backstop. When the capture
+  /// plus the call take longer than this interval, the next attempt simply starts as soon as the last ends.
+  /// Minimum 1.
   /// </summary>
-  public int UnknownStartIntervalSeconds { get; set; } = 40;
+  public int UnknownStartIntervalSeconds { get; set; } = 15;
 
   /// <summary>
   /// Hard cap on SongRec calls in any rolling 60-minute window, across every source. When it is reached,
   /// attempts wait until the oldest call in the window ages out, and one Warning is logged per episode.
   /// Minimum 1.
   /// </summary>
-  public int MaxCallsPerHour { get; set; } = 120;
+  public int MaxCallsPerHour { get; set; } = 240;
 
   /// <summary>
   /// Back-off after the first consecutive SongRec failure (timeout, non-zero exit, unparsable output),
