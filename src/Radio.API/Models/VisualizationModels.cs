@@ -1,38 +1,40 @@
+using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Visualization;
+
 namespace Radio.API.Models;
 
 /// <summary>
-/// Spectrum visualization data for SignalR broadcasts.
-/// Contains FFT analysis results from the audio stream.
+/// Spectrum visualization data for SignalR broadcasts: the FFT grouped into log-spaced display bands.
 /// </summary>
 /// <remarks>
-/// Magnitude values are normalized by the VisualizerService. The values represent
-/// the relative amplitude of each frequency component in the audio signal.
+/// Not the raw FFT bins. <see cref="FromBins"/> groups them with <see cref="LogSpectrumBands"/>
+/// (128 bands, 40 Hz – 16 kHz, dB-scaled), which is what the spectrum and ring visualizers draw —
+/// and is ~2.5 KB of JSON per frame where the raw 1024 bins plus 1024 frequencies were ~20–25 KB.
 /// </remarks>
 public class SpectrumDataDto
 {
   /// <summary>
-  /// Gets or sets the magnitude values for each frequency bin.
-  /// Values are normalized to 0.0-1.0 range by the VisualizerService.
+  /// Gets or sets the display value of each band, 0.0–1.0, dB-scaled relative to the frame's peak.
   /// </summary>
   public float[] Magnitudes { get; set; } = [];
 
   /// <summary>
-  /// Gets or sets the frequency value for each bin in Hz.
+  /// Gets or sets the centre frequency of each band in Hz.
   /// </summary>
   public float[] Frequencies { get; set; } = [];
 
   /// <summary>
-  /// Gets or sets the number of frequency bins.
+  /// Gets or sets the number of bands (the length of <see cref="Magnitudes"/>).
   /// </summary>
   public int BinCount { get; set; }
 
   /// <summary>
-  /// Gets or sets the frequency resolution (Hz per bin).
+  /// Gets or sets the FFT's resolution (Hz per underlying FFT bin, not per band).
   /// </summary>
   public float FrequencyResolution { get; set; }
 
   /// <summary>
-  /// Gets or sets the maximum frequency represented.
+  /// Gets or sets the FFT's maximum frequency (Nyquist), not the top band's edge.
   /// </summary>
   public float MaxFrequency { get; set; }
 
@@ -40,6 +42,24 @@ public class SpectrumDataDto
   /// Gets or sets the timestamp.
   /// </summary>
   public long TimestampMs { get; set; }
+
+  /// <summary>
+  /// Builds the DTO from the analyzer's raw bins, grouping them into display bands. The one mapping
+  /// for both the hub's <c>GetSpectrum</c> and the broadcast stream, so the two cannot drift apart.
+  /// </summary>
+  public static SpectrumDataDto FromBins(SpectrumData data)
+  {
+    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(data.Magnitudes, data.FrequencyResolution);
+    return new SpectrumDataDto
+    {
+      Magnitudes = magnitudes,
+      Frequencies = frequencies,
+      BinCount = magnitudes.Length,
+      FrequencyResolution = data.FrequencyResolution,
+      MaxFrequency = data.MaxFrequency,
+      TimestampMs = data.Timestamp.ToUnixTimeMilliseconds()
+    };
+  }
 }
 
 /// <summary>
