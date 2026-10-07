@@ -113,6 +113,59 @@ public class RdsAccumulatingScrollBufferTests
   }
 
   [Fact]
+  public void NextExpiryIn_CountsDownToTheOldestReplacedChunk_AndIsNullWhenNothingWaits()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, TimeSpan.FromSeconds(30), time);
+
+    buffer.NextExpiryIn.Should().BeNull();
+    buffer.AppendChunk("A");
+    buffer.NextExpiryIn.Should().BeNull(); // only the current chunk
+    buffer.AppendChunk("B");
+    buffer.NextExpiryIn.Should().Be(TimeSpan.FromSeconds(30));
+    time.Advance(TimeSpan.FromSeconds(12));
+    buffer.NextExpiryIn.Should().Be(TimeSpan.FromSeconds(18));
+    time.Advance(TimeSpan.FromSeconds(40));
+    buffer.NextExpiryIn.Should().Be(TimeSpan.Zero); // overdue
+    buffer.ExpireStale().Should().BeTrue();
+    buffer.NextExpiryIn.Should().BeNull();
+  }
+
+  [Fact]
+  public void CapEviction_AndExpiry_StayAligned()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(24, DefaultSeparator, TimeSpan.FromSeconds(30), time);
+
+    buffer.AppendChunk("AAAAAAAA");          // replaced at t=0 below
+    buffer.AppendChunk("BBBBBBBB");          // replaced at t=10
+    time.Advance(TimeSpan.FromSeconds(10));
+    buffer.AppendChunk("CCCCCCCC");          // cap (24) evicts AAAAAAAA
+    buffer.Text.Should().Be("BBBBBBBB • CCCCCCCC");
+
+    time.Advance(TimeSpan.FromSeconds(29)); // BBBBBBBB was replaced 29 s ago
+    buffer.ExpireStale().Should().BeFalse();
+    time.Advance(TimeSpan.FromSeconds(1));
+    buffer.ExpireStale().Should().BeTrue();
+    buffer.Text.Should().Be("CCCCCCCC");
+  }
+
+  [Fact]
+  public void ReturningMessage_OlderCopyExpires_NewestStays()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, TimeSpan.FromSeconds(30), time);
+
+    buffer.AppendChunk("Slogan");
+    buffer.AppendChunk("Artist - Title");
+    buffer.AppendChunk("Slogan");
+    time.Advance(TimeSpan.FromSeconds(30));
+
+    buffer.ExpireStale().Should().BeTrue();
+    buffer.Text.Should().Be("Slogan");
+  }
+
+  [Fact]
   public void StationChange_ClearsTheExpiryState_WithTheText()
   {
     var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();

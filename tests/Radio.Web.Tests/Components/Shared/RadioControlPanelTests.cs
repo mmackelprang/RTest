@@ -1128,6 +1128,38 @@ public class RadioControlPanelTests : TestContext
     cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
   }
 
+  /// <summary>
+  /// Owner report 2026-10-07: the ticker trailed three songs behind. A replaced message must age out
+  /// on its own timer — with NO further broadcast, because AudioStateUpdateService only broadcasts on
+  /// change and a steady station can go quiet for minutes.
+  /// </summary>
+  [Fact]
+  public async Task ReplacedRadioText_AgesOut_OnItsOwnTimer_WithNoFurtherBroadcast()
+  {
+    var monitor = new TriggerableOptionsMonitor<RdsScrollOptions>(new RdsScrollOptions { RtHistorySeconds = -1 });
+    Services.AddSingleton<IOptionsMonitor<RdsScrollOptions>>(monitor);
+    var cut = RenderPanel(BuildState(rdsStationName: "WKRR", rdsRadioText: null), bands: new[] { BuildFmBand() });
+
+    // Swap in a fake clock, then change RtHistorySeconds (-1 → 30) — a real reshape path — so the
+    // buffer is rebuilt against that clock. (It must be a CHANGE: an equal value does not rebuild.)
+    var clock = new FakeTimeProvider();
+    cut.Instance.Clock = clock;
+    await cut.InvokeAsync(() => monitor.Fire(new RdsScrollOptions { RtHistorySeconds = 30 }));
+
+    var handle = typeof(RadioControlPanel).GetMethod("HandleRadioStateChanged", BindingFlags.NonPublic | BindingFlags.Instance)!;
+    await (Task)handle.Invoke(cut.Instance, [BuildState(rdsStationName: "WKRR", rdsRadioText: "Bryan Adams - Run to You")])!;
+    await (Task)handle.Invoke(cut.Instance, [BuildState(rdsStationName: "WKRR", rdsRadioText: "Bad Company - Shooting Star")])!;
+    // Asserted on the card's RadioText parameter (what the buffer hands it), not the marquee's DOM:
+    // the marquee applies text changes through its JS diff, which does not run under bUnit.
+    string CardText() => cut.FindComponent<RdsCard>().Instance.RadioText ?? string.Empty;
+    cut.WaitForAssertion(() =>
+      Assert.Equal("Bryan Adams - Run to You • Bad Company - Shooting Star", CardText()));
+
+    clock.Advance(TimeSpan.FromSeconds(31)); // no broadcast: only the panel's own timer can act
+
+    cut.WaitForAssertion(() => Assert.Equal("Bad Company - Shooting Star", CardText()));
+  }
+
   private sealed class TriggerableOptionsMonitor<T> : IOptionsMonitor<T>
   {
     private readonly List<Action<T, string?>> _listeners = [];

@@ -34,7 +34,8 @@ public class RdsScrollOptions
 
   /// <summary>
   /// Maximum buffer length in characters. Once exceeded, the oldest whole
-  /// messages are dropped from the front until the total is within the cap.
+  /// messages are dropped from the front until the total is within the cap
+  /// (a single message longer than the cap keeps only its last characters).
   /// Default 256 ≈ 4 full Group 2A RT messages, keeping the scroll cycle to a
   /// comfortable ~17 s at 40 px/s. How long a replaced message stays is
   /// <see cref="RtHistorySeconds"/>; the cap only bounds the length.

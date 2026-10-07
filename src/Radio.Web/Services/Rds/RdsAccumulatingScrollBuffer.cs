@@ -57,8 +57,10 @@ public sealed class RdsAccumulatingScrollBuffer
 
   // Whole chunks in arrival order; Text is their separator-join, cached.
   private readonly List<string> _chunks = new();
-  // Parallel to _chunks: when each chunk stopped being the newest (null for the newest).
-  private readonly List<DateTimeOffset?> _replacedAt = new();
+  // Parallel to _chunks: when each chunk stopped being the newest (null for the newest), as a
+  // monotonic TimeProvider timestamp — wall-clock time can step (NTP), which would let a fresher
+  // stamp sit ahead of a stale one and break front-only eviction.
+  private readonly List<long?> _replacedAt = new();
   private readonly TimeProvider _time;
   private string _cachedText = string.Empty;
 
@@ -172,7 +174,7 @@ public sealed class RdsAccumulatingScrollBuffer
 
     if (_replacedAt.Count > 0)
     {
-      _replacedAt[^1] = _time.GetUtcNow();
+      _replacedAt[^1] = _time.GetTimestamp();
     }
 
     _chunks.Add(trimmed);
@@ -185,8 +187,9 @@ public sealed class RdsAccumulatingScrollBuffer
 
   /// <summary>
   /// Evicts chunks the station replaced more than <see cref="History"/> ago. The newest chunk is never
-  /// evicted. Call it on a regular tick (RadioControlPanel does, on every radio-state broadcast), since
-  /// expiry is time-driven and nothing else arrives when a station holds one message.
+  /// evicted. Expiry is time-driven — a station holding one message sends nothing new — so the owner
+  /// must call this when <see cref="NextExpiryIn"/> says something is due (RadioControlPanel arms a
+  /// one-shot timer from it).
   /// </summary>
   /// <returns>True when anything was evicted (the text changed).</returns>
   public bool ExpireStale()
@@ -326,7 +329,26 @@ public sealed class RdsAccumulatingScrollBuffer
     }
   }
 
-  // Front-only: chunks are replaced in arrival order, so every stale chunk precedes every fresh one.
+  /// <summary>
+  /// Time until the oldest replaced chunk expires (zero if it already has), or null when nothing is
+  /// waiting to expire — no history window, or only the current chunk is held.
+  /// </summary>
+  public TimeSpan? NextExpiryIn
+  {
+    get
+    {
+      if (History is not { } history || _chunks.Count < 2 || _replacedAt[0] is not { } replaced)
+      {
+        return null;
+      }
+
+      var remaining = history - _time.GetElapsedTime(replaced);
+      return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+    }
+  }
+
+  // Front-only: chunks are replaced in arrival order and stamped from a monotonic clock, so every
+  // stale chunk precedes every fresh one.
   private bool RemoveExpired()
   {
     if (History is not { } history)
@@ -334,9 +356,8 @@ public sealed class RdsAccumulatingScrollBuffer
       return false;
     }
 
-    var cutoff = _time.GetUtcNow() - history;
     var removed = false;
-    while (_chunks.Count > 1 && _replacedAt[0] is { } replaced && replaced <= cutoff)
+    while (_chunks.Count > 1 && _replacedAt[0] is { } replaced && _time.GetElapsedTime(replaced) >= history)
     {
       _chunks.RemoveAt(0);
       _replacedAt.RemoveAt(0);

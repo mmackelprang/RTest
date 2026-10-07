@@ -912,9 +912,9 @@
     // unconditionally, so any config write anywhere emptied the RadioText (only the station name,
     // read straight from _radioState, survived) until the station sent a new RT chunk.
     //
-    // So: rebuild only when the buffer's own shape changed (size cap or separator), and refill it
-    // from the current state when it is rebuilt, so it is never left blank. Anything else (scroll
-    // speed) just takes the new options.
+    // So: rebuild only when the buffer itself changes (size cap, separator, or RtHistorySeconds), and
+    // refill it from the current state when it is rebuilt, so it is never left blank. Anything else
+    // (scroll speed) just takes the new options.
     _rdsScrollOptionsListener = RdsScrollOptionsMonitor.OnChange(opts => _ = InvokeAsync(() =>
     {
       bool reshape = opts.RtBufferMaxChars != _rdsScrollOptions.RtBufferMaxChars ||
@@ -929,6 +929,9 @@
           _rdsBuffer.ResetOnTuneChange(_radioState.Band, _radioState.Frequency, _radioState.RdsPi);
           _rdsBuffer.AppendChunk(_radioState.RdsRadioText);
         }
+
+        // The old buffer's pending expiry (if any) no longer applies.
+        ArmRdsExpiry();
       }
 
       StateHasChanged();
@@ -1056,18 +1059,57 @@
         _rdsBuffer.AppendChunk(dto.RdsRadioText);
       }
 
-      // Expiry is time-driven: a station holding one message sends nothing new, so the replaced
-      // messages are aged out here, on every broadcast (telemetry arrives ~2/s).
       _rdsBuffer.ExpireStale();
+      ArmRdsExpiry();
 
       StateHasChanged();
     });
   }
 
   // The buffer's shape (cap, separator) and how long a replaced RadioText message stays.
-  private static RdsAccumulatingScrollBuffer CreateRdsBuffer(RdsScrollOptions o) =>
+  private RdsAccumulatingScrollBuffer CreateRdsBuffer(RdsScrollOptions o) =>
     new(o.RtBufferMaxChars, o.RtChunkSeparator,
-      o.RtHistorySeconds < 0 ? null : TimeSpan.FromSeconds(o.RtHistorySeconds));
+      o.RtHistorySeconds < 0 ? null : TimeSpan.FromSeconds(o.RtHistorySeconds), Clock);
+
+  // RadioText history expiry runs on its own one-shot timer, armed for exactly when the oldest
+  // replaced message is due. It cannot ride on hub broadcasts: AudioStateUpdateService broadcasts only
+  // when the radio state CHANGES (signal, RSSI, gain, RDS), so a strong, steady station holding one
+  // message can go quiet for long stretches and old text would linger well past the window.
+  // Call only on the renderer (inside InvokeAsync or a lifecycle method).
+  private ITimer? _rdsExpiryTimer;
+
+  private void ArmRdsExpiry()
+  {
+    if (_disposed)
+    {
+      return;
+    }
+
+    if (_rdsBuffer.NextExpiryIn is not { } due)
+    {
+      _rdsExpiryTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+      return;
+    }
+
+    _rdsExpiryTimer ??= Clock.CreateTimer(_ => _ = InvokeAsync(OnRdsExpiryDue), null,
+      Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+    _rdsExpiryTimer.Change(due, Timeout.InfiniteTimeSpan);
+  }
+
+  private void OnRdsExpiryDue()
+  {
+    if (_disposed)
+    {
+      return;
+    }
+
+    if (_rdsBuffer.ExpireStale())
+    {
+      StateHasChanged();
+    }
+
+    ArmRdsExpiry();
+  }
 
   private async Task FrequencyUpAsync()
   {
@@ -2039,6 +2081,7 @@
     _agcPressGeneration++;
     _agcLongPressTimer?.Dispose();
     _agcIdleTimer?.Dispose();
+    _rdsExpiryTimer?.Dispose();
     _rdsScrollOptionsListener?.Dispose();
     _rdsScrollOptionsListener = null;
     await Task.CompletedTask;
