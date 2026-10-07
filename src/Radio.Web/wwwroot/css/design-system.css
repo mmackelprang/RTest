@@ -4572,48 +4572,21 @@ body {
 /* ─── §S  Signal Meter Calibration (Radio Controller Polish PR 1) ─────────── *
  *
  * Companion to `.rcp-meter` in RadioControlPanel.razor. Adds the dBu
- * readout, the CLIP-pill overdrive indicator, and the four-tick scale
- * label strip under the meter bar. The 20-segment bar itself stays in
- * RadioControlPanel's inline <style>; only the calibration overlay lives
- * here because the tokens it consumes (font-mono, signal-red,
- * text-medium, text-low) come from §2.
+ * readout and the four-tick scale label strip under the meter bar (the CLIP
+ * indicator moved to the status bar, §T, on 2026-10-06). The 20-segment bar
+ * itself stays in RadioControlPanel's inline <style>; only the calibration
+ * overlay lives here because the tokens it consumes (font-mono, text-medium,
+ * text-low) come from §2.
  * ─────────────────────────────────────────────────────────────────────────── */
 
 .rcp-meter-readout {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  /* UI-27: the CLIP pill is positioned against this box. */
-  position: relative;
 }
 
-/* UI-27: the pill takes no part in layout. It is 19.5 px tall against the header's 16.5, so while it
-   was inserted in flow the header grew 3 px every time it appeared and everything below the meter
-   moved down with it. It is now out of flow, to the left of the readout and centred on it, and is
-   always rendered — .is-on shows it — so CLIP appearing or clearing changes no element's box. */
-.rcp-clip-pill {
-  position: absolute;
-  right: calc(100% + 6px);
-  top: 50%;
-  transform: translateY(-50%);
-  visibility: hidden;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--signal-red);
-  background: rgba(248, 113, 113, 0.10);
-  color: var(--signal-red);
-  box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
-}
-
-.rcp-clip-pill.is-on {
-  visibility: visible;
-}
+/* The CLIP pill that sat out of flow beside the readout (UI-27) moved to the status bar's lamp slot,
+   §T, in the status-bar redesign (2026-10-06). */
 
 .rcp-meter-dbu {
   font-family: var(--font-mono);
@@ -4635,36 +4608,44 @@ body {
   opacity: 0.7;
 }
 
-/* ─── §T  AGC Two-Cell Strip (Radio Controller Polish PR 1) ───────────────── *
+/* ─── §T  Radio panel status bar + AGC popup (status-bar redesign, 2026-10-06) ─ *
  *
- * Replaces the old flex `.rcp-sdr-controls` strip. The strip is now a
- * fixed grid: 130px AGC toggle cell on the left, flex gain cell on the
- * right. Right cell is ALWAYS rendered — when AGC is on it shows the
- * device-chosen gain ("Tuner is choosing  28.0 dB"); when AGC is off it
- * shows a fixed-width amber pill (so the value never jitters width),
- * the slider, and a "0 – 50" range hint.
+ * One 44 px row between the tuner column and the preset bar:
+ *   STEP (tap cycles) | STEREO CLIP lamps | AGC chip (tap toggles, hold opens the popup)
+ * It replaced the AGC two-cell strip (Radio Controller Polish PR 1) at the bottom of the tuner
+ * column, the well's STEP / STEREO row and the meter header's CLIP pill. The row sits outside
+ * .rcp-tuner, which clips its bottom rows under a height squeeze, so it is never the row clipped.
+ * Every slot has a fixed width, so no state change moves anything. The lamp look lives in
+ * RadioControlPanel's inline <style> with the stereo glow it shares.
  * ─────────────────────────────────────────────────────────────────────────── */
 
-.rcp-sdr-grid {
-  display: grid;
-  grid-template-columns: 130px 1fr;
-  gap: 12px;
-  align-items: stretch;
-  /* UI-20: full tuner-column width, edge-aligned with the band row (was max-width 420). */
-  width: 100%;
-  padding: 6px;
-  background: var(--surface-inset);
-  border-radius: 4px;
-  border: 1px solid var(--surface-raised);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+.rcp-status-host {
+  position: relative;      /* the AGC popup is placed against this box */
+  flex-shrink: 0;
+  margin: 0 24px 8px;      /* the tuner column's side padding, so the bar lines up with the well */
+  /* No z-index, deliberately: one would make this box a stacking context and trap the popup's
+     backdrop (9999) and card (10000) inside it, under anything else on the page above that level. */
 }
 
-.rcp-agc-cell {
+.rcp-status-bar {
+  display: flex;
+  align-items: stretch;
+  height: var(--touch-compact);
+  background: var(--surface-inset);
+  border-radius: 4px;
+  /* The §T inset surface. Drawn with box-shadow rather than a border so the row is exactly 44 px
+     and its two buttons are full-height touch targets. */
+  box-shadow: inset 0 0 0 1px var(--surface-raised), inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.rcp-sb-step,
+.rcp-sb-agc {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 6px 10px;
+  flex: 0 0 auto;
+  height: 100%;
+  padding: 0 12px;
   border-radius: 4px;
   background: linear-gradient(180deg, #141416 0%, #0d0d0f 100%);
   border: 1px solid var(--surface-separator);
@@ -4674,26 +4655,169 @@ body {
   transition: all 80ms ease;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
-  /* Reset the <button> defaults the browser applies; the cell renders as a
-     tappable surface, not a chrome button. */
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;   /* a hold on the AGC chip is a gesture, not a selection or menu */
   font: inherit;
   line-height: 1;
   appearance: none;
 }
 
-.rcp-agc-cell:hover {
+.rcp-sb-step { width: 148px; }   /* fits "STEP 12.5 kHz" */
+.rcp-sb-agc  { width: 232px; justify-content: space-between; }
+
+.rcp-sb-step:hover,
+.rcp-sb-agc:not(:disabled):hover {
   border-color: rgba(240, 168, 48, 0.25);
   background: linear-gradient(180deg, #1a1a1d 0%, #131315 100%);
 }
 
-.rcp-agc-cell:active {
+.rcp-sb-step:active,
+.rcp-sb-agc:not(:disabled):active {
   transform: translateY(1px);
   border-bottom-width: 1px;
 }
 
-.rcp-agc-cell:focus-visible {
+.rcp-sb-step:focus-visible,
+.rcp-sb-agc:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
+}
+
+.rcp-sb-agc:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.rcp-sb-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-low);
+}
+
+.rcp-sb-step-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-medium);
+  white-space: nowrap;
+}
+
+.rcp-sb-step:hover .rcp-sb-step-value { color: var(--signal-amber); }
+
+.rcp-sb-lamps {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rcp-sb-agc-value {
+  flex: 0 0 64px;          /* "28.0 dB" and the 56 px pill both fit, so AUTO <-> MAN shifts nothing */
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rcp-sb-agc-auto-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-medium);
+  white-space: nowrap;
+}
+
+.rcp-sb-agc-none {
+  flex: 1;
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-low);
+}
+
+.rcp-sb-agc-tune {
+  flex: 0 0 18px;
+  display: inline-flex;
+  color: var(--signal-amber);
+}
+
+.rcp-sb-agc-tune .rzi,
+.rcp-sb-agc-tune .rz-icon {
+  font-size: 18px;
+}
+
+.rcp-sb-agc-tune.is-hidden { visibility: hidden; }
+
+/* AGC popup — the §Z card, opening upward from the chip, right-aligned to it. */
+.rcp-agc-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+/* Qualified with .gain-popover: the §Z rules come later in this file at equal specificity and would
+   otherwise win (width 340 px, readout 22 px). */
+.gain-popover.rcp-agc-popup {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10000;
+  width: 380px;
+}
+
+.rcp-agc-popup .rcp-agc-popup-readout {
+  display: block;
+  text-align: center;
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.rcp-agc-popup-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.rcp-agc-popup-nudge {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #161618 0%, #0f0f11 100%);
+  border: 1px solid #222225;
+  border-bottom: 2px solid #0a0a0c;
+  color: var(--signal-amber);
+  font-family: var(--font-mono);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rcp-agc-popup-nudge:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.rcp-agc-popup-slider {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  accent-color: var(--signal-amber);
+  cursor: pointer;
+}
+
+.rcp-agc-popup .gain-popover-footer {
+  gap: 12px;
+}
+
+.rcp-agc-popup .gain-popover-reset {
+  flex: 1;
 }
 
 .rcp-agc-label {
@@ -4704,9 +4828,9 @@ body {
   color: var(--signal-amber);
 }
 
-/* When AGC is OFF (cell not pressed) the label dims so the amber stays
-   exclusive to the AUTO state. The cell button toggles aria-pressed. */
-.rcp-agc-cell:not([aria-pressed="true"]) .rcp-agc-label {
+/* When AGC is not AUTO the label dims so the amber stays exclusive to the AUTO state. The chip
+   button sets aria-pressed. */
+.rcp-sb-agc:not([aria-pressed="true"]) .rcp-agc-label {
   color: var(--text-low);
 }
 
@@ -4735,12 +4859,12 @@ body {
   background: transparent;
 }
 
-.rcp-gain-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  min-width: 0;
+/* In the status bar both chips take one fixed width, so AUTO <-> MAN moves nothing beside them. */
+.rcp-sb-agc .rcp-agc-chip-auto,
+.rcp-sb-agc .rcp-agc-chip-off {
+  box-sizing: border-box;
+  width: 52px;
+  text-align: center;
 }
 
 .rcp-gain-pill {
@@ -4758,34 +4882,6 @@ body {
   border-radius: 999px;
   padding: 4px 8px;
   background: color-mix(in srgb, var(--signal-amber) 4%, transparent);
-}
-
-.rcp-gain-range-hint {
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  color: var(--text-low);
-  white-space: nowrap;
-}
-
-.rcp-gain-auto-hint {
-  flex: 1;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  color: var(--text-low);
-}
-
-.rcp-gain-auto-value {
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--signal-amber);
-  text-shadow: 0 0 6px color-mix(in srgb, var(--signal-amber) 18%, transparent);
 }
 
 /* ─── §U  Confidence Pips (Radio Controller Polish PR 2) ──────────────────── *
@@ -5882,86 +5978,158 @@ body {
 }
 
 
-/* ─── §Y  NowPlaying Status Strip (Radio Controller Polish PR 4) ──────────── *
- * Unified Source · Frequency · RDS · Gain strip at the top of NowPlayingPanel.
- * Replaces the three floating pills (Searching badge, source pill, 0dB
- * cyan button) that PR 4 of the handoff explicitly bans.
- *
- * Cell visibility is template-driven: the source cell is always present,
- * frequency + RDS only render for radio-family sources, the gain cell is
- * always present (its tap opens GainControlPopover, see §Z).
- *
- * The strip sits in the same stacking context as the album art card. When
- * a track has art the strip uses a translucent backdrop so it reads as
- * "floating glass" rather than a hard chrome bar.
+/* ─── §Y  NowPlaying status bar (status-bar redesign, 2026-10-06) ─────────── *
+ * The first row of NowPlayingPanel's transport block, for every source:
+ *   Mute (104 px) | Fingerprint (flex, ellipsis) | Gain (96 px)
+ * It replaced the 36 px Source · Frequency · Gain strip across the top of the
+ * panel (Radio Controller Polish PR 4) and the floating match badge (§Y2).
+ * Every slot is always rendered at a fixed width, so no state change moves
+ * anything. The fingerprint slot shows recognition states only — never RDS.
+ * The tuner-side twin is §T.
  * ────────────────────────────────────────────────────────────────────────── */
 
-.np-status-strip {
+.np-transport {
+  position: relative;   /* no z-index and no filter: see the comment in NowPlayingPanel.razor */
+}
+
+.np-transport-glass {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--surface-separator);
+}
+
+.np-transport-body {
+  position: relative;   /* paints above the glass layer, which precedes it */
+  padding: 8px 16px 12px;
+}
+
+.np-status-bar {
   display: flex;
-  align-items: center;
-  height: 36px;
-  padding: 0 12px;
-  gap: 12px;
-  background: var(--surface-raised);
-  border-bottom: 1px solid var(--surface-separator);
-  flex-shrink: 0;
+  align-items: stretch;
+  height: var(--touch-compact);
+  /* 8 px, not less: the seek bar that can follow is a 44 px touch area with margin-top: -8px and
+     z-index 1 (.np-seek-bar), so a smaller gap let it cover the bottom of these chips and a tap on
+     their lower edge scrubbed the track instead. */
+  margin-bottom: 8px;
+  /* The divider is a shadow, not a border, so the slots get the full 44 px. */
+  box-shadow: inset 0 -1px 0 var(--surface-separator);
 }
 
-/* When album art is behind the strip, fade the chrome to translucent glass so
-   the art's mood comes through. The blur is applied only here — the source
-   cells stay legible because the swatches and text use high-contrast tokens. */
-.np-status-strip.has-art-bg {
-  background: rgba(20, 20, 22, 0.85);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-
-.np-status-cell {
+.np-bar-slot {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-right: 12px;
+  height: 100%;
+  min-height: 0;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
   border-right: 1px solid var(--surface-separator);
-  min-width: 0; /* allow ellipsis on children */
+  border-radius: 0;
+  color: var(--text-medium);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
 }
 
-.np-status-strip.has-art-bg .np-status-cell {
-  border-right-color: rgba(255, 255, 255, 0.10);
-}
-
-.np-status-cell:last-child {
+.np-bar-slot:last-child {
   border-right: none;
-  padding-right: 0;
-  margin-left: auto; /* push the gain cell to the trailing edge */
 }
 
-/* Source cell — 8×8 coloured square + name. */
-.np-status-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+.np-bar-slot:hover,
+.np-bar-slot:focus-visible {
+  background: var(--accent-dim);
+}
+
+.np-bar-slot:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.np-bar-slot:disabled {
+  cursor: default;
+  background: transparent;
+}
+
+/* Mute — the .topbar-mute-chip treatment, in a fixed slot. */
+.np-bar-mute {
+  flex: 0 0 104px;
+  width: 104px;
+  color: var(--text-low);
+}
+
+.np-bar-mute .rzi,
+.np-bar-mute .rz-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.np-bar-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.20em;
+}
+
+.np-bar-mute.is-muted {
+  color: var(--signal-red);
+}
+
+/* Fingerprint — the only variable-length text, so it gets the flex slot and an ellipsis. */
+.np-bar-fp {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.np-bar-fp-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  color: var(--text-medium);
+}
+
+.np-bar-fp.is-off .np-bar-fp-label,
+.np-bar-fp.is-waiting .np-bar-fp-label,
+.np-bar-fp.is-nomatch .np-bar-fp-label {
+  color: var(--text-low);
+}
+
+.np-bar-fp.is-unavailable .np-bar-fp-label {
+  color: var(--signal-amber);
+}
+
+.np-bar-fp .confidence-pips {
   flex-shrink: 0;
 }
 
-.np-status-name {
-  font-size: 12px;
-  color: var(--text-high);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
+/* Gain — unity reads --text-low; any offset reads in the accent so it stands out. */
+.np-bar-gain {
+  flex: 0 0 96px;
+  width: 96px;
+  justify-content: flex-end;
 }
 
-/* Frequency cell — DSEG LED value + small mono unit chip. */
-.np-status-freq {
-  font-family: var(--font-led);
-  font-weight: 700;
+.np-bar-gain-value {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--signal-amber);
+  font-size: 11px;
   letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--text-low);
+}
+
+.np-bar-gain.is-offset .np-bar-gain-value {
+  color: var(--accent-primary);
 }
 
 /* Reusable inline unit indicator chip (e.g. "MHz", "kHz", "dB"). Renamed
@@ -5978,110 +6146,40 @@ body {
   border-radius: 4px;
 }
 
-/* RDS status-strip cell styles removed with the duplicate readout (Item 2):
-   .np-status-rds-station / .np-status-rds-tag had no remaining markup. The
-   single RDS readout is the RdsCard marquee in the radio panel. */
-
-/* Gain cell — tappable; cyan to suggest interactivity. */
-.np-status-cell-gain {
-  cursor: pointer;
-  user-select: none;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
-}
-
-.np-status-cell-gain:hover,
-.np-status-cell-gain:focus-visible {
-  background: var(--accent-dim);
-  outline: none;
-}
-
-.np-status-cell-gain:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 1px;
-}
-
-.np-status-gain {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  color: var(--accent-primary);
-}
-
-
-/* ─── §Y2 NowPlaying Match Badge (Radio Controller Polish PR 4) ─────────── *
- * Confidence pips + label anchored under the song title inside the album-art
- * card. The badge replaces the legacy "Searching/Strong" floating pill in
- * the top-left corner. Tapping the badge opens the recognition stream.
- * ────────────────────────────────────────────────────────────────────────── */
-
-.np-match-badge {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  cursor: pointer;
-  z-index: 3;
-  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
-}
-
-.np-match-badge:hover,
-.np-match-badge:focus-visible {
-  background: rgba(0, 0, 0, 0.75);
-  outline: none;
-}
-
-.np-match-badge:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-
-.np-match-badge-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.10em;
-  color: var(--text-medium);
-}
-
-.np-match-badge.is-rds .np-match-badge-label {
-  color: var(--accent-primary);
-}
+/* §Y2 — the floating match badge over the album art — was removed by the status-bar redesign
+   (2026-10-06); recognition shows in the status bar's fingerprint slot (§Y). */
 
 
 /* ─── §Z  Gain Control Popover (Radio Controller Polish PR 4) ─────────────── *
  * Vertical peak meter · vertical slider · scale-label column. Replaces the
  * inline RadzenSlider+nudge buttons block that lived in NowPlayingPanel.
- * The popover is anchored to the gain status-strip cell; positioning is
- * absolute within NowPlayingPanel's bounding box.
+ * The popover opens upward from the status bar's gain slot (§Y), positioned
+ * against NowPlayingPanel's transport block. The radio panel's AGC popup
+ * (§T) reuses this card's chrome.
  *
  * The peak meter receives ReceiveLevels SignalR pushes via
  * AudioVisualizationHubService.OnLevelData. Cadence is whatever the visualizer
  * is producing (~20fps in normal play). Segments paint reactively; a 1px
  * hold mark decays at ~1 segment / 600 ms.
  *
- * AGC: when the source is part of the radio family the header carries an
- * "Auto on / Auto off" pill. Activating Auto dims the slider track + knob to
- * 35% opacity and blocks pointer events; the footer surfaces the device-
- * chosen gain in dB instead of the slider value.
+ * It has no AGC control: its slider is playback (source) gain, a different
+ * control from the tuner's RF AGC, which lives only in the radio panel's
+ * status bar (§T) since 2026-10-06.
  * ────────────────────────────────────────────────────────────────────────── */
 
-/* Anchors the popover just under the status strip's gain cell at the
-   trailing edge of the album-art container. The popover lives inside the
-   album-art container (which starts immediately below the 36px strip),
-   so 8px of top inset puts the popover ≈44px from the panel top — i.e.
-   directly under the gain cell without overlapping the strip. */
+/* The popover's click-away backdrop and its anchor. Both are children of .np-transport, which is
+   not a stacking context, so 9999 / 10000 compete across the whole Home page: the backdrop covers
+   the radio panel as well, and the card sits above the backdrop. The anchor opens the card upward,
+   8 px above the top of the transport block (the status bar is its first row), at its trailing edge. */
+.np-gain-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
 .np-gain-popover-anchor {
   position: absolute;
-  top: 8px;
+  bottom: calc(100% + 8px);
   right: 16px;
   z-index: 10000;
 }
@@ -6119,33 +6217,6 @@ body {
   color: var(--text-high);
   font-weight: 500;
   flex: 1;
-}
-
-.gain-popover-auto {
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  background: transparent;
-  cursor: pointer;
-  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
-}
-
-.gain-popover-auto.is-on {
-  color: var(--signal-green);
-  border: 1px solid var(--signal-green);
-  background: color-mix(in srgb, var(--signal-green) 12%, transparent);
-}
-
-.gain-popover-auto.is-off {
-  color: var(--text-medium);
-  border: 1px solid var(--surface-separator);
-}
-
-.gain-popover-auto:hover {
-  filter: brightness(1.15);
 }
 
 .gain-popover-body {
@@ -6208,11 +6279,6 @@ body {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-}
-
-.gain-popover-slider.is-disabled {
-  opacity: 0.35;
-  pointer-events: none;
 }
 
 /* Vertical-style range via writing-mode (more reliable than transform: rotate
@@ -7471,15 +7537,12 @@ body {
     calc(8px - var(--encoder-band-y)),
     -50%,
     calc(712px - var(--encoder-band-y) - 100%));
-  /* 10000. Above the 9999 tier (the sleep screen at :2840 and
-     .rcp-preset-menu-overlay at :4455) and level with .np-gain-popover-anchor
-     (:4767), which is the only other 10000 on the page — there is no
-     gain-popover backdrop, and an earlier revision of this comment said there
-     was one at 9999. Level, not above, means DOM order decides between those
-     two; both are layout-root children and the HUD mounts after, so the HUD
-     wins today. Raising this to beat the popover outright was not done: the
-     popover is a control the user is touching, and a readout should not cover
-     one. */
+  /* 10000. Above the 9999 tier (the sleep screen, the kiosk dialogs). The Home
+     page's popovers also use 10000 — .np-gain-popover-anchor and .rcp-agc-popup,
+     over backdrops at 9999 — but they sit inside .page-transition's child, whose
+     transform makes a stacking context, so this element (mounted at the layout
+     root) paints above them regardless of the numbers. pointer-events: none
+     below keeps it from taking a touch meant for one of them. */
   z-index: 10000;
   /* A readout, not a control. Without this the card is a 360px transparent
      shield over whatever route is underneath it. */
@@ -7727,15 +7790,12 @@ body {
      properties compose (translate is applied before transform). */
   translate: -50% -50%;
   width: 440px;
-  /* 10000. Above the 9999 tier (the sleep screen at :2840 and
-     .rcp-preset-menu-overlay at :4455) and level with .np-gain-popover-anchor
-     (:4767), which is the only other 10000 on the page — there is no
-     gain-popover backdrop, and an earlier revision of this comment said there
-     was one at 9999. Level, not above, means DOM order decides between those
-     two; both are layout-root children and the HUD mounts after, so the HUD
-     wins today. Raising this to beat the popover outright was not done: the
-     popover is a control the user is touching, and a readout should not cover
-     one. */
+  /* 10000. Above the 9999 tier (the sleep screen, the kiosk dialogs). The Home
+     page's popovers also use 10000 — .np-gain-popover-anchor and .rcp-agc-popup,
+     over backdrops at 9999 — but they sit inside .page-transition's child, whose
+     transform makes a stacking context, so this element (mounted at the layout
+     root) paints above them regardless of the numbers. pointer-events: none
+     below keeps it from taking a touch meant for one of them. */
   z-index: 10000;
   /* A readout, not a control. Every function it offers has a touch equivalent
      (the topbar source strip, the band pills), and a 440px transparent shield

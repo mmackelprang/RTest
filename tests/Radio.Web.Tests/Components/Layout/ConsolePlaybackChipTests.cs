@@ -70,7 +70,6 @@ public class ConsolePlaybackChipTests : TestContext
       transport: new OfflineHubTransport()));
     Services.AddSingleton<DeviceDisplayStateService>();
     Services.AddSingleton<CentrePanelViewService>();
-    Services.AddSingleton<GainPopoverService>();
     Services.AddSingleton<PhoneUnreadState>();
     Services.AddSingleton<EncoderFaultAnnouncer>();
     Services.AddSingleton<VisualizerTelemetryService>();

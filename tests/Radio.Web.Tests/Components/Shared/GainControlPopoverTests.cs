@@ -17,11 +17,9 @@ namespace Radio.Web.Tests.Components.Shared;
 /// tests verify the layout / state-flip behaviour the spec calls out:
 ///
 /// <list type="bullet">
-///   <item>Header renders kicker + title + optional Auto pill.</item>
-///   <item>Slider disabled while <c>IsAuto</c> is true; Reset disabled while Auto.</item>
+///   <item>Header renders kicker + title, and no AGC control (status-bar redesign, 2026-10-06).</item>
 ///   <item>Slider value change fires <c>OnValueChanged</c>.</item>
 ///   <item>Peak meter segment count updates from <c>OnLevelData</c> hub pushes.</item>
-///   <item>Auto pill click fires <c>OnAutoToggled</c>.</item>
 ///   <item>Reset click fires <c>OnReset</c> AND <c>OnValueChanged</c> with 1.0.</item>
 /// </list>
 ///
@@ -63,8 +61,7 @@ public class GainControlPopoverTests : TestContext
   public void Popover_RendersOpenClass_WhenIsOpenTrue()
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore"));
+      .Add(p => p.IsOpen, true));
 
     var root = cut.Find(".gain-popover");
     Assert.Contains("is-open", root.ClassList);
@@ -74,8 +71,7 @@ public class GainControlPopoverTests : TestContext
   public void Popover_OmitsOpenClass_WhenIsOpenFalse()
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, false)
-      .Add(p => p.SourceType, "RTLSDRCore"));
+      .Add(p => p.IsOpen, false));
 
     var root = cut.Find(".gain-popover");
     Assert.DoesNotContain("is-open", root.ClassList);
@@ -86,12 +82,11 @@ public class GainControlPopoverTests : TestContext
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore")
       .Add(p => p.SourceKicker, "SDR · RTL-SDR")
-      .Add(p => p.Title, "RF gain"));
+      .Add(p => p.Title, "Source gain"));
 
     Assert.Equal("SDR · RTL-SDR", cut.Find(".gain-popover-kicker").TextContent);
-    Assert.Equal("RF gain", cut.Find(".gain-popover-title").TextContent);
+    Assert.Equal("Source gain", cut.Find(".gain-popover-title").TextContent);
   }
 
   [Fact]
@@ -99,7 +94,6 @@ public class GainControlPopoverTests : TestContext
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
       .Add(p => p.SourceKicker, string.Empty)
       .Add(p => p.Title, "Source gain"));
 
@@ -107,91 +101,30 @@ public class GainControlPopoverTests : TestContext
   }
 
   [Fact]
-  public void AutoPill_Hidden_WhenShowAutoToggleFalse()
+  public void HasNoAgcControl_AndTheSliderAndResetAreAlwaysLive()
   {
-    // File / Bluetooth sources don't expose AGC; the pill is omitted entirely.
+    // Owner decision 4 (2026-10-06): the Auto pill toggled the tuner's RF AGC — a different control
+    // from this playback-gain slider — and AGC now lives only in the radio panel's status bar. With
+    // it went the AGC-on state that disabled the slider and Reset.
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
-      .Add(p => p.ShowAutoToggle, false));
+      .Add(p => p.SourceKicker, "SDR · RTL-SDR")
+      .Add(p => p.Title, "Source gain"));
 
     Assert.Empty(cut.FindAll(".gain-popover-auto"));
+    Assert.DoesNotContain("Auto on", cut.Markup);
+    Assert.DoesNotContain("Auto off", cut.Markup);
+    Assert.False(cut.Find("input[type=range]").HasAttribute("disabled"));
+    Assert.False(cut.Find(".gain-popover-reset").HasAttribute("disabled"));
+    Assert.DoesNotContain("is-disabled", cut.Find(".gain-popover-slider").ClassList);
   }
 
   [Fact]
-  public void AutoPill_RendersOnClass_WhenIsAuto()
-  {
-    var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore")
-      .Add(p => p.ShowAutoToggle, true)
-      .Add(p => p.IsAuto, true));
-
-    var pill = cut.Find(".gain-popover-auto");
-    Assert.Contains("is-on", pill.ClassList);
-    Assert.Equal("Auto on", pill.TextContent.Trim());
-  }
-
-  [Fact]
-  public void AutoPill_RendersOffClass_WhenNotAuto()
-  {
-    var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore")
-      .Add(p => p.ShowAutoToggle, true)
-      .Add(p => p.IsAuto, false));
-
-    var pill = cut.Find(".gain-popover-auto");
-    Assert.Contains("is-off", pill.ClassList);
-    Assert.Equal("Auto off", pill.TextContent.Trim());
-  }
-
-  [Fact]
-  public async Task AutoPill_Click_FiresOnAutoToggled()
-  {
-    var toggled = false;
-    var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore")
-      .Add(p => p.ShowAutoToggle, true)
-      .Add(p => p.IsAuto, false)
-      .Add(p => p.OnAutoToggled, () => { toggled = true; }));
-
-    // Component handler is `async Task HandleAutoToggleAsync() => await
-    // OnAutoToggled.InvokeAsync();` — `toggled` is set INSIDE the awaited
-    // continuation. bUnit's sync Click() waits on the dispatch task, but on
-    // slower CI runners the OnInitializedAsync hub-connect attempt can leave
-    // the dispatcher queue non-empty, so the callback's continuation can lag
-    // behind the assertion. Route the click through cut.InvokeAsync so the
-    // full handler chain runs on the renderer's dispatcher and we await it.
-    await cut.InvokeAsync(() => cut.Find(".gain-popover-auto").Click());
-
-    Assert.True(toggled);
-  }
-
-  [Fact]
-  public void Slider_DisabledAndDimmed_WhenIsAuto()
-  {
-    var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore")
-      .Add(p => p.IsAuto, true));
-
-    var sliderWrap = cut.Find(".gain-popover-slider");
-    Assert.Contains("is-disabled", sliderWrap.ClassList);
-
-    var input = cut.Find("input[type=range]");
-    Assert.True(input.HasAttribute("disabled"));
-  }
-
-  [Fact]
-  public async Task Slider_Input_FiresOnValueChanged_WhenNotAuto()
+  public async Task Slider_Input_FiresOnValueChanged()
   {
     float? received = null;
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
-      .Add(p => p.IsAuto, false)
       .Add(p => p.CurrentValue, 1.0f)
       .Add(p => p.OnValueChanged, (float v) => { received = v; }));
 
@@ -209,26 +142,12 @@ public class GainControlPopoverTests : TestContext
   }
 
   [Fact]
-  public void Reset_DisabledWhenAuto()
-  {
-    var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore")
-      .Add(p => p.IsAuto, true));
-
-    var reset = cut.Find(".gain-popover-reset");
-    Assert.True(reset.HasAttribute("disabled"));
-  }
-
-  [Fact]
   public async Task Reset_Click_FiresOnResetAndOnValueChangedWithOne()
   {
     var resetFired = false;
     float? lastValue = null;
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
-      .Add(p => p.IsAuto, false)
       .Add(p => p.CurrentValue, 0.5f)
       .Add(p => p.OnReset, () => { resetFired = true; })
       .Add(p => p.OnValueChanged, (float v) => { lastValue = v; }));
@@ -248,26 +167,10 @@ public class GainControlPopoverTests : TestContext
   }
 
   [Fact]
-  public void Footer_ShowsAppliedGainDb_WhenAuto()
+  public void Footer_ShowsSliderValueInDb()
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "RTLSDRCore")
-      .Add(p => p.IsAuto, true)
-      .Add(p => p.AppliedGainDb, 28.0)
-      .Add(p => p.CurrentValue, 0.5f)); // would surface as -6dB but Auto suppresses it
-
-    var value = cut.Find(".gain-popover-value").TextContent;
-    Assert.Contains("28.0", value);
-  }
-
-  [Fact]
-  public void Footer_ShowsSliderValueInDb_WhenManual()
-  {
-    var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
-      .Add(p => p.IsAuto, false)
       .Add(p => p.CurrentValue, 1.0f));
 
     var value = cut.Find(".gain-popover-value").TextContent;
@@ -280,8 +183,7 @@ public class GainControlPopoverTests : TestContext
   public void Body_RendersScaleLabels()
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
-      .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer"));
+      .Add(p => p.IsOpen, true));
 
     var scale = cut.Find(".gain-popover-scale").TextContent;
     Assert.Contains("+6", scale);
@@ -297,7 +199,6 @@ public class GainControlPopoverTests : TestContext
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
       .Add(p => p.SegmentCount, 20));
 
     Assert.Equal(20, cut.FindAll(".gain-popover-peak-segment").Count);
@@ -317,7 +218,6 @@ public class GainControlPopoverTests : TestContext
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
       .Add(p => p.SegmentCount, 20));
 
     // Sanity: no segments lit before any level data arrives.
@@ -345,7 +245,6 @@ public class GainControlPopoverTests : TestContext
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
       .Add(p => p.SegmentCount, 20));
 
     var hub = Services.GetRequiredService<AudioVisualizationHubService>();
@@ -370,7 +269,6 @@ public class GainControlPopoverTests : TestContext
   {
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
       .Add(p => p.IsOpen, true)
-      .Add(p => p.SourceType, "FilePlayer")
       .Add(p => p.SegmentCount, 20));
 
     var hub = Services.GetRequiredService<AudioVisualizationHubService>();

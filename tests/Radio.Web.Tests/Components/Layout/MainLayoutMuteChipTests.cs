@@ -16,11 +16,11 @@ using Xunit;
 namespace Radio.Web.Tests.Components.Layout;
 
 /// <summary>
-/// UI-2 / D11: the top-level nav has no Metrics pill — diagnostics live under Settings, so the
-/// Settings pill is what lights on <c>/diagnostics</c>. Rendering set-up mirrors
-/// <see cref="ConsolePlaybackChipTests"/>.
+/// ENC-4a's topbar MUTED chip, as amended by the main-page status-bar redesign (owner decision,
+/// 2026-10-06): hidden on "/" only, where NowPlayingPanel's status bar shows mute in its own slot,
+/// and still shown on every other route. Rendering set-up mirrors <see cref="MainLayoutNavTests"/>.
 /// </summary>
-public class MainLayoutNavTests : TestContext
+public class MainLayoutMuteChipTests : TestContext
 {
   private IRenderedComponent<Radio.Web.Components.Layout.MainLayout> RenderLayout(string? navigateTo = null)
   {
@@ -73,78 +73,59 @@ public class MainLayoutNavTests : TestContext
     return RenderComponent<Radio.Web.Components.Layout.MainLayout>();
   }
 
-  [Fact]
-  public void Nav_HasNoMetricsPill()
+  /// <summary>Mutes the console the way the API reports it: a VolumeChanged broadcast.</summary>
+  private async Task MuteAsync(IRenderedComponent<Radio.Web.Components.Layout.MainLayout> cut)
   {
-    var cut = RenderLayout();
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    await cut.InvokeAsync(() => HubEventFire.FireAsync<VolumeDto?>(
+      hub, nameof(AudioStateHubService.VolumeChanged), new VolumeDto(0.5f, true)));
+  }
 
-    Assert.Empty(cut.FindAll("a[href='/metrics']"));
-    Assert.DoesNotContain(
-      cut.FindAll(".nav-pill-label"),
-      label => label.TextContent.Trim() is "Metrics" or "Diagnostics");
+  [Theory]
+  [InlineData("/queue")]
+  [InlineData("/phone")]
+  [InlineData("/history")]
+  public async Task MutedChip_IsShown_OnEveryRouteButHome(string route)
+  {
+    var cut = RenderLayout(navigateTo: route);
+
+    await MuteAsync(cut);
+
+    Assert.Single(cut.FindAll(".topbar-mute-chip"));
   }
 
   [Fact]
-  public void Nav_StillHasTheSettingsPill()
+  public async Task MutedChip_IsHidden_OnHome()
   {
-    var cut = RenderLayout();
+    var cut = RenderLayout(navigateTo: "/");
 
-    // Guards the absence assertions above: the nav rendered, and the pill Diagnostics lives under is there.
-    Assert.Single(cut.FindAll("a[href='/system']"));
+    await MuteAsync(cut);
+
+    Assert.Empty(cut.FindAll(".topbar-mute-chip"));
   }
 
   [Fact]
-  public void SettingsPill_IsActive_OnTheDiagnosticsRoute()
+  public async Task MutedChip_FollowsNavigation_IntoAndOutOfHome()
   {
-    var cut = RenderLayout(navigateTo: "/diagnostics");
+    var cut = RenderLayout(navigateTo: "/queue");
+    await MuteAsync(cut);
+    Assert.Single(cut.FindAll(".topbar-mute-chip"));
 
-    var settings = cut.Find("a[href='/system']");
-    Assert.Contains("nav-active", settings.GetAttribute("class") ?? string.Empty);
+    var nav = Services.GetRequiredService<NavigationManager>();
+    await cut.InvokeAsync(() => nav.NavigateTo("/"));
+    Assert.Empty(cut.FindAll(".topbar-mute-chip"));
+
+    await cut.InvokeAsync(() => nav.NavigateTo("/history"));
+    Assert.Single(cut.FindAll(".topbar-mute-chip"));
   }
 
-  /// <summary>
-  /// UI-25: the triple-tap callback carries the tap's x and the pressed slot's edges, and the layout
-  /// hands the tray a placement under the slot at that x. Toggling again closes; reopening at another
-  /// x moves it; a tap on the backdrop outside the tray closes it.
-  /// </summary>
   [Fact]
-  public async Task DevTrayGesture_OpensTheTrayUnderTheSlot_FollowsANewTap_AndClosesOnTapAway()
+  public void MutedChip_IsHidden_WhenNotMuted_OffHome()
   {
-    var cut = RenderLayout();
-    Assert.Empty(cut.FindAll(".dev-tray-backdrop"));
+    // Guards the positive tests above: the chip appears because of the mute, not the route.
+    var cut = RenderLayout(navigateTo: "/queue");
 
-    await cut.InvokeAsync(() => cut.Instance.ToggleDevTray(1200, 3, 59, 1920, 720));
-    var tray = cut.Find(".dev-tray");
-    Assert.Contains("is-open", tray.GetAttribute("class") ?? string.Empty);
-    Assert.Contains("left:960px", tray.GetAttribute("style") ?? string.Empty);
-    Assert.Contains("top:67px", tray.GetAttribute("style") ?? string.Empty);
-
-    await cut.InvokeAsync(() => cut.Instance.ToggleDevTray(1200, 3, 59, 1920, 720));
-    Assert.DoesNotContain("is-open", cut.Find(".dev-tray").GetAttribute("class") ?? string.Empty);
-    Assert.Empty(cut.FindAll(".dev-tray-backdrop"));
-
-    await cut.InvokeAsync(() => cut.Instance.ToggleDevTray(1150, 3, 59, 1920, 720));
-    tray = cut.Find(".dev-tray");
-    Assert.Contains("is-open", tray.GetAttribute("class") ?? string.Empty);
-    Assert.Contains("left:910px", tray.GetAttribute("style") ?? string.Empty);
-
-    cut.Find(".dev-tray-backdrop").Click();
-    Assert.DoesNotContain("is-open", cut.Find(".dev-tray").GetAttribute("class") ?? string.Empty);
-  }
-
-  /// <summary>
-  /// Every return from /sleep is a client-side navigation onto a fresh MainLayout, so idle-dimmer.js
-  /// does not reload and its timers are only re-armed if the layout asks. Without this call a console
-  /// woken from /sleep and left alone never dimmed or slept again.
-  /// </summary>
-  [Fact]
-  public void FirstRender_ArmsTheIdleDimTimers()
-  {
-    RenderLayout();
-
-    Assert.Contains(
-      JSInterop.Invocations,
-      i => i.Identifier == "radioSleepManager.wake" && Equals(i.Arguments[0], "mount"));
+    Assert.Empty(cut.FindAll(".topbar-mute-chip"));
   }
 
   private sealed class StubOptionsMonitor<T> : IOptionsMonitor<T>

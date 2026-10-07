@@ -101,18 +101,7 @@
              title="Click to set frequency">
           @FrequencyValue(_radioState.Frequency, _radioState.Band)<span class="rcp-freq-unit">@FrequencyUnit(_radioState.Band)</span>
         </div>
-        <div class="rcp-freq-indicators">
-          <div class="rcp-step-label rcp-step-clickable" @onclick="CycleStepSizeAsync"
-               title="Click to change step size">
-            STEP @FormatStep(_radioState.Step, _radioState.Band)
-          </div>
-          @if (_radioState.Band == "FM")
-          {
-            <div class="rcp-stereo-indicator @(_radioState.IsStereo ? "rcp-stereo-on" : "")">
-              STEREO
-            </div>
-          }
-        </div>
+        @* STEP and STEREO moved to the status bar below the tuner (status-bar redesign, 2026-10-06). *@
       </div>
 
       <!-- Signal strength meter (PR 1 of Radio Controller Polish arc) -->
@@ -130,11 +119,9 @@
                height. As its own row it added ~36 px against 16 px of slack and pushed the AGC row
                out of the clipped tuner column; with the preset bar below there is no slack at all. *@
             @ScanIndicator()
+            @* CLIP moved to the status bar's lamp slot (status-bar redesign, 2026-10-06); the dBu
+               readout is the meter's own numeric reading and stays here. *@
             <span class="rcp-meter-readout">
-              @* UI-27: rendered whenever the meter is, shown by .is-on. Inserting it on demand made the header 3 px
-                 taller while it showed, and everything below the meter moved with each flicker. The
-                 pill is also out of flow (design-system.css §S), so it takes no room either way. *@
-              <span class="rcp-clip-pill @(_radioState.Clip ? "is-on" : "")">CLIP</span>
               <span class="rcp-meter-dbu">@($"{_radioState.RssiDbu.ToString("0").Replace("-", "−")} dBu")</span>
             </span>
           </div>
@@ -142,7 +129,7 @@
             @{
               // The DTO clamp guarantees SignalStrength ∈ [0, 100], so the
               // 20-segment fill never overflows. CLIP is the separate signal —
-              // see the pill above.
+              // the lamp in the status bar below the tuner.
               var clampedPct = _radioState.SignalStrength ?? 0;
             }
             @for (int i = 0; i < 20; i++)
@@ -190,38 +177,102 @@
                       class="rcp-tune-btn" Variant="Variant.Text"
                       Click="FrequencyUpAsync" title="Frequency Up" />
       </div>
+    </div>
 
-      <!-- SDR / gain controls (PR 1 — fixed two-cell grid; right cell always rendered) -->
-      @if (_radioState.Gain.HasValue)
-      {
-        <div class="rcp-sdr-grid">
-          @* Left cell: tappable AGC toggle + AUTO/OFF chip *@
-          <button type="button"
-                  class="rcp-agc-cell"
-                  @onclick="@(async () => await HandleAutoGainChangedAsync(!_radioState.AutoGain))"
-                  aria-pressed="@_radioState.AutoGain.ToString().ToLowerInvariant()"
-                  aria-label="@(_radioState.AutoGain ? "Automatic gain control on — tap to disable" : "Automatic gain control off — tap to enable")">
-            <span class="rcp-agc-label">AGC</span>
-            <span class="@(_radioState.AutoGain ? "rcp-agc-chip-auto" : "rcp-agc-chip-off")">
-              @(_radioState.AutoGain ? "AUTO" : "OFF")
+    @* Status bar (main-page status-bar redesign, 2026-10-06): STEP | STEREO CLIP | AGC, 44 px, in its
+       own row between the tuner column and the preset bar. It is deliberately outside .rcp-tuner, which
+       clips its bottom rows under a height squeeze, so this row can never be the one clipped. Every
+       slot is always rendered at a fixed width, so no state change moves anything. CSS:
+       design-system.css §T. *@
+    var isFm = string.Equals(_radioState.Band, "FM", StringComparison.Ordinal);
+    var hasGain = _radioState.Gain.HasValue;
+    var agcAuto = hasGain && _radioState.AutoGain;
+    <div class="rcp-status-host">
+      <div class="rcp-status-bar" role="group" aria-label="Tuner status">
+        <button type="button"
+                class="rcp-sb-step"
+                @onclick="CycleStepSizeAsync"
+                aria-label="@($"Tuning step {FormatStep(_radioState.Step, _radioState.Band)}. Tap to change.")">
+          <span class="rcp-sb-key">STEP</span>
+          <span class="rcp-sb-step-value">@FormatStep(_radioState.Step, _radioState.Band)</span>
+        </button>
+
+        <div class="rcp-sb-lamps">
+          @* Off FM the slot stays and reads a dim MONO, so the lamps never move. *@
+          <span class="rcp-lamp rcp-lamp-stereo @(isFm && _radioState.IsStereo ? "rcp-stereo-on" : null)">@(isFm ? "STEREO" : "MONO")</span>
+          <span class="rcp-lamp rcp-lamp-clip @(_radioState.Clip ? "is-on" : null)">CLIP</span>
+        </div>
+
+        <button type="button"
+                class="rcp-sb-agc @(agcAuto ? "is-auto" : hasGain ? "is-manual" : "is-none")"
+                disabled="@(!hasGain)"
+                aria-pressed="@(agcAuto ? "true" : "false")"
+                aria-label="@AgcChipAriaLabel"
+                @onclick="HandleAgcChipClickAsync"
+                @onpointerdown="HandleAgcPointerDown"
+                @onpointerup="CancelAgcLongPress"
+                @onpointerleave="CancelAgcLongPress"
+                @onpointercancel="CancelAgcLongPress"
+                @onkeydown="HandleAgcChipKeyDownAsync"
+                @oncontextmenu:preventDefault="true">
+          <span class="rcp-agc-label">AGC</span>
+          @if (!hasGain)
+          {
+            <span class="rcp-sb-agc-none">—</span>
+          }
+          else
+          {
+            <span class="@(agcAuto ? "rcp-agc-chip-auto" : "rcp-agc-chip-off")">@(agcAuto ? "AUTO" : "MAN")</span>
+            <span class="rcp-sb-agc-value">
+              @if (agcAuto)
+              {
+                <span class="rcp-sb-agc-auto-value">@_radioState.AppliedGain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) dB</span>
+              }
+              else
+              {
+                <span class="rcp-gain-pill">@_radioState.AppliedGain.ToString("0", System.Globalization.CultureInfo.InvariantCulture) dB</span>
+              }
             </span>
-          </button>
+            @* The glyph the popup is opened for; its slot is kept (hidden) in AUTO so nothing shifts. *@
+            <span class="rcp-sb-agc-tune @(agcAuto ? "is-hidden" : null)" aria-hidden="true"><RadzenIcon Icon="tune" /></span>
+          }
+        </button>
+      </div>
 
-          @* Right cell: always rendered; content swaps on AGC state *@
-          <div class="rcp-gain-cell">
-            @if (_radioState.AutoGain)
-            {
-              <span class="rcp-gain-auto-hint">Tuner is choosing</span>
-              <span class="rcp-gain-auto-value">@_radioState.AppliedGain.ToString("0.0") dB</span>
-            }
-            else
-            {
-              <span class="rcp-gain-pill">@_radioState.AppliedGain.ToString("0") dB</span>
-              <RadzenSlider TValue="int" Value="@_radioState.Gain.Value"
-                            Change="@(async (int val) => await HandleGainChangedAsync(val))"
-                            Min="0" Max="50" Step="1" Style="flex: 1; min-width: 0;" />
-              <span class="rcp-gain-range-hint">0 – 50</span>
-            }
+      @if (_isAgcPopupOpen && hasGain)
+      {
+        @* AGC popup: opened by holding the AGC chip. The backdrop is local, the .rcp-preset-menu-overlay
+           pattern. A backdrop mounted by MainLayout, outside .page-transition, would paint above
+           this card, which lives inside it (why GainPopoverService was removed). Card chrome is
+           the §Z gain popover's. *@
+        <div class="rcp-agc-popup-backdrop" @onclick="CloseAgcPopup" aria-hidden="true"></div>
+        <div class="gain-popover rcp-agc-popup" role="dialog" aria-label="RF gain, manual"
+             @onkeydown="HandleAgcPopupKeyDown">
+          <div class="gain-popover-header">
+            <span class="gain-popover-title">SDR · RF gain · manual</span>
+          </div>
+          <div class="rcp-agc-popup-readout gain-popover-value">@AgcPopupReadout</div>
+          <div class="rcp-agc-popup-row">
+            <button type="button" class="rcp-agc-popup-nudge"
+                    @onclick="() => NudgeAgcGainAsync(-1)"
+                    disabled="@(_agcTarget <= AgcGainMin)"
+                    aria-label="Decrease RF gain">−</button>
+            <input type="range" class="rcp-agc-popup-slider" @ref="_agcSliderRef"
+                   min="@AgcGainMin" max="@AgcGainMax" step="1"
+                   value="@(_agcScrub ?? _agcTarget)"
+                   @oninput="OnAgcSliderInput"
+                   @onchange="OnAgcSliderReleaseAsync"
+                   aria-label="RF gain"
+                   aria-valuemin="@AgcGainMin" aria-valuemax="@AgcGainMax"
+                   aria-valuenow="@(_agcScrub ?? _agcTarget)" />
+            <button type="button" class="rcp-agc-popup-nudge"
+                    @onclick="() => NudgeAgcGainAsync(1)"
+                    disabled="@(_agcTarget >= AgcGainMax)"
+                    aria-label="Increase RF gain">+</button>
+          </div>
+          <div class="gain-popover-footer">
+            <button type="button" class="gain-popover-reset rcp-agc-popup-auto" @onclick="EnableAgcFromPopupAsync">AGC on</button>
+            <button type="button" class="gain-popover-reset rcp-agc-popup-done" @onclick="CloseAgcPopup">Done</button>
           </div>
         </div>
       }
@@ -379,7 +430,8 @@
     justify-content: flex-start;
     /* UI-20 (spec §4.2): top padding 32 → 20 and gap 10 → 8 pay, with the one-row band strip, for
        the 89 px preset bar. Measured on the box 2026-10-01: ~4.5 px is left over, so any row added
-       here must take height from somewhere else or the AGC row clips. */
+       here must take height from somewhere else or the bottom row (now the tune/scan controls)
+       clips. The status bar (2026-10-06) is outside this column and took the AGC row's place. */
     padding: 20px 24px 12px;
     gap: 8px;
     position: relative;
@@ -558,46 +610,24 @@
     opacity: 0.08 !important;
   }
 
-  .rcp-freq-indicators {
-    display: flex;
-    justify-content: space-between;
+  /* The well's STEP / STEREO indicator row (.rcp-freq-indicators, .rcp-step-label,
+     .rcp-step-clickable) moved to the status bar under the tuner — design-system.css §T — in the
+     status-bar redesign (2026-10-06). The lamp look below came with it. */
+
+  /* Status-bar lamps (STEREO / MONO, CLIP): always rendered, dim until lit, so a lamp changing state
+     changes its colour and never its box. */
+  .rcp-lamp {
+    display: inline-flex;
     align-items: center;
-    margin-top: 6px;
-    position: relative;
-    z-index: 1;
-  }
-
-  .rcp-step-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-low);
-    letter-spacing: 0.12em;
-    padding: 2px 8px;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 2px;
-    border: 1px solid rgba(255, 255, 255, 0.04);
-  }
-
-  .rcp-step-clickable {
-    cursor: pointer;
-    transition: all 120ms ease;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .rcp-step-clickable:hover {
-    color: var(--signal-amber);
-    border-color: rgba(240, 168, 48, 0.2);
-    background: rgba(240, 168, 48, 0.04);
-  }
-
-  .rcp-stereo-indicator {
+    justify-content: center;
+    box-sizing: border-box;
+    width: 76px;
+    height: 22px;
     font-family: var(--font-mono);
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.18em;
     color: var(--text-low);
-    padding: 2px 10px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 2px;
     transition: all 300ms ease;
@@ -616,6 +646,15 @@
     /* Static glow. This used to pulse via an infinite box-shadow animation, which cannot run on
        the compositor: Chrome repainted on the main thread 60 times a second while stereo was
        locked — ~36% of a core on the kiosk (measured 2026-10-06). */
+  }
+
+  /* CLIP lit: the red of the meter-header pill it replaced (design-system.css §S, pre-2026-10-06). */
+  .rcp-lamp-clip.is-on {
+    color: var(--signal-red);
+    border-color: var(--signal-red);
+    opacity: 1;
+    background: rgba(248, 113, 113, 0.10);
+    box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
   }
 
   /* PR 3 of the Radio Controller Polish arc — RDS info block was extracted
@@ -796,10 +835,9 @@
     box-shadow: none !important;
   }
 
-  /* ── SDR / AGC controls — see design-system.css §T for the strip and
-     amber-pill styling. The legacy `.rcp-sdr-controls` / `.rcp-gain-slot`
-     rules were removed in PR 1 of the Radio Controller Polish arc when the
-     flex strip became a fixed two-cell grid. ──────────────────────────── */
+  /* ── Status bar (STEP | STEREO CLIP | AGC) and the AGC popup — see design-system.css §T. The
+     two-cell AGC grid that sat at the bottom of the tuner column was removed by the status-bar
+     redesign (2026-10-06). ─────────────────────────────────────────────────────────────────── */
 
   /* UI-20: the presets rail's rules (.rcp-presets, -header, -list, -empty) went with the rail. The
      preset bar is styled in design-system.css §X, next to the shared card tokens it reuses. */
@@ -914,6 +952,7 @@
     }
 
     HubService.RadioStateChanged += HandleRadioStateChanged;
+    HubService.SourceChanged += OnHubSourceChanged;
   }
 
   private async Task LoadBandsAsync()
@@ -924,12 +963,14 @@
 
   private async Task LoadRadioStateAsync()
   {
+    var previous = _radioState;
     try { _radioState = await RadioApi.GetStateAsync(); }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to load radio state");
       _radioState = null;
     }
+    CloseAgcPopupIfStale(previous, _radioState);
   }
 
   private async Task LoadPresetsAsync()
@@ -997,7 +1038,9 @@
     // these mutations off-thread let a buffer rebuild race a chunk append into the discarded buffer.
     await InvokeAsync(() =>
     {
+      var previous = _radioState;
       _radioState = dto;
+      CloseAgcPopupIfStale(previous, dto);
 
       // Only touch the RDS accumulator when the broadcast actually carried an
       // RDS/tuning change. On telemetry-only ticks (RdsRelevantChanged == false)
@@ -1057,7 +1100,11 @@
     try
     {
       var previous = _radioState;
-      if (_radioState != null) _radioState = _radioState with { Band = newBand };
+      if (_radioState != null)
+      {
+        _radioState = _radioState with { Band = newBand };
+        CloseAgcPopupIfStale(previous, _radioState);
+      }
       if (await RadioApi.SetBandAsync(newBand))
       {
         await LoadRadioStateAsync();
@@ -1192,17 +1239,399 @@
     catch (Exception ex) { Logger.LogError(ex, "Error in HandleAutoGainChangedAsync"); }
   }
 
-  private async Task HandleGainChangedAsync(int gain)
+  // ─── Status bar: AGC chip + AGC popup (main-page status-bar redesign, 2026-10-06) ───────────
+  //
+  // Tap the chip: toggle AGC. Hold it for LongPressThresholdMs: open the popup — and, if AGC is on,
+  // first switch to manual at the gain AGC is currently applying (owner decision 3). The hold fires
+  // AT the threshold while the finger is still down (the EncoderInteractionTimings contract), from a
+  // timer armed on pointerdown; the band pill and preset cards resolve theirs on release instead.
+
+  /// <summary>
+  /// The clock the long-press and the popup's idle dismissal are timed against. Production never
+  /// writes this. <c>internal</c> so <c>Radio.Web.Tests</c> can substitute a <c>FakeTimeProvider</c>;
+  /// a settable property rather than <c>@inject</c> for the reasons given on
+  /// <c>NowPlayingPanel.Clock</c> (no <see cref="TimeProvider"/> is registered in either host).
+  /// </summary>
+  internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+  /// <summary>The popup closes itself after this long with no interaction (spec §3).</summary>
+  internal static readonly TimeSpan AgcPopupIdleTimeout = TimeSpan.FromSeconds(10);
+
+  // The manual-gain contract the API takes (an int, RadioController.SetGain). The R820T itself has
+  // 29 discrete steps up to 49.6 dB and snaps to the nearest; AppliedGain reports where it landed.
+  private const int AgcGainMin = 0;
+  private const int AgcGainMax = 50;
+
+  private ITimer? _agcLongPressTimer;
+  // Bumped on every pointerdown and every cancel, so a long-press callback that was already queued
+  // when the press ended finds a different number and does nothing.
+  private int _agcPressGeneration;
+  private bool _suppressNextAgcClick;
+
+  private bool _isAgcPopupOpen;
+  // The manual gain the popup last asked for: seeded when it opens, moved by each commit. The slider
+  // and the nudges work from this rather than from _radioState.Gain, which a hub tick can carry stale
+  // between a commit and its confirmation.
+  private int _agcTarget;
+  // The slider's position while it is being dragged; null otherwise. Only the readout follows it —
+  // nothing is sent until release.
+  private int? _agcScrub;
+  private ITimer? _agcIdleTimer;
+  private DateTimeOffset _agcLastInteraction;
+  // True while a hold (or Arrow Up) is switching AGC off and opening the popup. Taps and further holds
+  // are ignored until it finishes, so a second press cannot toggle AGC between its two POSTs.
+  private bool _agcOpening;
+  // When this panel last switched AGC off itself. A RadioStateChanged tick built before that POST can
+  // arrive after it; inside AgcOffGrace such a tick's AutoGain=true is treated as stale, not as AGC
+  // having been turned back on (see CloseAgcPopupIfStale).
+  private DateTimeOffset? _agcOffRequestedAt;
+  internal static readonly TimeSpan AgcOffGrace = TimeSpan.FromSeconds(2);
+  private ElementReference _agcSliderRef;
+  private bool _focusAgcSliderPending;
+  private bool _disposed;
+
+  private string AgcChipAriaLabel
   {
+    get
+    {
+      if (_radioState?.Gain is null)
+      {
+        return "Automatic gain control unavailable";
+      }
+      var applied = _radioState.AppliedGain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+      return _radioState.AutoGain
+        ? $"Automatic gain control on, {applied} dB. Tap to switch to manual; hold, or press Arrow Up, to set the gain."
+        : $"Automatic gain control off, manual gain {applied} dB. Tap to turn on; hold, or press Arrow Up, to adjust.";
+    }
+  }
+
+  /// <summary>
+  /// The popup's large readout: the slider position while it is dragged, otherwise the gain the
+  /// tuner reports it applied.
+  /// </summary>
+  private string AgcPopupReadout => _agcScrub is int scrub
+    ? $"{scrub.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} dB"
+    : $"{(_radioState?.AppliedGain ?? 0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} dB";
+
+  private void HandleAgcPointerDown(PointerEventArgs e)
+  {
+    // A new press starts clean: a long-press whose trailing click was delivered somewhere other than
+    // the chip (the popup's backdrop mounts under the finger) must not swallow this press's click.
+    _suppressNextAgcClick = false;
+    CancelAgcLongPress();
+    if (e.Button != 0 || _radioState?.Gain is null)
+    {
+      return;
+    }
+
+    var generation = _agcPressGeneration;
+    _agcLongPressTimer = Clock.CreateTimer(
+      _ =>
+      {
+        if (!_disposed)
+        {
+          _ = InvokeAsync(() => OnAgcLongPressAsync(generation));
+        }
+      },
+      null,
+      TimeSpan.FromMilliseconds(LongPressThresholdMs),
+      Timeout.InfiniteTimeSpan);
+  }
+
+  /// <summary>Ends a press that has not reached the threshold (pointer up, leave or cancel).</summary>
+  private void CancelAgcLongPress()
+  {
+    _agcPressGeneration++;
+    _agcLongPressTimer?.Dispose();
+    _agcLongPressTimer = null;
+  }
+
+  private async Task OnAgcLongPressAsync(int generation)
+  {
+    if (_disposed || generation != _agcPressGeneration)
+    {
+      return;
+    }
+    _agcLongPressTimer?.Dispose();
+    _agcLongPressTimer = null;
+    _suppressNextAgcClick = true;
+    await OpenAgcPopupFromChipAsync(focusSlider: false);
+  }
+
+  /// <summary>
+  /// The keyboard route to the popup, for a browser with no touch: Arrow Up on the chip does what a
+  /// hold does, and moves focus to the slider.
+  /// </summary>
+  private async Task HandleAgcChipKeyDownAsync(KeyboardEventArgs e)
+  {
+    if (e.Key == "ArrowUp")
+    {
+      await OpenAgcPopupFromChipAsync(focusSlider: true);
+    }
+  }
+
+  private async Task OpenAgcPopupFromChipAsync(bool focusSlider)
+  {
+    if (_agcOpening || _isAgcPopupOpen || _radioState?.Gain is null)
+    {
+      return;
+    }
+    _agcOpening = true;
+    try
+    {
+      if (_radioState.AutoGain)
+      {
+        // Owner decision 3: one gesture switches to manual at the gain AGC is applying right now, then
+        // opens the popup. The manual-gain call is rejected while AGC is on, so the order matters.
+        // Between the two POSTs the tuner briefly runs at its previous manual gain; only a combined
+        // API call could avoid that.
+        var gain = Math.Clamp((int)Math.Round(_radioState.AppliedGain), AgcGainMin, AgcGainMax);
+        if (!await RadioApi.SetAutoGainAsync(false))
+        {
+          return;
+        }
+        _agcOffRequestedAt = Clock.GetUtcNow();
+        var gainSet = await RadioApi.SetGainAsync(gain);
+        await LoadRadioStateAsync();
+        if (_disposed || _radioState?.Gain is null)
+        {
+          StateHasChanged();
+          return;
+        }
+        // If the manual gain was refused, the tuner kept its previous manual gain: seed the popup from
+        // what the state now reports rather than from the value that was not applied.
+        _agcTarget = gainSet
+          ? gain
+          : Math.Clamp(_radioState.Gain ?? (int)Math.Round(_radioState.AppliedGain), AgcGainMin, AgcGainMax);
+      }
+      else
+      {
+        _agcTarget = Math.Clamp(_radioState.Gain ?? (int)Math.Round(_radioState.AppliedGain), AgcGainMin, AgcGainMax);
+      }
+
+      OpenAgcPopup();
+      _focusAgcSliderPending = focusSlider;
+      StateHasChanged();
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error opening the AGC popup"); }
+    finally
+    {
+      _agcOpening = false;
+    }
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (_focusAgcSliderPending && _isAgcPopupOpen)
+    {
+      _focusAgcSliderPending = false;
+      try { await _agcSliderRef.FocusAsync(); }
+      catch (Exception ex) { Logger.LogDebug(ex, "Could not focus the AGC popup slider"); }
+    }
+  }
+
+  private async Task HandleAgcChipClickAsync()
+  {
+    if (_suppressNextAgcClick)
+    {
+      // The click that trails a long-press: the hold already acted.
+      _suppressNextAgcClick = false;
+      return;
+    }
+    if (_agcOpening || _radioState?.Gain is null)
+    {
+      return;
+    }
+    await HandleAutoGainChangedAsync(!_radioState.AutoGain);
+  }
+
+  private void HandleAgcPopupKeyDown(KeyboardEventArgs e)
+  {
+    if (e.Key == "Escape")
+    {
+      CloseAgcPopup();
+    }
+  }
+
+  private void OpenAgcPopup()
+  {
+    _isAgcPopupOpen = true;
+    _agcScrub = null;
+    TouchAgcPopup();
+  }
+
+  private void CloseAgcPopup()
+  {
+    _isAgcPopupOpen = false;
+    _agcScrub = null;
+    _focusAgcSliderPending = false;
+    // With a mouse, the click that trails a hold lands on the backdrop's ancestor, not the chip, so
+    // the suppression flag can outlive the popup; clear it so a later keyboard Enter is not swallowed.
+    _suppressNextAgcClick = false;
+    _agcIdleTimer?.Dispose();
+    _agcIdleTimer = null;
+  }
+
+  /// <summary>
+  /// Records an interaction and (re)arms the idle dismissal. Called only from renderer-context paths
+  /// (event handlers and <c>InvokeAsync</c> callbacks), which Blazor serialises — that is what makes
+  /// the unlocked null-check-then-create safe.
+  /// </summary>
+  private void TouchAgcPopup()
+  {
+    _agcLastInteraction = Clock.GetUtcNow();
+    if (_agcIdleTimer != null)
+    {
+      _agcIdleTimer.Change(AgcPopupIdleTimeout, Timeout.InfiniteTimeSpan);
+      return;
+    }
+    _agcIdleTimer = Clock.CreateTimer(
+      _ =>
+      {
+        if (!_disposed)
+        {
+          _ = InvokeAsync(OnAgcPopupIdleElapsed);
+        }
+      },
+      null,
+      AgcPopupIdleTimeout,
+      Timeout.InfiniteTimeSpan);
+  }
+
+  private void OnAgcPopupIdleElapsed()
+  {
+    // A callback that was already queued when an interaction re-armed the timer finds a recent
+    // interaction and leaves the popup alone; the re-armed timer will come back for it.
+    if (!_isAgcPopupOpen || Clock.GetUtcNow() - _agcLastInteraction < AgcPopupIdleTimeout)
+    {
+      return;
+    }
+    CloseAgcPopup();
+    StateHasChanged();
+  }
+
+  /// <summary>Drag frame: moves the readout only. Nothing is sent until release.</summary>
+  private void OnAgcSliderInput(ChangeEventArgs e)
+  {
+    if (TryParseAgcGain(e.Value, out var gain))
+    {
+      _agcScrub = gain;
+      TouchAgcPopup();
+    }
+  }
+
+  /// <summary>
+  /// Release: the native range input raises <c>change</c> once, when the drag ends (and once per
+  /// keyboard step), so this is the one place a drag sends <c>SetGainAsync</c> — the AUD-28 SeekBar
+  /// idiom, replacing the old inline slider that sent one per drag frame.
+  /// </summary>
+  private async Task OnAgcSliderReleaseAsync(ChangeEventArgs e)
+  {
+    _agcScrub = null;
+    if (TryParseAgcGain(e.Value, out var gain))
+    {
+      await CommitAgcGainAsync(gain);
+    }
+  }
+
+  private Task NudgeAgcGainAsync(int delta) => CommitAgcGainAsync(_agcTarget + delta);
+
+  private async Task CommitAgcGainAsync(int gain)
+  {
+    TouchAgcPopup();
+    gain = Math.Clamp(gain, AgcGainMin, AgcGainMax);
+    if (gain == _agcTarget)
+    {
+      return;
+    }
+
+    var previous = _agcTarget;
+    _agcTarget = gain;
     try
     {
       if (await RadioApi.SetGainAsync(gain))
       {
         await LoadRadioStateAsync();
-        await InvokeAsync(StateHasChanged);
+      }
+      else if (_agcTarget == gain)
+      {
+        // Revert only if no later commit has moved the target since; that one owns it now.
+        _agcTarget = previous;
       }
     }
-    catch (Exception ex) { Logger.LogError(ex, "Error in HandleGainChangedAsync"); }
+    catch (Exception ex)
+    {
+      if (_agcTarget == gain)
+      {
+        _agcTarget = previous;
+      }
+      Logger.LogError(ex, "Error setting the manual RF gain");
+    }
+  }
+
+  private async Task EnableAgcFromPopupAsync()
+  {
+    try
+    {
+      if (await RadioApi.SetAutoGainAsync(true))
+      {
+        CloseAgcPopup();
+        await LoadRadioStateAsync();
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error enabling AGC from the popup"); }
+  }
+
+  private static bool TryParseAgcGain(object? value, out int gain)
+  {
+    gain = 0;
+    if (value is null
+        || !double.TryParse(value.ToString(), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+    {
+      return false;
+    }
+    gain = Math.Clamp((int)Math.Round(parsed), AgcGainMin, AgcGainMax);
+    return true;
+  }
+
+  /// <summary>
+  /// Closes the AGC popup when the state it adjusts goes away: AGC is on (from any path — the chip,
+  /// another client, the API), the radio state could not be read or has no manual gain, or the band
+  /// changed. Called where a new state is loaded or pushed (LoadRadioStateAsync, the hub handler, the
+  /// optimistic band change); the failed-band-change revert restores the earlier state without it.
+  /// <para>
+  /// For <see cref="AgcOffGrace"/> after this panel switched AGC off, AutoGain=true is ignored: a hub
+  /// tick built before that POST can be delivered after it, and would otherwise close the popup the
+  /// hold had just opened. AGC turned on by another client inside that window is the cost.
+  /// </para>
+  /// </summary>
+  private void CloseAgcPopupIfStale(RadioStateDto? previous, RadioStateDto? current)
+  {
+    if (!_isAgcPopupOpen)
+    {
+      return;
+    }
+    if (current is null
+        || current.Gain is null
+        || (current.AutoGain && !(_agcOffRequestedAt is { } offAt && Clock.GetUtcNow() - offAt < AgcOffGrace))
+        || (previous is not null && !string.Equals(previous.Band, current.Band, StringComparison.Ordinal)))
+    {
+      CloseAgcPopup();
+    }
+  }
+
+  private async Task OnHubSourceChanged()
+  {
+    // A source change takes the tuner away from under the popup.
+    await InvokeAsync(() =>
+    {
+      if (_isAgcPopupOpen)
+      {
+        CloseAgcPopup();
+        StateHasChanged();
+      }
+    });
   }
 
   private void OpenFrequencyDialog()
@@ -1605,6 +2034,11 @@
   public async ValueTask DisposeAsync()
   {
     HubService.RadioStateChanged -= HandleRadioStateChanged;
+    HubService.SourceChanged -= OnHubSourceChanged;
+    _disposed = true;
+    _agcPressGeneration++;
+    _agcLongPressTimer?.Dispose();
+    _agcIdleTimer?.Dispose();
     _rdsScrollOptionsListener?.Dispose();
     _rdsScrollOptionsListener = null;
     await Task.CompletedTask;
