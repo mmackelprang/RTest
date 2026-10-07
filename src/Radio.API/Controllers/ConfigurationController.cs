@@ -416,9 +416,9 @@ public class ConfigurationController : ControllerBase
   /// <summary>
   /// Section-specific validation. Called after the generic shape checks pass.
   /// Returns a <see cref="BadRequestObjectResult"/> on validation failure, or
-  /// <c>null</c> if the values are acceptable. Today this only enforces the
-  /// radio-section threshold range (PR D #30); add additional sections as
-  /// they accumulate hard-bound fields.
+  /// <c>null</c> if the values are acceptable. Enforces the radio-section
+  /// threshold range (PR D #30) and that the Visualizer display-scale keys are
+  /// numbers; add additional sections as they accumulate hard-bound fields.
   /// </summary>
   private static ActionResult? ValidateSectionValues(string section, IDictionary<string, object> data)
   {
@@ -440,7 +440,62 @@ public class ConfigurationController : ControllerBase
         }
       }
     }
+
+    // Visualizer display-scale keys must be finite numbers. A value that does not parse is not a
+    // display glitch: VisualizerService binds these options once at start-up (IOptions), so it would
+    // stop radio-api from starting. Range sanity (ceiling above floor, curve > 0) is NOT rejected
+    // here — LogSpectrumBands.Sanitize falls back to defaults for those at render time.
+    if (string.Equals(section, VisualizerOptions.SectionName, StringComparison.OrdinalIgnoreCase))
+    {
+      foreach (string key in VisualizerScaleKeys)
+      {
+        object? raw = data.FirstOrDefault(kv => string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
+        if (raw != null && !TryReadFiniteFloat(raw))
+        {
+          return new BadRequestObjectResult(new
+          {
+            error = $"{key} must be a number.",
+            field = key,
+          });
+        }
+      }
+    }
+
     return null;
+  }
+
+  private static readonly string[] VisualizerScaleKeys =
+  [
+    nameof(VisualizerOptions.SpectrumFloorDbfs),
+    nameof(VisualizerOptions.SpectrumCeilingDbfs),
+    nameof(VisualizerOptions.SpectrumCurve),
+    nameof(VisualizerOptions.SpectrumTiltDbPerOctave),
+  ];
+
+  // A finite float from a raw JSON value or boxed CLR value; invariant culture for strings.
+  private static bool TryReadFiniteFloat(object value)
+  {
+    double d;
+    if (value is System.Text.Json.JsonElement el)
+    {
+      if (el.ValueKind == System.Text.Json.JsonValueKind.Number)
+      {
+        return el.TryGetDouble(out d) && double.IsFinite(d);
+      }
+
+      return el.ValueKind == System.Text.Json.JsonValueKind.String
+        && double.TryParse(el.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)
+        && double.IsFinite(d);
+    }
+
+    return value switch
+    {
+      int or long => true,
+      float f => float.IsFinite(f),
+      double dd => double.IsFinite(dd),
+      string s => double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d) && double.IsFinite(d),
+      _ => false,
+    };
   }
 
   /// <summary>

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 using Radio.API.Models;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Metrics;
@@ -20,6 +22,7 @@ public class AudioVisualizationHub : Hub
   private readonly ILogger<AudioVisualizationHub> _logger;
   private readonly IVisualizerService _visualizerService;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly IOptionsMonitor<VisualizerOptions>? _visualizerOptions;
   private static int _connectedClients;
 
   /// <summary>
@@ -34,14 +37,17 @@ public class AudioVisualizationHub : Hub
   /// <param name="logger">The logger instance.</param>
   /// <param name="visualizerService">The visualizer service.</param>
   /// <param name="metricsCollector">Optional metrics collector.</param>
+  /// <param name="visualizerOptions">The spectrum display scale; the defaults apply when absent.</param>
   public AudioVisualizationHub(
     ILogger<AudioVisualizationHub> logger,
     IVisualizerService visualizerService,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    IOptionsMonitor<VisualizerOptions>? visualizerOptions = null)
   {
     _logger = logger;
     _visualizerService = visualizerService;
     _metricsCollector = metricsCollector;
+    _visualizerOptions = visualizerOptions;
   }
 
   /// <summary>
@@ -203,7 +209,8 @@ public class AudioVisualizationHub : Hub
     await base.OnDisconnectedAsync(exception);
   }
 
-  private static SpectrumDataDto MapToSpectrumDto(SpectrumData data) => SpectrumDataDto.FromBins(data);
+  private SpectrumDataDto MapToSpectrumDto(SpectrumData data) =>
+    SpectrumDataDto.FromBins(data, SpectrumDataDto.ReadOptions(_visualizerOptions, _logger));
 
   private static LevelDataDto MapToLevelDto(LevelData data)
   {

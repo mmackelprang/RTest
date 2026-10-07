@@ -69,4 +69,35 @@ public class VisualizerOptions
   /// Default is 0.5.
   /// </summary>
   public float SpectrumSmoothing { get; set; } = 0.5f;
+
+  /// <summary>
+  /// Gets or sets the tilted level, in dBFS, that the spectrum and ring draw as an empty bar.
+  /// Default is -65. Read live (IOptionsMonitor), so a config change applies without a restart.
+  /// </summary>
+  /// <remarks>
+  /// With <see cref="SpectrumCeilingDbfs"/> this sets the window of levels that fills a bar. A window
+  /// that is too wide makes the display flat — 70 dB (-80..-10) put most music at half height and a
+  /// 6 dB swing moved a bar ~8%; measured on the box 2026-10-06, 40 dB with
+  /// <see cref="SpectrumCurve"/> 1.5 restored the old contrast and colour spread.
+  /// </remarks>
+  public float SpectrumFloorDbfs { get; set; } = -65f;
+
+  /// <summary>
+  /// Gets or sets the tilted level, in dBFS, that draws as a full bar. Default is -25. Must be above
+  /// <see cref="SpectrumFloorDbfs"/>; otherwise both fall back to their defaults.
+  /// </summary>
+  public float SpectrumCeilingDbfs { get; set; } = -25f;
+
+  /// <summary>
+  /// Gets or sets the exponent applied to the 0..1 bar height after the dB window. Default is 1.5.
+  /// Above 1 it shortens the quieter bars more than the loud ones, which adds contrast (and colour
+  /// variety, since bar colour follows height); 1 is the plain dB scale. Must be positive.
+  /// </summary>
+  public float SpectrumCurve { get; set; } = 1.5f;
+
+  /// <summary>
+  /// Gets or sets the gain, in dB per octave about 1 kHz, that compensates music's natural fall-off
+  /// with frequency. Default is 3. 0 disables it.
+  /// </summary>
+  public float SpectrumTiltDbPerOctave { get; set; } = 3f;
 }

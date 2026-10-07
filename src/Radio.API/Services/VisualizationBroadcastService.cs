@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 using Radio.API.Hubs;
+using Radio.Core.Configuration;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 
@@ -17,6 +19,7 @@ public class VisualizationBroadcastService : BackgroundService
   private readonly ILogger<VisualizationBroadcastService> _logger;
   private readonly IHubContext<AudioVisualizationHub> _hubContext;
   private readonly IVisualizerService _visualizerService;
+  private readonly IOptionsMonitor<VisualizerOptions>? _visualizerOptions;
 
   /// <summary>
   /// Gets or sets the target frame rate for broadcasts (default: 20 fps).
@@ -35,11 +38,13 @@ public class VisualizationBroadcastService : BackgroundService
   public VisualizationBroadcastService(
     ILogger<VisualizationBroadcastService> logger,
     IHubContext<AudioVisualizationHub> hubContext,
-    IVisualizerService visualizerService)
+    IVisualizerService visualizerService,
+    IOptionsMonitor<VisualizerOptions>? visualizerOptions = null)
   {
     _logger = logger;
     _hubContext = hubContext;
     _visualizerService = visualizerService;
+    _visualizerOptions = visualizerOptions;
   }
 
   /// <summary>
@@ -130,7 +135,10 @@ public class VisualizationBroadcastService : BackgroundService
       .SendAsync("ReceiveWaveform", waveformDto, cancellationToken);
   }
 
-  private static SpectrumDataDto MapToSpectrumDto(SpectrumData data) => SpectrumDataDto.FromBins(data);
+  // Options read per frame, so a live config change to the display scale applies on the next frame.
+  // ReadOptions never throws: an unparseable value must not stop all three streams (see its remarks).
+  private SpectrumDataDto MapToSpectrumDto(SpectrumData data) =>
+    SpectrumDataDto.FromBins(data, SpectrumDataDto.ReadOptions(_visualizerOptions, _logger));
 
   private static LevelDataDto MapToLevelDto(LevelData data)
   {

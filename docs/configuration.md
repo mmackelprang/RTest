@@ -663,6 +663,19 @@ deployed `appsettings.Production.json` or config store. It is still loaded into 
 | `MinFrequency` | `float` | `20` | Minimum frequency to display in spectrum analysis (Hz) |
 | `MaxFrequency` | `float` | `20000` | Maximum frequency to display in spectrum analysis (Hz) |
 | `SpectrumSmoothing` | `float` | `0.5` | Spectrum smoothing factor (0.0 to 1.0). Higher values provide smoother spectrum display. |
+| `SpectrumFloorDbfs` | `float` | `-65` | Tilted level (dBFS) that the spectrum/ring draw as an empty bar. Applies live, no restart. |
+| `SpectrumCeilingDbfs` | `float` | `-25` | Tilted level (dBFS) that draws as a full bar. Must be above the floor, else both revert to defaults. Narrower window = more motion and colour. |
+| `SpectrumCurve` | `float` | `1.5` | Exponent on bar height after the dB window. >1 adds contrast (shortens quieter bars); 1 = plain dB. Must be > 0. |
+| `SpectrumTiltDbPerOctave` | `float` | `3` | Gain per octave about 1 kHz compensating music's fall-off with frequency (keeps bass from dominating). 0 disables. |
+
+`MinFrequency`/`MaxFrequency` are not used by the spectrum/ring bands, which span a fixed 40 Hz – 16 kHz.
+
+The four `Spectrum*` values are tuned through the config store (e.g. `POST /api/configuration/Visualizer`)
+and apply on the next frame; the Settings UI does not expose them. `POST /api/configuration/Visualizer`
+rejects a value that is not a finite number (400). If one arrives by another route, the spectrum stream
+falls back to its default scale (one Warning logged) instead of stopping, but radio-api binds these options
+at start-up, so a non-numeric value would still stop it starting — fix such a value before restarting.
+Out-of-range combinations (ceiling not above floor, curve ≤ 0) are accepted and fall back to defaults.
 
 ---
 
