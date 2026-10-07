@@ -863,9 +863,7 @@
     // options before any state hydration so the very first RT chunk goes
     // into a correctly-sized buffer with the configured separator.
     _rdsScrollOptions = RdsScrollOptionsMonitor.CurrentValue;
-    _rdsBuffer = new RdsAccumulatingScrollBuffer(
-      _rdsScrollOptions.RtBufferMaxChars,
-      _rdsScrollOptions.RtChunkSeparator);
+    _rdsBuffer = CreateRdsBuffer(_rdsScrollOptions);
 
     // Listen for config-bridge change tokens (SQLite store writes) so the
     // user's UI changes take effect without a page reload.
@@ -882,11 +880,12 @@
     _rdsScrollOptionsListener = RdsScrollOptionsMonitor.OnChange(opts => _ = InvokeAsync(() =>
     {
       bool reshape = opts.RtBufferMaxChars != _rdsScrollOptions.RtBufferMaxChars ||
+                     opts.RtHistorySeconds != _rdsScrollOptions.RtHistorySeconds ||
                      !string.Equals(opts.RtChunkSeparator, _rdsScrollOptions.RtChunkSeparator, StringComparison.Ordinal);
       _rdsScrollOptions = opts;
       if (reshape)
       {
-        _rdsBuffer = new RdsAccumulatingScrollBuffer(opts.RtBufferMaxChars, opts.RtChunkSeparator);
+        _rdsBuffer = CreateRdsBuffer(opts);
         if (_radioState != null)
         {
           _rdsBuffer.ResetOnTuneChange(_radioState.Band, _radioState.Frequency, _radioState.RdsPi);
@@ -1014,9 +1013,18 @@
         _rdsBuffer.AppendChunk(dto.RdsRadioText);
       }
 
+      // Expiry is time-driven: a station holding one message sends nothing new, so the replaced
+      // messages are aged out here, on every broadcast (telemetry arrives ~2/s).
+      _rdsBuffer.ExpireStale();
+
       StateHasChanged();
     });
   }
+
+  // The buffer's shape (cap, separator) and how long a replaced RadioText message stays.
+  private static RdsAccumulatingScrollBuffer CreateRdsBuffer(RdsScrollOptions o) =>
+    new(o.RtBufferMaxChars, o.RtChunkSeparator,
+      o.RtHistorySeconds < 0 ? null : TimeSpan.FromSeconds(o.RtHistorySeconds));
 
   private async Task FrequencyUpAsync()
   {

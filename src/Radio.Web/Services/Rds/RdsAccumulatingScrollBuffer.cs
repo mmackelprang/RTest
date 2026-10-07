@@ -34,6 +34,13 @@ namespace Radio.Web.Services.Rds;
 /// reset because the station hasn't actually changed.
 /// </para>
 /// <para>
+/// History expiry: a chunk the station has replaced stays only for <see cref="History"/>, then
+/// <see cref="ExpireStale"/> evicts it from the front. The newest chunk never expires. Without this
+/// the cap was the only eviction, and a station that holds one RadioText per song (92.3 WKRR,
+/// measured 2026-10-07) left the ticker trailing ~5–6 songs behind. Chunks are replaced in arrival
+/// order, so stale chunks are always at the front and front-only eviction removes all of them.
+/// </para>
+/// <para>
 /// Thread-affinity: no internal locking. The owning component must mutate the
 /// buffer only on its renderer (inside <c>InvokeAsync</c>); RadioControlPanel's
 /// SignalR handler and its options listener both do.
@@ -50,6 +57,9 @@ public sealed class RdsAccumulatingScrollBuffer
 
   // Whole chunks in arrival order; Text is their separator-join, cached.
   private readonly List<string> _chunks = new();
+  // Parallel to _chunks: when each chunk stopped being the newest (null for the newest).
+  private readonly List<DateTimeOffset?> _replacedAt = new();
+  private readonly TimeProvider _time;
   private string _cachedText = string.Empty;
 
   // Dedup / replacement tracker — the most recent chunk AS APPENDED (before
@@ -79,11 +89,21 @@ public sealed class RdsAccumulatingScrollBuffer
   /// a single space so the buffer never welds two chunks into one unreadable
   /// run.
   /// </param>
-  public RdsAccumulatingScrollBuffer(int maxChars, string separator)
+  /// <param name="history">
+  /// How long a replaced chunk stays (see <see cref="ExpireStale"/>); null keeps history until the
+  /// cap evicts it. Negative is treated as null.
+  /// </param>
+  /// <param name="timeProvider">Clock for expiry; defaults to <see cref="TimeProvider.System"/>.</param>
+  public RdsAccumulatingScrollBuffer(int maxChars, string separator, TimeSpan? history = null, TimeProvider? timeProvider = null)
   {
     MaxChars = Math.Max(8, maxChars);
     Separator = string.IsNullOrEmpty(separator) ? " " : separator;
+    History = history is { } h && h >= TimeSpan.Zero ? h : null;
+    _time = timeProvider ?? TimeProvider.System;
   }
+
+  /// <summary>How long a replaced chunk stays in the buffer; null = until the cap evicts it.</summary>
+  public TimeSpan? History { get; }
 
   /// <summary>Hard cap on buffer length, in chars.</summary>
   public int MaxChars { get; }
@@ -150,10 +170,34 @@ public sealed class RdsAccumulatingScrollBuffer
       }
     }
 
+    if (_replacedAt.Count > 0)
+    {
+      _replacedAt[^1] = _time.GetUtcNow();
+    }
+
     _chunks.Add(trimmed);
+    _replacedAt.Add(null);
     _lastAppendedChunk = trimmed;
     EnforceCap();
+    RemoveExpired();
     RebuildText();
+  }
+
+  /// <summary>
+  /// Evicts chunks the station replaced more than <see cref="History"/> ago. The newest chunk is never
+  /// evicted. Call it on a regular tick (RadioControlPanel does, on every radio-state broadcast), since
+  /// expiry is time-driven and nothing else arrives when a station holds one message.
+  /// </summary>
+  /// <returns>True when anything was evicted (the text changed).</returns>
+  public bool ExpireStale()
+  {
+    if (!RemoveExpired())
+    {
+      return false;
+    }
+
+    RebuildText();
+    return true;
   }
 
   /// <summary>
@@ -191,6 +235,7 @@ public sealed class RdsAccumulatingScrollBuffer
     if (bandChanged || freqChanged || piChanged || piNowAcquired)
     {
       _chunks.Clear();
+      _replacedAt.Clear();
       _cachedText = string.Empty;
       _lastAppendedChunk = null;
     }
@@ -213,6 +258,7 @@ public sealed class RdsAccumulatingScrollBuffer
   public void Clear()
   {
     _chunks.Clear();
+    _replacedAt.Clear();
     _cachedText = string.Empty;
     _lastAppendedChunk = null;
     _hasSeenStation = false;
@@ -271,12 +317,33 @@ public sealed class RdsAccumulatingScrollBuffer
     while (_chunks.Count > 1 && JoinedLength() > MaxChars)
     {
       _chunks.RemoveAt(0);
+      _replacedAt.RemoveAt(0);
     }
 
     if (_chunks.Count == 1 && _chunks[0].Length > MaxChars)
     {
       _chunks[0] = TakeLastCharsSafe(_chunks[0], MaxChars);
     }
+  }
+
+  // Front-only: chunks are replaced in arrival order, so every stale chunk precedes every fresh one.
+  private bool RemoveExpired()
+  {
+    if (History is not { } history)
+    {
+      return false;
+    }
+
+    var cutoff = _time.GetUtcNow() - history;
+    var removed = false;
+    while (_chunks.Count > 1 && _replacedAt[0] is { } replaced && replaced <= cutoff)
+    {
+      _chunks.RemoveAt(0);
+      _replacedAt.RemoveAt(0);
+      removed = true;
+    }
+
+    return removed;
   }
 
   private int JoinedLength()

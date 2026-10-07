@@ -33,11 +33,11 @@ public class RdsScrollOptions
   public const string SectionName = "Radio";
 
   /// <summary>
-  /// Maximum buffer length in characters. Once exceeded, the oldest characters
-  /// are dropped from the front of the buffer on whole-char boundaries until
-  /// the new total is within the cap. Default 256 ≈ 4 full Group 2A RT
-  /// messages, giving ~2 minutes of rolling history on a typical RDS-rich
-  /// station while keeping the scroll cycle to a comfortable ~17 s at 40 px/s.
+  /// Maximum buffer length in characters. Once exceeded, the oldest whole
+  /// messages are dropped from the front until the total is within the cap.
+  /// Default 256 ≈ 4 full Group 2A RT messages, keeping the scroll cycle to a
+  /// comfortable ~17 s at 40 px/s. How long a replaced message stays is
+  /// <see cref="RtHistorySeconds"/>; the cap only bounds the length.
   /// </summary>
   public int RtBufferMaxChars { get; set; } = 256;
 
@@ -56,4 +56,17 @@ public class RdsScrollOptions
   /// (\n / \r / \t) that would break the single-line marquee.
   /// </summary>
   public string RtChunkSeparator { get; set; } = " • ";
+
+  /// <summary>
+  /// How long, in seconds, a RadioText message stays in the ticker after the station replaces it.
+  /// The message currently being sent always stays. Default 30. 0 shows only the current message;
+  /// a negative value keeps history until <see cref="RtBufferMaxChars"/> evicts it (the old
+  /// behaviour).
+  /// </summary>
+  /// <remarks>
+  /// Owner report 2026-10-07: the ticker carried the last three songs' artists. Stations such as
+  /// 92.3 WKRR send one RadioText per song and hold it for the whole song (measured: unchanged for
+  /// 2+ minutes), so a cap-only buffer of 256 chars trailed ~5–6 songs behind.
+  /// </remarks>
+  public int RtHistorySeconds { get; set; } = 30;
 }

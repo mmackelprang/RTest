@@ -24,6 +24,111 @@ public class RdsAccumulatingScrollBufferTests
 {
   private const string DefaultSeparator = " • ";
 
+  // ─── History expiry (owner report 2026-10-07: ticker trailed three songs behind) ──────────
+
+  /// <summary>
+  /// A station that holds one RadioText per song: after the song changes, the previous song's text
+  /// stays for the history window, then goes. The current message stays however long it is held.
+  /// </summary>
+  [Fact]
+  public void ReplacedMessage_Expires_AfterTheHistoryWindow_CurrentStays()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, TimeSpan.FromSeconds(30), time);
+
+    buffer.AppendChunk("Robert Palmer - Addicted to Love");
+    time.Advance(TimeSpan.FromMinutes(4)); // the whole song: still the current message
+    buffer.ExpireStale().Should().BeFalse();
+    buffer.Text.Should().Be("Robert Palmer - Addicted to Love");
+
+    buffer.AppendChunk("Bryan Adams - Run to You");
+    time.Advance(TimeSpan.FromSeconds(29));
+    buffer.ExpireStale().Should().BeFalse();
+    buffer.Text.Should().Be("Robert Palmer - Addicted to Love • Bryan Adams - Run to You");
+
+    time.Advance(TimeSpan.FromSeconds(1));
+    buffer.ExpireStale().Should().BeTrue();
+    buffer.Text.Should().Be("Bryan Adams - Run to You");
+  }
+
+  [Fact]
+  public void ThreeSongs_OnlyTheCurrentRemains_OnceTheirWindowsPass()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, TimeSpan.FromSeconds(30), time);
+
+    foreach (var song in new[] { "Robert Palmer - Addicted to Love", "Bryan Adams - Run to You", "Bad Company - Shooting Star" })
+    {
+      buffer.AppendChunk(song);
+      time.Advance(TimeSpan.FromMinutes(4));
+      buffer.ExpireStale();
+    }
+
+    buffer.Text.Should().Be("Bad Company - Shooting Star");
+    buffer.ChunkCount.Should().Be(1);
+  }
+
+  [Fact]
+  public void ZeroHistory_ShowsOnlyTheCurrentMessage()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, TimeSpan.Zero, time);
+
+    buffer.AppendChunk("Station slogan");
+    buffer.AppendChunk("Artist - Title");
+
+    buffer.Text.Should().Be("Artist - Title");
+  }
+
+  [Fact]
+  public void NoHistory_KeepsTheOldCapOnlyBehaviour()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, history: null, timeProvider: time);
+
+    buffer.AppendChunk("First");
+    buffer.AppendChunk("Second");
+    time.Advance(TimeSpan.FromHours(1));
+
+    buffer.ExpireStale().Should().BeFalse();
+    buffer.Text.Should().Be("First • Second");
+  }
+
+  /// <summary>
+  /// A partial message completed in place is still the current message: replace-in-place must not
+  /// start its expiry clock.
+  /// </summary>
+  [Fact]
+  public void ExtendingTheCurrentMessage_DoesNotStartItsExpiry()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, TimeSpan.FromSeconds(30), time);
+
+    buffer.AppendChunk("Bad Company - Shoo");
+    buffer.AppendChunk("Bad Company - Shooting Star");
+    time.Advance(TimeSpan.FromMinutes(5));
+
+    buffer.ExpireStale().Should().BeFalse();
+    buffer.Text.Should().Be("Bad Company - Shooting Star");
+  }
+
+  [Fact]
+  public void StationChange_ClearsTheExpiryState_WithTheText()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator, TimeSpan.FromSeconds(30), time);
+    buffer.ResetOnTuneChange("FM", 92_300_000, 0x1234);
+    buffer.AppendChunk("Old station A");
+    buffer.AppendChunk("Old station B");
+
+    buffer.ResetOnTuneChange("FM", 95_300_000, 0x5678);
+    buffer.AppendChunk("New station");
+    time.Advance(TimeSpan.FromMinutes(1));
+
+    buffer.ExpireStale().Should().BeFalse();
+    buffer.Text.Should().Be("New station");
+  }
+
   // ─── Construction + defaults ─────────────────────────────────────────────
 
   [Fact]
