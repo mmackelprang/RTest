@@ -8,14 +8,14 @@ namespace Radio.API.Models;
 /// </summary>
 /// <remarks>
 /// Not the raw FFT bins. <see cref="FromBins"/> groups them with <see cref="LogSpectrumBands"/>
-/// (128 bands, 40 Hz – 16 kHz, dB-scaled), which is what the spectrum and ring visualizers draw —
+/// (128 bands, 40 Hz – 16 kHz, tilted absolute dBFS), which is what the spectrum and ring visualizers draw —
 /// and is ~2.5 KB of JSON per frame where the raw 1024 bins plus 1024 frequencies were ~20–25 KB.
 /// </remarks>
 public class SpectrumDataDto
 {
   /// <summary>
-  /// Gets or sets the display value of each band, 0.0–1.0, dB-scaled relative to the analyzer's
-  /// normalized full scale (1.0).
+  /// Gets or sets the display value of each band, 0.0–1.0: absolute dBFS with a +3 dB/octave tilt,
+  /// mapped from −80 dBFS (0) to −10 dBFS (1). See <see cref="LogSpectrumBands"/>.
   /// </summary>
   public float[] Magnitudes { get; set; } = [];
 

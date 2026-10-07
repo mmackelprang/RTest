@@ -16,6 +16,7 @@ internal sealed class SpectrumAnalyzer
   private readonly float[] _magnitudes;
   private readonly float[] _smoothedMagnitudes;
   private readonly float[] _windowFunction;
+  private readonly float _windowSum;
   private readonly bool _applyWindow;
   private readonly float _smoothingFactor;
   private int _inputPosition;
@@ -67,6 +68,8 @@ internal sealed class SpectrumAnalyzer
     {
       _windowFunction[i] = 0.5f * (1f - MathF.Cos(2f * MathF.PI * i / (fftSize - 1)));
     }
+
+    _windowSum = applyWindow ? _windowFunction.Sum() : fftSize;
   }
 
   /// <summary>
@@ -103,9 +106,16 @@ internal sealed class SpectrumAnalyzer
   }
 
   /// <summary>
-  /// Computes the FFT and returns magnitude values.
+  /// Computes the FFT and returns each bin's absolute amplitude.
   /// </summary>
-  /// <returns>Array of magnitude values (0.0 to 1.0) for each frequency bin.</returns>
+  /// <remarks>
+  /// Absolute, not normalized per frame: a full-scale sine reads 1.0 at its bin, whatever else is in
+  /// the frame. This used to divide every frame by its own loudest bin, which pinned the loudest bin at
+  /// 1.0 and so drew broadband noise (radio static) as a full-height wall, and hid how loud anything
+  /// actually was. The visualization tap runs before master volume (SoundFlow applies modifiers before
+  /// Volume), so these levels do not move with the volume knob.
+  /// </remarks>
+  /// <returns>Array of amplitude values (0.0 to 1.0, full-scale sine = 1.0) for each frequency bin.</returns>
   public float[] GetMagnitudes()
   {
     lock (_lock)
@@ -127,24 +137,11 @@ internal sealed class SpectrumAnalyzer
       // Perform FFT in place
       FFT(_fftBuffer);
 
-      // Calculate magnitudes (normalized)
-      var maxMagnitude = 0f;
+      // Amplitude per bin: |X| × 2 / Σw. Dividing by the window's sum (its coherent gain), not by N,
+      // is what makes a full-scale sine read 1.0 with the Hann window as well as without it.
       for (var i = 0; i < _magnitudes.Length; i++)
       {
-        _magnitudes[i] = (float)_fftBuffer[i].Magnitude / _fftSize * 2;
-        if (_magnitudes[i] > maxMagnitude)
-        {
-          maxMagnitude = _magnitudes[i];
-        }
-      }
-
-      // Normalize to 0-1 range if there's audio
-      if (maxMagnitude > 0.001f)
-      {
-        for (var i = 0; i < _magnitudes.Length; i++)
-        {
-          _magnitudes[i] = Math.Clamp(_magnitudes[i] / maxMagnitude, 0f, 1f);
-        }
+        _magnitudes[i] = Math.Clamp((float)_fftBuffer[i].Magnitude * 2f / _windowSum, 0f, 1f);
       }
 
       // Apply smoothing
