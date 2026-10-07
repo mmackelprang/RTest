@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Radzen;
 using Radio.Web.Components.Shared;
 using Radio.Web.Models;
@@ -240,42 +241,16 @@ public class RadioControlPanelTests : TestContext
     Assert.Equal(20, litCount);
   }
 
-  [Fact]
-  public void SignalMeter_ShowsClipPill_WhenClipTrue()
-  {
-    var clipState = BuildState(signalStrength: 100, clip: true, rssiDbu: 0.0);
-    var cut = RenderPanel(clipState);
-
-    var pills = cut.FindAll(".rcp-clip-pill.is-on");
-    Assert.Single(pills);
-    Assert.Equal("CLIP", pills[0].TextContent.Trim());
-  }
-
-  [Fact]
-  public void SignalMeter_HidesClipPill_WhenClipFalse()
-  {
-    var state = BuildState(signalStrength: 70, clip: false, rssiDbu: -18.0);
-    var cut = RenderPanel(state);
-
-    // UI-27: the pill stays in the DOM and is hidden by the stylesheet — see
-    // Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn for the half bUnit cannot see.
-    Assert.Single(cut.FindAll(".rcp-clip-pill"));
-    Assert.Empty(cut.FindAll(".rcp-clip-pill.is-on"));
-  }
-
   [Theory]
   [InlineData(false, false)]
   [InlineData(true, false)]
   [InlineData(false, true)]
   [InlineData(true, true)]
-  public void MeterHeader_HasTheSameElements_WithAndWithoutClip(bool clip, bool scanning)
+  public void MeterHeader_HoldsNoClip_AndTheSameElements_WithAndWithoutClip(bool clip, bool scanning)
   {
-    // UI-27, owner: "when the CLIP tag appears above the signal strength bar, it causes the whole
-    // screen to shift by a couple of pixels". Inserting the pill made the header 3 px taller
-    // (measured: 16.5 → 19.5 px) and moved everything below the meter. Now CLIP changes one class
-    // and nothing else: the header holds the same elements in the same order either way, so CLIP
-    // cannot add a box to the header's layout or take one away. (One render per bUnit context,
-    // hence one expected shape per scan state rather than a with/without comparison in one test.)
+    // UI-27 made CLIP change no box in the meter header; the status-bar redesign (2026-10-06) moved
+    // CLIP out of the header altogether, into the status bar's lamp slot. The header keeps the RSSI
+    // label, the scan chip and the dBu readout, and CLIP cannot change its shape.
     var state = BuildState(signalStrength: 100, clip: clip, rssiDbu: -20.0, scanStopThreshold: -10.0) with
     {
       IsScanning = scanning,
@@ -284,37 +259,12 @@ public class RadioControlPanelTests : TestContext
     var cut = RenderPanel(state);
     var header = cut.Find(".rcp-meter-header");
     var shape = string.Join("|", header.QuerySelectorAll("*").Select(e =>
-      $"{e.TagName}.{string.Join(".", e.ClassList.Where(c => c != "is-on").OrderBy(c => c, StringComparer.Ordinal))}"));
+      $"{e.TagName}.{string.Join(".", e.ClassList.OrderBy(c => c, StringComparer.Ordinal))}"));
 
     var expected = (scanning ? "SPAN.|SPAN.rcp-scanning|" : "SPAN.|")
-      + "SPAN.rcp-meter-readout|SPAN.rcp-clip-pill|SPAN.rcp-meter-dbu";
+      + "SPAN.rcp-meter-readout|SPAN.rcp-meter-dbu";
     shape.Should().Be(expected);
-    header.QuerySelector(".rcp-clip-pill")!.ClassList.Contains("is-on").Should().Be(clip);
-  }
-
-  [Fact]
-  public void Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn()
-  {
-    // bUnit computes no styles, so the geometry half of UI-27 is pinned in the stylesheet: the pill
-    // is out of flow (absolute, against the readout), hidden by visibility rather than display —
-    // display:none would take its box away and put it back, which is the shift — and shown only by
-    // .is-on. Measured in Chromium at 1920×720: header 16.5 px and every rect below it identical with
-    // CLIP off, CLIP on, scanning and both.
-    var css = File.ReadAllText(LocateDesignSystemCss());
-    var pill = Regex.Match(css, @"\n\.rcp-clip-pill\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
-    var on = Regex.Match(css, @"\n\.rcp-clip-pill\.is-on\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
-    var readout = Regex.Match(css, @"\n\.rcp-meter-readout\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
-
-    pill.Should().Contain("position: absolute");
-    // Where it sits once out of flow: left of the dBu readout and centred on it. Without these it
-    // would land on top of the readout.
-    pill.Should().Contain("right: calc(100% + 6px)");
-    pill.Should().Contain("top: 50%");
-    pill.Should().Contain("transform: translateY(-50%)");
-    pill.Should().Contain("visibility: hidden");
-    pill.Should().NotContain("display: none");
-    on.Should().Contain("visibility: visible");
-    readout.Should().Contain("position: relative", "the pill is placed against the readout, not some outer box");
+    header.TextContent.Should().NotContain("CLIP");
   }
 
   private static string LocateDesignSystemCss()
@@ -355,85 +305,438 @@ public class RadioControlPanelTests : TestContext
     Assert.Equal(new[] { "−60", "−30", "−12", "0 dBu" }, labels);
   }
 
-  [Fact]
-  public void AgcStrip_TwoCellGrid_BothPopulated_WhenAgcOn()
-  {
-    var state = BuildState(autoGain: true, appliedGain: 28.0, gain: 0);
-    var cut = RenderPanel(state);
-
-    var grid = cut.Find(".rcp-sdr-grid");
-    var directChildren = grid.Children.ToArray();
-    Assert.Equal(2, directChildren.Length);
-
-    // Left cell — AGC button with AUTO chip
-    var agcChip = cut.Find(".rcp-agc-chip-auto");
-    Assert.Equal("AUTO", agcChip.TextContent.Trim());
-    Assert.Empty(cut.FindAll(".rcp-agc-chip-off"));
-
-    // Right cell — "Tuner is choosing" hint + numeric gain
-    var hint = cut.Find(".rcp-gain-auto-hint");
-    Assert.Equal("Tuner is choosing", hint.TextContent.Trim());
-    var value = cut.Find(".rcp-gain-auto-value");
-    Assert.Contains("28.0", value.TextContent);
-    Assert.Contains("dB", value.TextContent);
-  }
-
-  [Fact]
-  public void AgcStrip_AgcOff_ShowsSlider_AndPill_AndRangeHint()
-  {
-    var state = BuildState(autoGain: false, appliedGain: 28.0, gain: 28);
-    var cut = RenderPanel(state);
-
-    // Pill stays a fixed-width amber chip with "28 dB"
-    var pill = cut.Find(".rcp-gain-pill");
-    Assert.Contains("28", pill.TextContent);
-    Assert.Contains("dB", pill.TextContent);
-
-    // Range hint visible
-    var hint = cut.Find(".rcp-gain-range-hint");
-    Assert.Contains("0", hint.TextContent);
-    Assert.Contains("50", hint.TextContent);
-
-    // Slider present (Radzen renders an input + slider DOM)
-    Assert.NotEmpty(cut.FindAll(".rz-slider"));
-
-    // AGC chip in OFF state
-    var offChip = cut.Find(".rcp-agc-chip-off");
-    Assert.Equal("OFF", offChip.TextContent.Trim());
-    Assert.Empty(cut.FindAll(".rcp-agc-chip-auto"));
-  }
-
-  // ─── Task #15 PR B (handoff item #26): AGC cell click toggles AGC ─────────
+  // ─── Status bar: STEP | STEREO CLIP | AGC (main-page status-bar redesign, 2026-10-06) ────────
   //
-  // The whole left cell of the SDR strip is a button; tapping it must fire
-  // RadioApi.SetAutoGainAsync(!current). PR 1 of Arc 2 introduced this two-cell
-  // grid; the unit test that pinned the click handler was deferred to PR B.
+  // One 44 px row between the tuner column and the preset bar. It replaced the freq well's STEP /
+  // STEREO row, the meter header's CLIP pill and the AGC two-cell grid at the bottom of the tuner.
 
-  [Fact]
-  public void AgcStrip_TapLeftCell_TogglesAgc()
+  private (IRenderedComponent<RadioControlPanel> Cut, RadioStateStubHandler Handler, FakeTimeProvider Clock) RenderStatusBar(
+    RadioStateDto state, IEnumerable<Radio.Core.Models.RadioBandModel>? bands = null)
   {
-    // AGC currently ON — tapping the cell must POST /api/radio/gain/auto with
-    // {"enabled": false} via RadioApi.SetAutoGainAsync.
-    var state = BuildState(autoGain: true, appliedGain: 18.0, gain: 0);
-    var handler = UseRadioState(state);
+    var handler = UseRadioState(state, bands: bands);
     var cut = RenderComponent<RadioControlPanel>();
     cut.WaitForAssertion(() =>
     {
       Assert.DoesNotContain("skeleton", cut.Markup, StringComparison.OrdinalIgnoreCase);
     }, timeout: TimeSpan.FromSeconds(2));
+    var clock = new FakeTimeProvider();
+    cut.Instance.Clock = clock;
+    return (cut, handler, clock);
+  }
 
-    cut.Find(".rcp-agc-cell").Click();
+  private static int Posts(RadioStateStubHandler handler, string path) =>
+    handler.RecordedCalls.ToList().Count(c => c.Method == "POST" && c.Path == path);
 
-    // Wait for the async POST to complete and land in the recorded-calls list.
+  private static List<string?> PostBodies(RadioStateStubHandler handler, string path) =>
+    handler.RecordedCalls.ToList().Where(c => c.Method == "POST" && c.Path == path).Select(c => c.Body).ToList();
+
+  private static void PressAgc(IRenderedComponent<RadioControlPanel> cut) =>
+    cut.Find(".rcp-sb-agc").PointerDown(new PointerEventArgs { Button = 0 });
+
+  private static readonly TimeSpan LongPress =
+    TimeSpan.FromMilliseconds(Radio.Core.Configuration.EncoderInteractionTimings.LongPressThresholdMs);
+
+  /// <summary>Holds the AGC chip past the threshold and waits for the popup.</summary>
+  private static void OpenPopupByHolding(IRenderedComponent<RadioControlPanel> cut, FakeTimeProvider clock)
+  {
+    PressAgc(cut);
+    clock.Advance(LongPress);
+    cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".rcp-agc-popup")), TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void StatusBar_SitsBetweenTheTunerColumnAndThePresetBar_OutsideTheTuner()
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(gain: 20));
+
+    var children = cut.Find(".rcp-root").Children.ToList();
+    var tuner = children.FindIndex(e => e.ClassList.Contains("rcp-tuner"));
+    var host = children.FindIndex(e => e.ClassList.Contains("rcp-status-host"));
+    var presets = children.FindIndex(e => e.ClassList.Contains("rcp-bar"));
+    tuner.Should().BeGreaterThanOrEqualTo(0);
+    host.Should().Be(tuner + 1, "the bar is the row right after the tuner column");
+    presets.Should().BeGreaterThan(host, "the preset bar stays below it");
+    cut.FindAll(".rcp-tuner .rcp-status-bar").Should().BeEmpty(
+      "inside .rcp-tuner the bar would be the row the column clips under a squeeze");
+  }
+
+  [Fact]
+  public void StatusBar_HasStepLampsAgc_InThatOrder()
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(gain: 20));
+
+    var slots = cut.Find(".rcp-status-bar").Children.Select(c => c.ClassList.First()).ToArray();
+    slots.Should().Equal("rcp-sb-step", "rcp-sb-lamps", "rcp-sb-agc");
+  }
+
+  [Fact]
+  public void OldIndicatorHomes_AreEmpty_ButTheDbuReadoutStays()
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(clip: true, gain: 20) with { IsStereo = true });
+
+    cut.FindAll(".rcp-freq-indicators").Should().BeEmpty();
+    cut.FindAll(".rcp-step-label").Should().BeEmpty();
+    cut.FindAll(".rcp-stereo-indicator").Should().BeEmpty();
+    cut.FindAll(".rcp-clip-pill").Should().BeEmpty();
+    cut.FindAll(".rcp-sdr-grid").Should().BeEmpty();
+    cut.FindAll(".rcp-agc-cell").Should().BeEmpty();
+    cut.Find(".rcp-freq-well").TextContent.Should().NotContain("STEP").And.NotContain("STEREO");
+    cut.Find(".rcp-meter-header .rcp-meter-dbu").TextContent.Should().Contain("dBu");
+  }
+
+  [Fact]
+  public void StepChip_ShowsTheStep_AndATapCyclesIt()
+  {
+    var (cut, handler, _) = RenderStatusBar(BuildState(gain: 20), bands: new[] { BuildFmBand() });
+
+    var step = cut.Find(".rcp-sb-step");
+    step.TextContent.Should().Contain("STEP").And.Contain("100 kHz");
+
+    step.Click();
+
     cut.WaitForAssertion(() =>
     {
-      var call = handler.RecordedCalls
-        .FirstOrDefault(c => c.Method == "POST" && c.Path == "/api/radio/gain/auto");
-      call.Path.Should().Be("/api/radio/gain/auto",
-        "the AGC cell click must POST to the auto-gain endpoint");
-      call.Body.Should().Contain("\"enabled\":false",
-        "current AGC=true must toggle to enabled:false");
-    }, timeout: TimeSpan.FromSeconds(2));
+      var body = PostBodies(handler, "/api/radio/step").Should().ContainSingle().Subject;
+      body.Should().Contain("200000", "FM's allowed steps are 50/100/200 kHz, so 100 kHz cycles to 200 kHz");
+    }, TimeSpan.FromSeconds(2));
+  }
+
+  [Theory]
+  [InlineData("FM", true, false, "STEREO", true)]
+  [InlineData("FM", false, false, "STEREO", false)]
+  [InlineData("AM", false, true, "MONO", false)]
+  [InlineData("AM", true, true, "MONO", false)]
+  public void Lamps_AreFixedSlots_LitOnlyWhenActive(string band, bool stereo, bool clip, string stereoText, bool stereoLit)
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(clip: clip, band: band, gain: 20) with { IsStereo = stereo });
+
+    var lamps = cut.Find(".rcp-sb-lamps").Children.ToArray();
+    lamps.Should().HaveCount(2, "both lamps always render, so a state change moves nothing");
+    lamps[0].TextContent.Trim().Should().Be(stereoText);
+    lamps[0].ClassList.Contains("rcp-stereo-on").Should().Be(stereoLit);
+    lamps[1].TextContent.Trim().Should().Be("CLIP");
+    lamps[1].ClassList.Contains("is-on").Should().Be(clip);
+  }
+
+  [Fact]
+  public void AgcChip_Auto_ShowsAutoAndTheAppliedGain()
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(autoGain: true, appliedGain: 28.0, gain: 0));
+
+    var chip = cut.Find(".rcp-sb-agc");
+    chip.ClassList.Should().Contain("is-auto");
+    chip.GetAttribute("aria-pressed").Should().Be("true");
+    chip.QuerySelector(".rcp-agc-chip-auto")!.TextContent.Trim().Should().Be("AUTO");
+    chip.QuerySelector(".rcp-sb-agc-auto-value")!.TextContent.Trim().Should().Be("28.0 dB");
+    chip.QuerySelector(".rcp-sb-agc-tune")!.ClassList.Should().Contain("is-hidden");
+    chip.HasAttribute("disabled").Should().BeFalse();
+  }
+
+  [Fact]
+  public void AgcChip_Manual_ShowsManTheAmberPillAndTheTuneGlyph()
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 28.0, gain: 28));
+
+    var chip = cut.Find(".rcp-sb-agc");
+    chip.ClassList.Should().Contain("is-manual");
+    chip.GetAttribute("aria-pressed").Should().Be("false");
+    chip.QuerySelector(".rcp-agc-chip-off")!.TextContent.Trim().Should().Be("MAN");
+    chip.QuerySelector(".rcp-gain-pill")!.TextContent.Trim().Should().Be("28 dB");
+    chip.QuerySelector(".rcp-sb-agc-tune")!.ClassList.Should().NotContain("is-hidden");
+    chip.GetAttribute("aria-label").Should().Contain("hold");
+  }
+
+  [Fact]
+  public void AgcChip_WithNoGain_IsDisabledAndReadsADash()
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(gain: null));
+
+    var chip = cut.Find(".rcp-sb-agc");
+    chip.HasAttribute("disabled").Should().BeTrue();
+    chip.TextContent.Should().Contain("AGC").And.Contain("—");
+    chip.QuerySelectorAll(".rcp-agc-chip-auto, .rcp-agc-chip-off").Should().BeEmpty();
+  }
+
+  [Theory]
+  [InlineData(true)]
+  [InlineData(false)]
+  public void AgcChip_HasTheSameSlots_InAutoAndManual(bool autoGain)
+  {
+    var (cut, _, _) = RenderStatusBar(BuildState(autoGain: autoGain, appliedGain: 12.5, gain: 12));
+
+    var slots = cut.Find(".rcp-sb-agc").Children.Select(c => c.ClassList.First()).ToArray();
+    slots[0].Should().Be("rcp-agc-label");
+    slots[1].Should().Be(autoGain ? "rcp-agc-chip-auto" : "rcp-agc-chip-off");
+    slots.Skip(2).Should().Equal("rcp-sb-agc-value", "rcp-sb-agc-tune");
+  }
+
+  [Theory]
+  [InlineData(true, "\"enabled\":false")]
+  [InlineData(false, "\"enabled\":true")]
+  public void AgcChip_Tap_TogglesAgc_AndOpensNoPopup(bool autoGain, string expectedBody)
+  {
+    var (cut, handler, _) = RenderStatusBar(BuildState(autoGain: autoGain, appliedGain: 18.0, gain: 18));
+
+    cut.Find(".rcp-sb-agc").Click();
+
+    cut.WaitForAssertion(() =>
+      PostBodies(handler, "/api/radio/gain/auto").Should().ContainSingle().Which.Should().Contain(expectedBody),
+      TimeSpan.FromSeconds(2));
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void AgcChip_PressReleasedBeforeTheThreshold_IsATap()
+  {
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+
+    PressAgc(cut);
+    clock.Advance(LongPress - TimeSpan.FromMilliseconds(1));
+    cut.Find(".rcp-sb-agc").PointerUp(new PointerEventArgs());
+    clock.Advance(TimeSpan.FromSeconds(1));
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty("the press ended 1 ms short of the threshold");
+
+    cut.Find(".rcp-sb-agc").Click();
+
+    cut.WaitForAssertion(() => Posts(handler, "/api/radio/gain/auto").Should().Be(1), TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void AgcChip_PointerLeave_CancelsTheHold()
+  {
+    var (cut, _, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+
+    PressAgc(cut);
+    cut.Find(".rcp-sb-agc").PointerLeave(new PointerEventArgs());
+    clock.Advance(LongPress);
+
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void AgcChip_HoldInManual_OpensThePopup_AtTheThreshold_AndSwallowsTheTrailingClick()
+  {
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+
+    PressAgc(cut);
+    clock.Advance(LongPress - TimeSpan.FromMilliseconds(1));
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+    clock.Advance(TimeSpan.FromMilliseconds(1));
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-agc-popup").Should().ContainSingle(), TimeSpan.FromSeconds(2));
+
+    // The release and the click the browser synthesises after it must not also toggle AGC.
+    cut.Find(".rcp-sb-agc").PointerUp(new PointerEventArgs());
+    cut.Find(".rcp-sb-agc").Click();
+
+    Posts(handler, "/api/radio/gain/auto").Should().Be(0);
+    Posts(handler, "/api/radio/gain").Should().Be(0, "opening the popup in manual sends nothing");
+    cut.FindAll(".rcp-agc-popup").Should().ContainSingle();
+  }
+
+  [Fact]
+  public void AgcChip_HoldInAuto_SwitchesToManualAtTheAppliedGain_ThenOpensThePopup()
+  {
+    // Owner decision 3: one gesture. AGC off first — the API rejects a manual gain while AGC is on —
+    // then the manual gain at what AGC was applying (27.6 dB rounds to 28), then the popup.
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: true, appliedGain: 27.6, gain: 0));
+
+    OpenPopupByHolding(cut, clock);
+
+    var posts = handler.RecordedCalls.ToList().Where(c => c.Method == "POST").ToList();
+    posts.Select(c => c.Path).Should().Equal("/api/radio/gain/auto", "/api/radio/gain");
+    posts[0].Body.Should().Contain("\"enabled\":false");
+    posts[1].Body.Should().Contain("\"gain\":28");
+    cut.Find(".rcp-sb-agc").ClassList.Should().Contain("is-manual");
+    cut.Find(".rcp-agc-popup-slider").GetAttribute("value").Should().Be("28");
+  }
+
+  [Fact]
+  public void Popup_HasTheSpecContents()
+  {
+    var (cut, _, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+    OpenPopupByHolding(cut, clock);
+
+    var popup = cut.Find(".rcp-agc-popup");
+    popup.ClassList.Should().Contain("gain-popover", "it reuses the source-gain popover's chrome");
+    popup.QuerySelector(".gain-popover-title")!.TextContent.Trim().Should().Be("SDR · RF gain · manual");
+    popup.QuerySelector(".rcp-agc-popup-readout")!.TextContent.Trim().Should().Be("20.0 dB");
+    var slider = popup.QuerySelector("input[type=range]")!;
+    slider.GetAttribute("min").Should().Be("0");
+    slider.GetAttribute("max").Should().Be("50");
+    slider.GetAttribute("step").Should().Be("1");
+    slider.GetAttribute("value").Should().Be("20");
+    popup.QuerySelectorAll(".rcp-agc-popup-nudge").Should().HaveCount(2);
+    popup.QuerySelector(".rcp-agc-popup-auto")!.TextContent.Trim().Should().Be("AGC on");
+    popup.QuerySelector(".rcp-agc-popup-done")!.TextContent.Trim().Should().Be("Done");
+    cut.FindAll(".rcp-agc-popup-backdrop").Should().ContainSingle();
+  }
+
+  [Fact]
+  public void Popup_SliderDrag_SendsNothing_AndTheReleaseCommitsOnce()
+  {
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+    OpenPopupByHolding(cut, clock);
+
+    // ⚠ The old inline slider sent SetGainAsync on every one of these frames.
+    foreach (var v in new[] { "24", "30", "35" })
+    {
+      cut.Find(".rcp-agc-popup-slider").Input(v);
+    }
+    Posts(handler, "/api/radio/gain").Should().Be(0);
+    cut.Find(".rcp-agc-popup-readout").TextContent.Trim().Should().Be("35.0 dB", "the readout follows the finger");
+
+    cut.Find(".rcp-agc-popup-slider").Change("35");
+
+    cut.WaitForAssertion(() =>
+      PostBodies(handler, "/api/radio/gain").Should().ContainSingle().Which.Should().Contain("\"gain\":35"),
+      TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void Popup_Nudges_CommitImmediately_OneStepEach()
+  {
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+    OpenPopupByHolding(cut, clock);
+
+    cut.FindAll(".rcp-agc-popup-nudge")[1].Click();
+    cut.WaitForAssertion(() => Posts(handler, "/api/radio/gain").Should().Be(1), TimeSpan.FromSeconds(2));
+    cut.FindAll(".rcp-agc-popup-nudge")[0].Click();
+    cut.WaitForAssertion(() => Posts(handler, "/api/radio/gain").Should().Be(2), TimeSpan.FromSeconds(2));
+
+    var bodies = PostBodies(handler, "/api/radio/gain");
+    bodies[0].Should().Contain("\"gain\":21");
+    bodies[1].Should().Contain("\"gain\":20");
+  }
+
+  [Fact]
+  public void Popup_Done_And_BackdropTap_Close_It_WithoutSendingAnything()
+  {
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+
+    OpenPopupByHolding(cut, clock);
+    cut.Find(".rcp-agc-popup-done").Click();
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+
+    cut.Find(".rcp-sb-agc").PointerUp(new PointerEventArgs());
+    OpenPopupByHolding(cut, clock);
+    cut.Find(".rcp-agc-popup-backdrop").Click();
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+    cut.FindAll(".rcp-agc-popup-backdrop").Should().BeEmpty();
+
+    handler.RecordedCalls.ToList().Should().NotContain(c => c.Method == "POST");
+  }
+
+  [Fact]
+  public void Popup_AgcOn_EnablesAgc_AndClosesIt()
+  {
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+    OpenPopupByHolding(cut, clock);
+
+    cut.Find(".rcp-agc-popup-auto").Click();
+
+    cut.WaitForAssertion(() =>
+    {
+      PostBodies(handler, "/api/radio/gain/auto").Should().ContainSingle().Which.Should().Contain("\"enabled\":true");
+      cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+      cut.Find(".rcp-sb-agc").ClassList.Should().Contain("is-auto");
+    }, TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void Popup_ClosesAfterTenIdleSeconds_AndAnInteractionRestartsTheCount()
+  {
+    var (cut, _, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+    OpenPopupByHolding(cut, clock);
+
+    clock.Advance(RadioControlPanel.AgcPopupIdleTimeout - TimeSpan.FromSeconds(1));
+    cut.Find(".rcp-agc-popup-slider").Input("25");      // an interaction, 9 s in
+    clock.Advance(RadioControlPanel.AgcPopupIdleTimeout - TimeSpan.FromSeconds(1));
+    cut.FindAll(".rcp-agc-popup").Should().ContainSingle("only 9 s have passed since the last touch");
+
+    clock.Advance(TimeSpan.FromSeconds(1));
+
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-agc-popup").Should().BeEmpty(), TimeSpan.FromSeconds(2));
+  }
+
+  public static TheoryData<string> PopupClosingStateChanges => new() { "agc-on", "band", "no-gain" };
+
+  [Theory]
+  [MemberData(nameof(PopupClosingStateChanges))]
+  public async Task Popup_Closes_WhenTheStateItAdjustsGoesAway(string change)
+  {
+    var state = BuildState(autoGain: false, appliedGain: 20.0, gain: 20);
+    var (cut, _, clock) = RenderStatusBar(state);
+    OpenPopupByHolding(cut, clock);
+
+    var next = change switch
+    {
+      "agc-on" => state with { AutoGain = true },   // AGC turned on from another path
+      "band" => state with { Band = "AM" },
+      _ => state with { Gain = null },
+    };
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged), next));
+
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+  }
+
+  [Fact]
+  public async Task Popup_Closes_OnASourceChange()
+  {
+    var (cut, _, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+    OpenPopupByHolding(cut, clock);
+
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(hub, nameof(AudioStateHubService.SourceChanged)));
+
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Popup_StaysOpen_OnATelemetryTick()
+  {
+    var state = BuildState(autoGain: false, appliedGain: 20.0, gain: 20);
+    var (cut, _, clock) = RenderStatusBar(state);
+    OpenPopupByHolding(cut, clock);
+
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    cut.InvokeAsync(() => HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged),
+      state with { SignalStrength = 35, RssiDbu = -40.0 }));
+
+    cut.FindAll(".rcp-agc-popup").Should().ContainSingle();
+  }
+
+  [Fact]
+  public void Css_StatusHost_IsNotAStackingContext_AndNothingNewAnimates()
+  {
+    var css = File.ReadAllText(LocateDesignSystemCss());
+    // Declarations only: several of these rules' comments explain the property they leave out, in
+    // the property's own name.
+    static string Declarations(string body) => Regex.Replace(body, @"/\*.*?\*/", string.Empty, RegexOptions.Singleline);
+
+    var host = Regex.Match(css, @"\n\.rcp-status-host\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+    host.Should().NotBeEmpty();
+    Declarations(host).Should().NotContain("z-index",
+      "a z-index here would trap the popup's backdrop and card inside the host");
+
+    var rules = Regex.Matches(css, @"\n(?<sel>\.(rcp-sb-|rcp-status-|rcp-agc-popup)[^{]*)\{(?<body>[^}]*)\}");
+    rules.Should().NotBeEmpty();
+    foreach (Match rule in rules)
+    {
+      Declarations(rule.Groups["body"].Value).Should().NotContain("animation",
+        $"{rule.Groups["sel"].Value.Trim()} must not animate (#789)");
+    }
+
+    var razor = File.ReadAllText(Path.Combine(
+      Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(LocateDesignSystemCss())))!,
+      "Components", "Shared", "RadioControlPanel.razor"));
+    var lampRules = Regex.Matches(razor, @"\n\s*(?<sel>\.rcp-(lamp|stereo-on)[^{]*)\{(?<body>[^}]*)\}");
+    lampRules.Should().NotBeEmpty();
+    foreach (Match rule in lampRules)
+    {
+      Declarations(rule.Groups["body"].Value).Should().NotContain("animation",
+        $"{rule.Groups["sel"].Value.Trim()} must not animate (#789)");
+    }
   }
 
   // ─── Task #15 PR B (handoff item #27): scan-signal dBu branch ────────────
@@ -611,24 +914,6 @@ public class RadioControlPanelTests : TestContext
     // existing SignalMeter_RendersDbuReadout test).
     var readout = cut.Find(".rcp-meter-dbu").TextContent.Trim();
     readout.Should().Be("−20 dBu");
-  }
-
-  [Theory]
-  [InlineData(true)]
-  [InlineData(false)]
-  public void AgcStrip_NoEmptyCell_RegardlessOfAgcState(bool autoGain)
-  {
-    // Both AGC on and AGC off must produce exactly two grid children — no
-    // collapsed/empty cell artefacts that would let the strip change height.
-    var state = BuildState(autoGain: autoGain, appliedGain: 12.5, gain: 12);
-    var cut = RenderPanel(state);
-
-    var grid = cut.Find(".rcp-sdr-grid");
-    Assert.Equal(2, grid.Children.Length);
-
-    // Both cells always present, regardless of AGC.
-    Assert.NotNull(cut.Find(".rcp-agc-cell"));
-    Assert.NotNull(cut.Find(".rcp-gain-cell"));
   }
 
   [Fact]
@@ -1547,7 +1832,11 @@ public class RadioControlPanelTests : TestContext
   /// </summary>
   private sealed class RadioStateStubHandler : HttpMessageHandler
   {
-    private readonly RadioStateDto _state;
+    /// <summary>
+    /// The state <c>GET /api/radio/state</c> answers with. The AGC and manual-gain POSTs update it the
+    /// way the API does, so a panel that re-reads state after one sees the result.
+    /// </summary>
+    public RadioStateDto State { get; private set; }
     private readonly IEnumerable<RadioPresetDto> _presets;
     private readonly IEnumerable<Radio.Core.Models.RadioBandModel> _bands;
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
@@ -1563,7 +1852,7 @@ public class RadioControlPanelTests : TestContext
       IEnumerable<RadioPresetDto>? presets = null,
       IEnumerable<Radio.Core.Models.RadioBandModel>? bands = null)
     {
-      _state = state;
+      State = state;
       _presets = presets ?? Array.Empty<RadioPresetDto>();
       _bands = bands ?? Array.Empty<Radio.Core.Models.RadioBandModel>();
     }
@@ -1580,9 +1869,17 @@ public class RadioControlPanelTests : TestContext
       }
       RecordedCalls.Add((method, path, body));
 
+      if (method == "POST" && body != null && path is "/api/radio/gain/auto" or "/api/radio/gain")
+      {
+        using var doc = JsonDocument.Parse(body);
+        State = path == "/api/radio/gain/auto"
+          ? State with { AutoGain = doc.RootElement.GetProperty("enabled").GetBoolean() }
+          : State with { Gain = doc.RootElement.GetProperty("gain").GetInt32(), AppliedGain = doc.RootElement.GetProperty("gain").GetInt32() };
+      }
+
       var response = (method, path) switch
       {
-        ("GET", "/api/radio/state") => Ok(_state),
+        ("GET", "/api/radio/state") => Ok(State),
         ("GET", "/api/radio/presets") => FailPresets
           ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
           : Ok(_presets),
