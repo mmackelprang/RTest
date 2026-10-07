@@ -6010,7 +6010,10 @@ body {
   display: flex;
   align-items: stretch;
   height: var(--touch-compact);
-  margin-bottom: 6px;
+  /* 8 px, not less: the seek bar that can follow is a 44 px touch area with margin-top: -8px and
+     z-index 1 (.np-seek-bar), so a smaller gap let it cover the bottom of these chips and a tap on
+     their lower edge scrubbed the track instead. */
+  margin-bottom: 8px;
   /* The divider is a shadow, not a border, so the slots get the full 44 px. */
   box-shadow: inset 0 -1px 0 var(--surface-separator);
 }
