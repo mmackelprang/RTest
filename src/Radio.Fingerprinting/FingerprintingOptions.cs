@@ -49,7 +49,8 @@ public sealed class FingerprintingOptions
   // --- SongRec call policy (FingerprintCallPolicy). Every interval below is measured from the START of one
   // attempt's capture to the start of the next ("start-to-start"), so the SampleDurationSeconds capture and
   // the SongRec call itself fit inside it. All are read live through IOptionsMonitor on every scheduling
-  // decision, so a config-store change applies to the next decision without a restart. Values below the
+  // decision, so a config-store change applies without a restart (an interval change takes effect from the
+  // attempt after the one already scheduled). Values below the
   // documented minimum are clamped up to it.
 
   /// <summary>

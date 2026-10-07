@@ -136,7 +136,7 @@ public class SongRecRecognitionService : ISongRecRecognitionService
   /// exception). Caller cancellation propagates as <see cref="OperationCanceledException"/>.
   /// </summary>
   /// <remarks>
-  /// Failures are logged here at Debug only. The caller counts consecutive failures and logs one Warning
+  /// Failures are logged here at Debug only (a failure to kill the process afterwards is still a Warning). The caller counts consecutive failures and logs one Warning
   /// when they reach <see cref="FingerprintingOptions.ErrorWarnThreshold"/> — a Warning per failure would
   /// put a journald line on every attempt during a Shazam outage, on a box where log volume correlates
   /// with audio distortion.

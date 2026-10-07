@@ -79,7 +79,7 @@ public class FingerprintCallPolicyTests
 
       var captureStart = now;
       now += capture;
-      policy.RecordCallStarted(now);
+      policy.RecordCallStarted(captureStart); // as the service does: stamped at the attempt's start
       var outcome = outcomeFor(calls.Count, captureStart);
       policy.RecordOutcome(decision.Segment, captureStart, outcome, now, outcome == CallOutcome.Error ? "songrec exited with code 1" : null);
       afterOutcome?.Invoke(outcome, source);
@@ -311,6 +311,22 @@ public class FingerprintCallPolicyTests
       from: T0 + TimeSpan.FromHours(2) + TimeSpan.FromSeconds(30));
 
     Assert.Equal(2, _logs.Count(l => l.Level == LogLevel.Warning && l.Message.Contains("call cap reached")));
+  }
+
+  /// <summary>
+  /// Review finding: the default schedule (15 s on a 13 s capture) runs at exactly the default cap's rate,
+  /// so the cap must not bind on ordinary listening — no held attempt, no Warning, over hours.
+  /// </summary>
+  [Fact]
+  public void Cap_DoesNotBind_OnTheDefaultRadioSchedule()
+  {
+    var policy = Create();
+
+    var calls = Simulate(policy, Radio(), (_, _) => CallOutcome.Match, TimeSpan.FromHours(3));
+
+    Assert.All(Gaps(calls), gap => Assert.Equal(15, gap));
+    Assert.Equal(720, calls.Count);
+    Assert.DoesNotContain(_logs, l => l.Level == LogLevel.Warning);
   }
 
   [Fact]

@@ -281,7 +281,7 @@ public class BackgroundIdentificationService : BackgroundService
         // as that is true; the next attempt's Capturing replaces it.
         var phase = CurrentPhase;
         if (phase != FingerprintPhase.Idle
-            && !(phase == FingerprintPhase.Error && _policy.ConsecutiveErrors > 0))
+            && !(phase == FingerprintPhase.Error && _policy.IsBackingOff(TimeProvider.GetUtcNow())))
         {
           UpdatePhase(FingerprintPhase.Idle);
         }
@@ -451,7 +451,10 @@ public class BackgroundIdentificationService : BackgroundService
     try
     {
       RecordMetadataCall();
-      _policy.RecordCallStarted(TimeProvider.GetUtcNow());
+      // Stamped at the attempt's start, the instant the schedule is measured from: stamped after the 13 s
+      // capture, a 15 s schedule at the default 240/hour cap would be held ~13 s every hour and log a cap
+      // Warning on ordinary listening.
+      _policy.RecordCallStarted(attemptStartedAt);
       var recognition = await songRec.RecognizeAsync(samples, ct);
       lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
 

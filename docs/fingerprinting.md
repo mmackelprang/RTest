@@ -80,7 +80,7 @@ ban. `FingerprintCallPolicy` now decides when the loop may capture and call. All
 **Known-start sources — file player, Bluetooth.** The source knows when each track begins.
 
 - A track is sent to SongRec only while its own metadata is missing a **title, an artist or album
-  art**. A tagged file with embedded art makes no calls. A Bluetooth track normally still gets one,
+  art**. A tagged file with embedded art makes no calls. A Bluetooth track normally still gets a first call,
   because AVRCP never supplies art here (AUD-17) — that call is what fetches its art. Once the art is
   resolved, an AVRCP refresh of the same track restores it from the per-track cache and makes no call.
 - First attempt 5 s after the track starts (then the 13 s capture). No match: retry 30 s later, then

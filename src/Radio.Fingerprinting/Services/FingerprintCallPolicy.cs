@@ -166,6 +166,15 @@ internal sealed class FingerprintCallPolicy
     }
   }
 
+  /// <summary>Whether a SongRec failure back-off is still running at <paramref name="now"/>.</summary>
+  public bool IsBackingOff(DateTimeOffset now)
+  {
+    lock (_lock)
+    {
+      return _backoffUntil > now;
+    }
+  }
+
   /// <summary>SongRec calls recorded in the 60 minutes before <paramref name="now"/>.</summary>
   public int CallsInLastHour(DateTimeOffset now)
   {
@@ -263,7 +272,7 @@ internal sealed class FingerprintCallPolicy
     }
   }
 
-  /// <summary>Records that a SongRec process is being started at <paramref name="now"/>; counts toward the hourly cap.</summary>
+  /// <summary>Records a SongRec call against the hourly cap, stamped <paramref name="now"/> — the identification loop passes the attempt's start, the same instant its schedule is measured from.</summary>
   public void RecordCallStarted(DateTimeOffset now)
   {
     var settings = Settings.From(_options());

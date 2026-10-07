@@ -74,7 +74,9 @@ public class BackgroundIdentificationServiceIdleLoopTests
     }
 
     public string SourceName => "Idle";
-    public PlaySource SourceType => PlaySource.File;
+    // Radio, not File: a known-start source with no track start is held 5 s by the call policy, and the
+    // CaptureReturnsNothing mode would then never reach CaptureAsync inside the measured window.
+    public PlaySource SourceType => PlaySource.Radio;
     public string? SourceFilePath => null;
     public bool NeedsFingerprintingLookup => mode == NothingToCapture.CaptureReturnsNothing;
     public Task<AudioSampleBuffer?> CaptureAsync(TimeSpan duration, CancellationToken ct = default) =>
