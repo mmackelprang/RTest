@@ -414,8 +414,8 @@ builder.Services.AddSingleton<PhoneHubService>();
 builder.Services.AddSingleton<GvTrunkHubService>();
 
 // ENC-4 — encoder HUD state. Sits with the hub services because it takes AudioStateHubService in
-// its constructor and subscribes to EncoderHudChanged there. Singleton rather than scoped (unlike
-// GainPopoverService): it tracks four physical knobs on one cabinet, so both hosts — MainLayout
+// its constructor and subscribes to EncoderHudChanged there. Singleton rather than scoped: it tracks
+// four physical knobs on one cabinet, so both hosts — MainLayout
 // and the /sleep route, which is on a different layout — must see the same card, and it has to
 // survive the route change between them.
 //
@@ -485,13 +485,7 @@ builder.Services.AddScoped<Radio.Web.Services.ContactResolutionService>();
 // different layout) inject it, so it outlives the route change between them within a circuit.
 builder.Services.AddScoped<Radio.Web.Services.IncomingCallBannerService>();
 
-// Task #15 PR E item #47 — gain-popover backdrop portal. Scoped so the
-// circuit's NowPlayingPanel + MainLayout share a single instance per user
-// session; mounted in MainLayout (OUTSIDE .page-transition) so the backdrop
-// escapes the sub-tree stacking context that previously trapped it.
-builder.Services.AddScoped<Radio.Web.Services.GainPopoverService>();
-
-// ENC-12. Scoped, like GainPopoverService and unlike AudioStateStore: this tracks what THIS browser
+// ENC-12. Scoped, unlike AudioStateStore: this tracks what THIS browser
 // session has already been told about the knobs, not the state of the knobs themselves.
 builder.Services.AddScoped<Radio.Web.Services.EncoderFaultAnnouncer>();
 
