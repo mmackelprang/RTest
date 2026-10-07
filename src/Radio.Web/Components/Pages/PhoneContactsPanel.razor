@@ -7,17 +7,15 @@
     <div style="display:flex; gap:8px; align-items:center; position:relative">
       @* Sync from Phone dropdown *@
       <div style="position:relative">
-        <RadzenButton Text="@(IsSyncing ? "Syncing..." : "Sync from Phone")"
-          Icon="@(IsSyncing ? "" : "smartphone")"
+        @* No child content, on purpose: RadzenButton renders ChildContent INSTEAD of Icon and Text
+           whenever it is non-null, and an @if inside the tag makes it non-null even when false — so
+           the old spinner-as-child left this button blank outside a sync. IsBusy/BusyText is
+           Radzen's own spinner-plus-label for the syncing state. *@
+        <RadzenButton Text="Sync from Phone" Icon="smartphone"
+          IsBusy="@IsSyncing" BusyText="Syncing..."
           Click="@(() => ShowSyncDropdownChanged.InvokeAsync(!ShowSyncDropdown))"
           ButtonStyle="ButtonStyle.Info" Size="ButtonSize.Small"
-          Disabled="@IsSyncing">
-          @if (IsSyncing)
-          {
-            <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small"
-              Mode="ProgressBarMode.Indeterminate" Style="margin-right:4px" />
-          }
-        </RadzenButton>
+          Disabled="@IsSyncing" />
         @if (ShowSyncDropdown && BtStatus != null)
         {
           @* Click-away overlay *@

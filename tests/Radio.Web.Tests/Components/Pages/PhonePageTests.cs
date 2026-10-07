@@ -235,20 +235,21 @@ public class PhonePageTests : TestContext
   [Fact]
   public void PhonePage_ContactsTab_Renders_SourceColumn()
   {
-    // Rail tab buttons are always present. Verify the component renders without
-    // error and the Contacts tab label appears.
+    // "Contacts" is always in the markup now (it is a rail label), so open the tab and assert on
+    // the panel itself.
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("Contacts", cut.Markup);
-    Assert.NotNull(cut);
+    OpenTab(cut, "Contacts");
+    var panel = cut.Find(".phone-contacts");
+    Assert.Contains("Source", panel.TextContent);
   }
 
   [Fact]
   public void PhonePage_ContactsTab_Renders_SyncButton()
   {
-    // Verify the component renders successfully with PbapApiService and
-    // BluetoothApiService injected (no DI error).
+    // Renders with PbapApiService and BluetoothApiService injected (no DI error).
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("Contacts", cut.Markup);
+    OpenTab(cut, "Contacts");
+    Assert.Contains("Sync from Phone", cut.Find(".phone-contacts").TextContent);
     Assert.DoesNotContain("NullReferenceException", cut.Markup);
   }
 
@@ -344,12 +345,10 @@ public class PhonePageTests : TestContext
   }
 
   // Switch the page to the Dashboard tab.
-  private static void OpenDashboard(IRenderedComponent<PhonePage> cut)
-  {
-    var dashButton = cut.FindAll("button.phone-rail-tab")
-      .First(b => b.TextContent.Contains("Dashboard"));
-    dashButton.Click();
-  }
+  private static void OpenDashboard(IRenderedComponent<PhonePage> cut) => OpenTab(cut, "Dashboard");
+
+  private static void OpenTab(IRenderedComponent<PhonePage> cut, string label) =>
+    cut.FindAll("button.phone-rail-tab").First(b => b.TextContent.Contains(label)).Click();
 
   private class EmptyResponseHandler : HttpMessageHandler
   {
