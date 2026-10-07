@@ -126,14 +126,30 @@ public class SongRecRecognitionService : ISongRecRecognitionService
   /// </summary>
   internal virtual Process? StartProcess(ProcessStartInfo startInfo) => Process.Start(startInfo);
 
+  /// <summary>
+  /// Classifies a songrec run that exited 0 with no stdout, from its stderr: no stderr, or songrec's
+  /// own "No match for this song", is a clean no-match; any other stderr text (a network error, an HTTP
+  /// refusal, …) is an error. songrec exits 0 on every recognition failure, so stderr is the only signal.
+  /// </summary>
+  internal static SongRecOutcome ClassifyEmptyOutput(string? stderr)
+  {
+    if (string.IsNullOrWhiteSpace(stderr)
+      || stderr.Contains("No match for this song", StringComparison.OrdinalIgnoreCase))
+    {
+      return SongRecOutcome.NoMatch;
+    }
+
+    return SongRecOutcome.Error;
+  }
+
   /// <summary>One songrec run: how it ended, the parsed response when it matched, and the failure when it did not run cleanly.</summary>
   internal sealed record SongRecRun(SongRecOutcome Outcome, SongRecResult? Result = null, string? Error = null);
 
   /// <summary>
   /// Runs the songrec recognize command and classifies the result: <see cref="SongRecOutcome.Match"/> (with
-  /// the parsed response), <see cref="SongRecOutcome.NoMatch"/> (clean exit, no track), or
-  /// <see cref="SongRecOutcome.Error"/> (start failure, timeout, non-zero exit, unparsable output, any other
-  /// exception). Caller cancellation propagates as <see cref="OperationCanceledException"/>.
+  /// the parsed response), <see cref="SongRecOutcome.NoMatch"/> (clean exit, no track, and no error text
+  /// other than songrec's own "No match"), or <see cref="SongRecOutcome.Error"/> (start failure, timeout,
+  /// non-zero exit, an exit-0 run whose stderr reports an error, unparsable output, any other exception). Caller cancellation propagates as <see cref="OperationCanceledException"/>.
   /// </summary>
   /// <remarks>
   /// Failures are logged here at Debug only (a failure to kill the process afterwards is still a Warning). The caller counts consecutive failures and logs one Warning
@@ -188,6 +204,19 @@ public class SongRecRecognitionService : ISongRecRecognitionService
 
       if (string.IsNullOrWhiteSpace(stdout))
       {
+        // ⚠ Exit code 0 does NOT mean success here. songrec prints every recognition failure to stderr
+        // as "Error: <message>" and still exits 0 — measured on the box (songrec 0.7.4, 2026-10-07):
+        // pink noise gave exit 0, empty stdout, stderr "... Error: No match for this song". So a
+        // network failure or a Shazam refusal (HTTP 429) arrives the same way, and treating every
+        // empty-stdout exit-0 run as a no-match would hide exactly the failures the backoff exists for.
+        var emptyOutcome = ClassifyEmptyOutput(stderr);
+        if (emptyOutcome == SongRecOutcome.Error)
+        {
+          var detail = stderr.Length > 200 ? stderr[..200] : stderr;
+          _logger.LogDebug("songrec reported an error with exit code 0: {StdErr}", detail);
+          return new SongRecRun(SongRecOutcome.Error, Error: $"songrec reported an error: {detail.Trim()}");
+        }
+
         // LOG-12: Trace. Every no-match used to be logged twice at Information (here and in
         // BackgroundIdentificationService, 1.8k/day each); the caller's Debug line is the one kept.
         _logger.LogTrace("SongRec returned empty output (no match)");

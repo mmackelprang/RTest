@@ -457,6 +457,49 @@ public class SongRecRecognitionServiceTests
     Assert.Null(run.Error);
   }
 
+  /// <summary>
+  /// songrec exits 0 on every recognition failure and reports it on stderr (measured on the box,
+  /// songrec 0.7.4: noise → exit 0, empty stdout, "Error: No match for this song"). Only its own
+  /// "No match" is a no-match; any other error text — a network failure, an HTTP 429 — is an error, or
+  /// the backoff would never see a Shazam refusal.
+  /// </summary>
+  [Theory]
+  [InlineData("", SongRecOutcome.NoMatch)]
+  [InlineData("[2026-10-07T16:00:14Z ERROR songrec::cli_main src/cli_main.rs:180] Error: No match for this song", SongRecOutcome.NoMatch)]
+  [InlineData("[... ERROR songrec::cli_main] Error: Network unreachable", SongRecOutcome.Error)]
+  [InlineData("[... ERROR songrec::cli_main] Error: HTTP status client error (429 Too Many Requests)", SongRecOutcome.Error)]
+  public void ClassifyEmptyOutput_OnlySongRecsOwnNoMatch_IsANoMatch(string stderr, SongRecOutcome expected)
+  {
+    Assert.Equal(expected, SongRecRecognitionService.ClassifyEmptyOutput(stderr));
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_ExitZeroWithAnErrorOnStderr_IsAnError()
+  {
+    var service = new StandInSongRecService(
+      _loggerMock.Object, Options.Create(new FingerprintingOptions()),
+      windows: ("cmd.exe", "/c echo Error: Network unreachable 1>&2"),
+      unix: ("/bin/sh", "-c \"echo 'Error: Network unreachable' >&2\""));
+
+    var run = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+
+    Assert.Equal(SongRecOutcome.Error, run.Outcome);
+    Assert.Contains("Network unreachable", run.Error);
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_ExitZeroWithSongRecsNoMatchOnStderr_IsANoMatch()
+  {
+    var service = new StandInSongRecService(
+      _loggerMock.Object, Options.Create(new FingerprintingOptions()),
+      windows: ("cmd.exe", "/c echo Error: No match for this song 1>&2"),
+      unix: ("/bin/sh", "-c \"echo 'Error: No match for this song' >&2\""));
+
+    var run = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+
+    Assert.Equal(SongRecOutcome.NoMatch, run.Outcome);
+  }
+
   [Fact]
   public async Task RunSongRecAsync_JsonWithoutATrack_IsANoMatch_AndWithATrack_IsAMatch()
   {
