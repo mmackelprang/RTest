@@ -468,7 +468,7 @@
   }
 
   /// <summary>What the status bar's fingerprint slot is showing. Recognition states only — never RDS.</summary>
-  internal enum FingerprintSlotState { Waiting, Off, Identifying, Match, NoMatch, Unavailable }
+  internal enum FingerprintSlotState { Waiting, Off, Listening, Identifying, Match, NoMatch, Unavailable }
 
   /// <summary>
   /// Resolves the fingerprint slot, first rule that applies:
@@ -477,15 +477,16 @@
   ///         returns null on failure), <c>Waiting</c> before the first read;</item>
   ///   <item>recognition disabled: <c>Off</c>;</item>
   ///   <item>an active match (see <see cref="_activeMatch"/>): <c>Match</c>. It outranks an
-  ///         in-progress cycle, which runs every few seconds and would otherwise replace the match
-  ///         with "Identifying…" on every cycle;</item>
-  ///   <item>phase <c>Error</c>: <c>Unavailable</c>; <c>Capturing</c> / <c>Fingerprinting</c> /
-  ///         <c>Querying</c>: <c>Identifying</c>; <c>NoMatch</c>: <c>NoMatch</c>. The service sets
-  ///         <c>Idle</c> straight after <c>Error</c> too, and an error leaves no event to fall back
-  ///         on, so in practice "ID unavailable" shows mostly when the status read itself fails;</item>
-  ///   <item>otherwise <c>NoMatch</c> when the most recent event is a failed lookup — the service
-  ///         returns to <c>Idle</c> straight after a <c>NoMatch</c>, so the phase alone would
-  ///         almost never show it — and <c>Waiting</c> when it is not.</item>
+  ///         in-progress attempt (on radio one starts every 40 s), which would otherwise replace the
+  ///         match with "Listening…" / "Identifying…" on every attempt;</item>
+  ///   <item>phase <c>Error</c>: <c>Unavailable</c> — the service holds <c>Error</c> while it is backing
+  ///         off after SongRec failures; <c>Capturing</c>: <c>Listening</c> (recording the sample — no
+  ///         call has been made yet); <c>Fingerprinting</c> / <c>Querying</c>: <c>Identifying</c> (the
+  ///         sample is with SongRec); <c>NoMatch</c>: <c>NoMatch</c>;</item>
+  ///   <item>otherwise (<c>Idle</c> — between attempts, the fingerprint call policy's waiting state)
+  ///         <c>NoMatch</c> when the most recent event is a failed lookup — the service returns to
+  ///         <c>Idle</c> straight after a <c>NoMatch</c>, so the phase alone would almost never show
+  ///         it — and <c>Waiting</c> when it is not. Never "Identifying…": waiting is not identifying.</item>
   /// </list>
   /// </summary>
   private FingerprintSlotState FingerprintSlot
@@ -501,7 +502,7 @@
       switch (_fpStatus.Phase)
       {
         case "Error": return FingerprintSlotState.Unavailable;
-        case "Capturing":
+        case "Capturing": return FingerprintSlotState.Listening;
         case "Fingerprinting":
         case "Querying": return FingerprintSlotState.Identifying;
         case "NoMatch": return FingerprintSlotState.NoMatch;
@@ -514,6 +515,7 @@
   private static string FingerprintSlotClass(FingerprintSlotState state) => state switch
   {
     FingerprintSlotState.Off => "is-off",
+    FingerprintSlotState.Listening => "is-listening",
     FingerprintSlotState.Identifying => "is-identifying",
     FingerprintSlotState.Match => "is-match",
     FingerprintSlotState.NoMatch => "is-nomatch",
@@ -523,14 +525,15 @@
 
   /// <summary>
   /// The slot's text. A match reads <c>{Bucket} match · {time-ago}</c> and never a percentage.
-  /// "Identifying…" is static text: the panel must not add an infinite animation (#789 removed two
-  /// for the kiosk's CPU).
+  /// "Listening…" and "Identifying…" are static text: the panel must not add an infinite animation (#789
+  /// removed two for the kiosk's CPU).
   /// </summary>
   private string FingerprintSlotLabel(FingerprintSlotState state)
   {
     switch (state)
     {
       case FingerprintSlotState.Off: return "ID off";
+      case FingerprintSlotState.Listening: return "Listening…";
       case FingerprintSlotState.Identifying: return "Identifying…";
       case FingerprintSlotState.NoMatch: return "No match";
       case FingerprintSlotState.Unavailable: return "ID unavailable";

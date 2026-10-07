@@ -32,7 +32,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly IConfigurationManager? _configurationManager;
   private readonly AlbumArtCacheService? _albumArtCache;
-  private readonly IOptionsMonitor<FingerprintingOptions>? _fingerprintingOptionsMonitor;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private readonly HashSet<string> _errorFiles = new();
@@ -83,10 +82,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   internal Func<string, QueueFileStamp?> QueueFileStat { get; set; } = StatQueueFile;
 
-  /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
-  private FingerprintingOptions FpOptions =>
-    _fingerprintingOptionsMonitor?.CurrentValue ?? new FingerprintingOptions();
-
   /// <summary>
   /// Initializes a new instance of the <see cref="FilePlayerAudioSource"/> class.
   /// </summary>
@@ -99,9 +94,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="configurationManager">Optional configuration manager for queue persistence.</param>
   /// <param name="albumArtCache">Optional album art cache for extracting embedded cover art.</param>
-  /// <param name="fingerprintingOptions">Optional fingerprinting options. Controls the
-  /// UseShazamForAllSources gate only — what is done with a fingerprint ANSWER is decided per
-  /// field by SourceMetadataPrecedence and is not configurable (AUD-1).</param>
+  /// <param name="fingerprintingOptions">Not read. It carried the UseShazamForAllSources gate, which the
+  /// fingerprint call policy retired (a file is fingerprinted only when its title, artist or album art is
+  /// missing); kept so the factory and existing callers construct unchanged.</param>
   /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
@@ -124,7 +119,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _playbackService = playbackService;
     _configurationManager = configurationManager;
     _albumArtCache = albumArtCache;
-    _fingerprintingOptionsMonitor = fingerprintingOptions;
 
     // AUD-96. The lambdas read the properties at call time, so a test can swap either seam after
     // construction.
@@ -2582,17 +2576,16 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           _metadata.GetValueOrDefault(StandardMetadataKeys.Artist),
           _duration);
 
-        // Check if metadata is incomplete (using defaults), or if Shazam toggle is on
-        bool hasIncompleteMetadata =
-          _metadata[StandardMetadataKeys.Artist].Equals(StandardMetadataKeys.DefaultArtist) ||
-          _metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum);
-        bool needsFingerprinting = hasIncompleteMetadata || FpOptions.UseShazamForAllSources;
-
+        // Call policy (owner, 2026-10-07): a file is sent to SongRec only when its own metadata is missing
+        // a title, an artist or album art; a tagged file with embedded art makes no calls. Written true OR
+        // false on every load: before the call policy only `true` was ever written here, so a fully tagged
+        // file had no key at all and SoundFlowAudioTap's missing-key default fingerprinted it every cycle.
+        // UseShazamForAllSources is deliberately not consulted (see its doc comment).
+        bool needsFingerprinting = HasIncompleteFingerprintMetadata(filePath, tags.Title != null);
+        _metadata["NeedsFingerprintingLookup"] = needsFingerprinting;
         if (needsFingerprinting)
         {
-          Logger.LogDebug("File {File} needs fingerprinting (incomplete={Incomplete}, shazamAll={ShazamAll})",
-            filePath, hasIncompleteMetadata, FpOptions.UseShazamForAllSources);
-          _metadata["NeedsFingerprintingLookup"] = true;
+          Logger.LogDebug("File {File} needs fingerprinting (title, artist or album art missing)", filePath);
         }
       }
       else
@@ -2620,6 +2613,31 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _identificationService?.RequestImmediateIdentification();
     }
   }
+
+  /// <summary>
+  /// True when the current track's own metadata lacks a title, an artist or album art — the call policy's
+  /// definition of "metadata missing" for a known-start source. Album is deliberately not part of it.
+  /// </summary>
+  /// <param name="filePath">The file just loaded.</param>
+  /// <param name="hasTitleTag">Whether the file carried a non-blank Title tag. Without one, Title holds the
+  /// file name UpdateMetadataFromFile seeded, which is a placeholder, not a title.</param>
+  private bool HasIncompleteFingerprintMetadata(string filePath, bool hasTitleTag)
+  {
+    var titleMissing = !hasTitleTag
+      || SourceMetadataPrecedence.IsFieldMissing(
+        _metadata, StandardMetadataKeys.Title, StandardMetadataKeys.DefaultTitle, Path.GetFileNameWithoutExtension(filePath));
+    var artistMissing = SourceMetadataPrecedence.IsFieldMissing(
+      _metadata, StandardMetadataKeys.Artist, StandardMetadataKeys.DefaultArtist);
+    return titleMissing || artistMissing || SourceMetadataPrecedence.ShouldFillAlbumArt(_metadata);
+  }
+
+  /// <summary>
+  /// For the fingerprint call policy (via <c>SoundFlowAudioTap.CurrentTrackStartedUtc</c>): when the current
+  /// file started playing or the file player last became the active source, whichever is later. The same
+  /// boundary <see cref="OnTrackIdentified"/> drops stale results against. Re-loading the same file
+  /// (repeat, queue edits) does not move it (AUD-33).
+  /// </summary>
+  internal DateTime? FingerprintTrackBoundaryUtc => LatestTrackBoundaryUtc(Volatile.Read(ref _trackStartedAtTicks));
 
   /// <summary>
   /// Extracts embedded album art from audio file metadata using TagLib.

@@ -608,7 +608,9 @@ public class NowPlayingPanelTests : TestContext
     // phase, enabled, expected label, expected state class
     { "Idle", false, "ID off", "is-off" },
     { "Idle", true, "Waiting to identify", "is-waiting" },
-    { "Capturing", true, "Identifying…", "is-identifying" },
+    // Capturing is recording the sample, not yet asking anyone: "Listening…". Only the SongRec call
+    // itself reads "Identifying…", and Idle — waiting for the next scheduled attempt — never does.
+    { "Capturing", true, "Listening…", "is-listening" },
     { "Fingerprinting", true, "Identifying…", "is-identifying" },
     { "Querying", true, "Identifying…", "is-identifying" },
     { "NoMatch", true, "No match", "is-nomatch" },

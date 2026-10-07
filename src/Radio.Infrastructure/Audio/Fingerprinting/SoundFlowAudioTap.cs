@@ -26,8 +26,8 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
   // occurred on every fingerprint cycle (~15 s) and triggered a GC pause which
   // starved the capture-fill thread (root cause of Cast-output underruns to
   // 0/384000). Captures are strictly serial: BackgroundIdentificationService runs a
-  // single identification loop, and RequestImmediateIdentification only cancels the
-  // backoff delay — it never starts a concurrent cycle. This matches the existing
+  // single identification loop, and RequestImmediateIdentification only cuts its
+  // wait short — it never starts a concurrent cycle. This matches the existing
   // single-threaded _chunkBuffer reuse assumption.
   //
   // _captureBuffer is internal scratch (never escapes this method) and is grow-only.
@@ -120,20 +120,31 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
         return btSource.NeedsFingerprintingLookup;
       }
 
-      // FilePlayer uses metadata dictionary
+      // FilePlayer uses metadata dictionary. UpdateMetadataFromFile writes the key, true or false, on every
+      // track load, so a missing key means no track has been loaded yet; true is kept as the default there.
+      // (Before the call policy a fully tagged file never got the key when UseShazamForAllSources was off,
+      // and this default then fingerprinted it every cycle.)
       if (source is FilePlayerAudioSource fileSource)
       {
         if (fileSource.Metadata?.TryGetValue("NeedsFingerprintingLookup", out var val) == true)
         {
           return val is bool b && b;
         }
-        return true; // Default: needs fingerprinting if flag not set
+        return true;
       }
 
       // Radio, Vinyl, USB always need fingerprinting
       return true;
     }
   }
+
+  /// <inheritdoc/>
+  public DateTime? CurrentTrackStartedUtc => _audioManager.ActiveSource switch
+  {
+    FilePlayerAudioSource fileSource => fileSource.FingerprintTrackBoundaryUtc,
+    BluetoothAudioSource btSource => btSource.FingerprintTrackBoundaryUtc,
+    _ => null
+  };
 
   /// <inheritdoc/>
   public bool IsActive

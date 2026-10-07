@@ -12,8 +12,10 @@ using Radio.Metrics;
 namespace Radio.Fingerprinting.Services;
 
 /// <summary>
-/// Background service that periodically identifies audio from active sources using SongRec.
-/// All source types (radio, file, vinyl, USB) use the same SongRec capture-and-recognize path.
+/// Background service that identifies audio from the active source using SongRec.
+/// All source types (radio, file, vinyl, USB, Bluetooth) use the same SongRec capture-and-recognize path;
+/// when an attempt may start is decided by <see cref="FingerprintCallPolicy"/> (per-source schedules, an
+/// hourly cap, and a failure back-off).
 /// Exposes real-time status via <see cref="GetStatus"/> and <see cref="StatusChanged"/>.
 /// </summary>
 public class BackgroundIdentificationService : BackgroundService
@@ -37,9 +39,18 @@ public class BackgroundIdentificationService : BackgroundService
   // On-demand identification trigger — cancels the current delay to identify immediately
   private CancellationTokenSource? _delayCts;
 
-  // SongRec exponential backoff — increases delay after consecutive failures
-  private int _consecutiveSongRecFailures;
-  private static readonly int[] BackoffSeconds = [15, 30, 60, 120];
+  // The owner's SongRec call policy (2026-10-07): per-source schedules, the hourly cap, failure back-off.
+  private readonly FingerprintCallPolicy _policy;
+
+  // Known-start sources (file, Bluetooth): the track key last raised for the current track (segment). A
+  // validation naming that same song again is not raised — unless the source still reports that it needs a
+  // lookup (see ShouldRaise). Touched on the loop thread and by ForgetRecentIdentification, so guarded.
+  private readonly object _raisedLock = new();
+  private string? _lastRaisedKeyInSegment;
+  private CallSegment? _raisedSegment;
+
+  // Logged once per transition to "not available", instead of once per capture.
+  private bool _songRecUnavailableLogged;
 
   // --- Fingerprint status tracking ---
   private readonly object _statusLock = new();
@@ -102,7 +113,18 @@ public class BackgroundIdentificationService : BackgroundService
     _optionsMonitor = options;
     _metricsCollector = metricsCollector;
     _captureWatchdog = captureWatchdog;
+    _policy = new FingerprintCallPolicy(() => _optionsMonitor.CurrentValue, logger);
   }
+
+  /// <summary>
+  /// The clock the call policy schedules against and the loop waits on. Tests substitute a fake. Event
+  /// timestamps the sources compare against their own <see cref="DateTime.UtcNow"/> stamps
+  /// (<see cref="TrackIdentifiedEventArgs.CaptureStartedAt"/>) stay on the system clock.
+  /// </summary>
+  internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+  /// <summary>Test seam (kind A — visibility): the call policy this service schedules with.</summary>
+  internal FingerprintCallPolicy CallPolicyForTesting => _policy;
 
   /// <summary>
   /// Returns the current fingerprint identification status snapshot.
@@ -141,12 +163,25 @@ public class BackgroundIdentificationService : BackgroundService
   }
 
   /// <summary>
-  /// Requests an immediate identification cycle, cutting short the loop's current idle or back-off wait.
-  /// Called by sources when a track changes or new incomplete metadata is received.
+  /// Wakes the loop so it re-reads the active source now instead of at the end of its current wait.
+  /// Called by sources when a track changes, new incomplete metadata arrives, or the radio is re-tuned.
   /// </summary>
+  /// <remarks>
+  /// This does not by itself bypass the call policy. For an unknown-start source (radio, vinyl, USB) it
+  /// makes the next attempt due now; for a known-start source (file, Bluetooth) the new track's own
+  /// schedule applies — its first attempt is <see cref="FingerprintingOptions.KnownStartFirstCallDelaySeconds"/>
+  /// after the track started. The hourly cap and the failure back-off apply either way.
+  /// </remarks>
   public void RequestImmediateIdentification()
   {
     _logger.LogDebug("Immediate identification requested");
+    _policy.RequestImmediate();
+    WakeLoop();
+  }
+
+  // Cancels the loop's current wait, if it is in one.
+  private void WakeLoop()
+  {
     try
     {
       _delayCts?.Cancel();
@@ -180,10 +215,27 @@ public class BackgroundIdentificationService : BackgroundService
 
   /// <summary>
   /// Internal test hook: runs exactly one identification cycle, without <c>ExecuteAsync</c>'s start-up delay
-  /// or its idle wait. Returns what the cycle returns (true when audio was captured).
+  /// or its idle wait. Returns true when the cycle captured audio.
   /// </summary>
-  internal Task<bool> RunOneCycleForTestingAsync(CancellationToken ct = default) =>
+  internal async Task<bool> RunOneCycleForTestingAsync(CancellationToken ct = default) =>
+    (await IdentifyCurrentAudioAsync(ct)).Captured;
+
+  /// <summary>
+  /// Internal test hook: runs exactly one identification cycle and returns its full result, including
+  /// whether SongRec was called and when the policy next allows an attempt.
+  /// </summary>
+  internal Task<CycleResult> RunOneCycleWithResultForTestingAsync(CancellationToken ct = default) =>
     IdentifyCurrentAudioAsync(ct);
+
+  /// <summary>What one identification cycle did.</summary>
+  /// <param name="Captured">Audio was captured (a capture that returned no samples does not count).</param>
+  /// <param name="CalledRecognizer">A SongRec process was started.</param>
+  /// <param name="NextAttemptAt">When the call policy said the next attempt may start, if it said to wait.</param>
+  internal readonly record struct CycleResult(bool Captured, bool CalledRecognizer, DateTimeOffset? NextAttemptAt)
+  {
+    /// <summary>Nothing was captured and no wait time is known: poll again after the idle interval.</summary>
+    public static CycleResult Idle => new(false, false, null);
+  }
 
   /// <inheritdoc/>
   protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -204,10 +256,10 @@ public class BackgroundIdentificationService : BackgroundService
 
     while (!stoppingToken.IsCancellationRequested)
     {
-      var captured = false;
+      var cycle = CycleResult.Idle;
       try
       {
-        captured = await IdentifyCurrentAudioAsync(stoppingToken);
+        cycle = await IdentifyCurrentAudioAsync(stoppingToken);
 
         // Clean up old entries from duplicate suppression cache
         CleanupRecentIdentifications();
@@ -224,38 +276,43 @@ public class BackgroundIdentificationService : BackgroundService
 
       try
       {
-        UpdatePhase(FingerprintPhase.Idle);
-
-        TimeSpan delay;
-        if (_consecutiveSongRecFailures > 0)
+        // Only on a change: this runs on every idle poll, and each UpdatePhase raises StatusChanged. Error
+        // is held while SongRec failures are being backed off, so the status reads "unavailable" for as long
+        // as that is true; the next attempt's Capturing replaces it.
+        var phase = CurrentPhase;
+        if (phase != FingerprintPhase.Idle
+            && !(phase == FingerprintPhase.Error && _policy.ConsecutiveErrors > 0))
         {
-          var delaySeconds = BackoffSeconds[Math.Min(_consecutiveSongRecFailures - 1, BackoffSeconds.Length - 1)];
-
-          _logger.LogDebug("SongRec backoff: {BackoffSeconds}s after {Failures} consecutive failures",
-            delaySeconds, _consecutiveSongRecFailures);
-
-          _metricsCollector?.Gauge("fingerprint.consecutive_failures", _consecutiveSongRecFailures);
-          delay = TimeSpan.FromSeconds(delaySeconds);
+          UpdatePhase(FingerprintPhase.Idle);
         }
-        else if (!captured)
+
+        if (cycle.CalledRecognizer)
         {
-          // AUD-35: a cycle that captured nothing may have returned without awaiting anything, so going
-          // straight round again was a synchronous tight loop — one core at 99.9 % on the appliance,
-          // indefinitely. RequestImmediateIdentification cancels this wait, so a track change that
-          // requests identification is delayed by at most one idle interval (a request that lands outside
-          // the wait, or before the source is Playing, is not lost for longer than that). The 100 ms floor
-          // keeps a mistaken 0 from recreating most of the old cost.
-          delay = TimeSpan.FromMilliseconds(Math.Max(100, _options.IdlePollIntervalMs));
-        }
-        else
-        {
-          // The capture itself (SampleDurationSeconds) throttles a cycle that did work.
+          // Ask the policy straight away: it now holds this attempt's outcome and knows the next due time.
           continue;
+        }
+
+        // AUD-35: a cycle that captured nothing may have returned without awaiting anything, so going
+        // straight round again was a synchronous tight loop — one core at 99.9 % on the appliance,
+        // indefinitely. The 100 ms floor keeps a mistaken 0 from recreating most of the old cost.
+        //
+        // The same wait covers an attempt the call policy has scheduled for later: the loop sleeps until it
+        // is due, but never longer than the idle interval, so it re-reads the source at least that often
+        // (a track or source change re-plans the schedule without needing a wake-up).
+        // RequestImmediateIdentification cancels the wait.
+        var delay = TimeSpan.FromMilliseconds(Math.Max(100, _options.IdlePollIntervalMs));
+        if (cycle.NextAttemptAt is { } nextAttemptAt)
+        {
+          var untilDue = nextAttemptAt - TimeProvider.GetUtcNow();
+          if (untilDue < delay)
+          {
+            delay = untilDue > TimeSpan.Zero ? untilDue : TimeSpan.Zero;
+          }
         }
 
         using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _delayCts = delayCts;
-        await Task.Delay(delay, delayCts.Token);
+        await Task.Delay(delay, TimeProvider, delayCts.Token);
         _delayCts = null;
       }
       catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
@@ -272,11 +329,15 @@ public class BackgroundIdentificationService : BackgroundService
     _logger.LogInformation("Background identification service stopped");
   }
 
+  /// <summary>
+  /// One pass of the loop: asks the call policy whether an attempt is due for the active source and, if so,
+  /// captures audio and sends it to SongRec.
+  /// </summary>
   /// <returns>
-  /// True when the cycle captured audio — which is what throttles the loop. False when it returned without
-  /// capturing (no tap, inactive source, no lookup needed, no samples): the caller must then wait (AUD-35).
+  /// What the cycle did. A cycle that did not start SongRec must be followed by a wait (AUD-35) — until
+  /// <see cref="CycleResult.NextAttemptAt"/> when the policy named one, otherwise the idle interval.
   /// </returns>
-  private async Task<bool> IdentifyCurrentAudioAsync(CancellationToken ct)
+  private async Task<CycleResult> IdentifyCurrentAudioAsync(CancellationToken ct)
   {
     _logger.LogDebug("Starting identification cycle");
     var cycleStartTime = DateTime.UtcNow;
@@ -288,26 +349,40 @@ public class BackgroundIdentificationService : BackgroundService
     if (audioTap == null)
     {
       _logger.LogWarning("Audio sample provider not available for fingerprinting");
-      return false;
+      return CycleResult.Idle;
     }
 
     // Check if source is active and needs fingerprinting
     if (!audioTap.IsActive)
     {
       _logger.LogDebug("Audio source not active, skipping identification");
-      return false;
+      return CycleResult.Idle;
     }
 
-    if (!audioTap.NeedsFingerprintingLookup)
+    var snapshot = new SourceSnapshot(
+      audioTap.SourceType,
+      audioTap.SourceName ?? audioTap.SourceType.ToString(),
+      audioTap.CurrentTrackStartedUtc,
+      audioTap.NeedsFingerprintingLookup);
+    var decision = _policy.Decide(snapshot, TimeProvider.GetUtcNow());
+
+    if (decision.Kind == CallDecisionKind.NotNeeded)
     {
       _logger.LogDebug("Source {SourceType} does not need fingerprinting, skipping", audioTap.SourceType);
-      return false;
+      return CycleResult.Idle;
+    }
+
+    if (decision.Kind == CallDecisionKind.Wait)
+    {
+      _logger.LogDebug("Next identification attempt for {SourceType} not before {NotBefore:u} ({Blocker})",
+        audioTap.SourceType, decision.NotBefore?.UtcDateTime, decision.Blocker);
+      return new CycleResult(false, false, decision.NotBefore);
     }
 
     _logger.LogDebug("Audio source active: {SourceType} - {SourceName}", audioTap.SourceType, audioTap.SourceName);
 
     // Start or continue an event record for this audio segment
-    var sourceName = audioTap.SourceName ?? audioTap.SourceType.ToString();
+    var sourceName = snapshot.SourceName;
     var sourceType = audioTap.SourceType.ToString();
     EnsureCurrentEvent(sourceName, sourceType);
     UpdatePhase(FingerprintPhase.Capturing);
@@ -316,7 +391,10 @@ public class BackgroundIdentificationService : BackgroundService
     _metricsCollector?.Increment("fingerprint.identification_attempts", 1,
       new Dictionary<string, string> { ["source"] = sourceTag });
 
-    // Unified path: Capture audio → SongRec recognition
+    // Unified path: Capture audio → SongRec recognition. Two clocks on purpose: the policy's (the start of
+    // this attempt, for start-to-start intervals) and the system clock the sources' AUD-33 stale-result
+    // checks compare against. They are the same clock outside tests.
+    var attemptStartedAt = TimeProvider.GetUtcNow();
     var captureStartTime = DateTime.UtcNow;
     var sampleDuration = TimeSpan.FromSeconds(_options.SampleDurationSeconds);
     _logger.LogDebug("Capturing {Duration}s of audio for SongRec", sampleDuration.TotalSeconds);
@@ -337,7 +415,9 @@ public class BackgroundIdentificationService : BackgroundService
       UpdatePhase(FingerprintPhase.Error, "No audio samples captured");
       _metricsCollector?.Increment("fingerprint.identification_failures", 1,
         new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "error" });
-      return false;
+      // Nothing is recorded with the policy: the attempt stays due, so audio returning after silence is
+      // tried again on the next pass rather than after a full interval.
+      return CycleResult.Idle;
     }
 
     _logger.LogDebug("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
@@ -346,29 +426,47 @@ public class BackgroundIdentificationService : BackgroundService
     var songRec = scope.ServiceProvider.GetService<ISongRecRecognitionService>();
     if (songRec is not { IsAvailable: true })
     {
-      _logger.LogWarning("SongRec not available for identification");
+      // Once per transition: this used to be a Warning on every capture.
+      if (!_songRecUnavailableLogged)
+      {
+        _songRecUnavailableLogged = true;
+        _logger.LogWarning("SongRec not available for identification");
+      }
       UpdatePhase(FingerprintPhase.NoMatch);
       _metricsCollector?.Increment("fingerprint.identification_failures", 1,
         new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "error" });
-      return true;
+      _policy.RecordOutcome(decision.Segment, attemptStartedAt, CallOutcome.NotCalled, TimeProvider.GetUtcNow());
+      return new CycleResult(true, false, null);
     }
+    _songRecUnavailableLogged = false;
 
     UpdatePhase(FingerprintPhase.Querying);
     var lookupStartTime = DateTime.UtcNow;
     double lookupElapsed = 0;
 
     MetadataLookupResult? result = null;
+    var outcome = CallOutcome.Error;
+    string? failure = null;
 
     try
     {
       RecordMetadataCall();
-      var songRecMetadata = await songRec.RecognizeAsync(samples, ct);
+      _policy.RecordCallStarted(TimeProvider.GetUtcNow());
+      var recognition = await songRec.RecognizeAsync(samples, ct);
       lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
 
       _metricsCollector?.Gauge("fingerprint.songrec_latency_ms", lookupElapsed);
 
-      if (songRecMetadata != null)
+      if (recognition.Outcome == SongRecOutcome.Error)
       {
+        failure = recognition.Error ?? "unknown SongRec failure";
+        _logger.LogDebug("SongRec recognition failed: {Error}", failure);
+        _metricsCollector?.Increment("fingerprint.identification_failures", 1,
+          new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "error" });
+      }
+      else if (recognition is { Outcome: SongRecOutcome.Match, Track: { } songRecMetadata })
+      {
+        outcome = CallOutcome.Match;
         // Cache album art from Shazam CDN to serve locally
         if (!string.IsNullOrEmpty(songRecMetadata.CoverArtUrl))
         {
@@ -400,39 +498,34 @@ public class BackgroundIdentificationService : BackgroundService
           Source = LookupSource.SongRec
         };
 
-        _consecutiveSongRecFailures = 0;
-        _metricsCollector?.Gauge("fingerprint.consecutive_failures", 0);
         _metricsCollector?.Increment("fingerprint.identification_successes", 1,
           new Dictionary<string, string> { ["source"] = sourceTag });
       }
       else
       {
+        outcome = CallOutcome.NoMatch;
         // LOG-12: Debug — the one no-match line kept (SongRecRecognitionService's is Trace).
         _logger.LogDebug("SongRec returned no match");
         _metricsCollector?.Increment("fingerprint.identification_failures", 1,
           new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "no_match" });
       }
     }
-    catch (OperationCanceledException)
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
       throw;
     }
-    catch (TimeoutException)
-    {
-      lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
-      _logger.LogWarning("SongRec recognition timed out");
-      _consecutiveSongRecFailures++;
-      _metricsCollector?.Increment("fingerprint.identification_failures", 1,
-        new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "timeout" });
-    }
     catch (Exception ex)
     {
+      // An implementation that throws instead of returning SongRecOutcome.Error is still a failure.
       lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
-      _logger.LogWarning(ex, "SongRec recognition failed");
-      _consecutiveSongRecFailures++;
+      failure = ex.Message;
+      _logger.LogDebug(ex, "SongRec recognition threw");
       _metricsCollector?.Increment("fingerprint.identification_failures", 1,
         new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "error" });
     }
+
+    _policy.RecordOutcome(decision.Segment, attemptStartedAt, outcome, TimeProvider.GetUtcNow(), failure);
+    _metricsCollector?.Gauge("fingerprint.consecutive_failures", _policy.ConsecutiveErrors);
 
     // Update event record with result
     if (result?.IsMatch == true && result.Metadata != null)
@@ -441,19 +534,24 @@ public class BackgroundIdentificationService : BackgroundService
       UpdateCurrentEventMatch(result.Metadata, result.Confidence);
       UpdatePhase(FingerprintPhase.Matched);
 
-      // Check duplicate suppression
-      if (IsDuplicateIdentification(trackKey))
+      if (!ShouldRaise(decision.Segment, trackKey, audioTap))
       {
         _logger.LogDebug("Suppressing duplicate identification: {Title} by {Artist}",
           result.Metadata.Title, result.Metadata.Artist);
         _metricsCollector?.Increment("fingerprint.duplicate_suppressions");
-        return true;
+        return new CycleResult(true, true, null);
       }
 
       MarkAsRecentlyIdentified(trackKey, result.Confidence);
 
       // Song change detection: compare with last identification
       DetectSongChange(trackKey, result.Metadata, result.Confidence, sourceTag);
+    }
+    else if (outcome == CallOutcome.Error)
+    {
+      // A failure is not a statement about the audio, so it is not counted as a no-match row; the Error
+      // phase also makes the next attempt start a fresh event record (EnsureCurrentEvent).
+      UpdatePhase(FingerprintPhase.Error, failure);
     }
     else
     {
@@ -482,19 +580,81 @@ public class BackgroundIdentificationService : BackgroundService
     var totalElapsed = (DateTime.UtcNow - cycleStartTime).TotalMilliseconds;
     _logger.LogDebug("Identification cycle completed in {TotalElapsed}ms (lookup: {Lookup}ms)",
       totalElapsed, lookupElapsed);
-    return true;
+    return new CycleResult(true, true, null);
   }
 
   /// <summary>
-  /// Resets the song change detection state.
-  /// Call when the audio source changes to prevent false song-change events.
+  /// Whether a match should be raised as <see cref="TrackIdentified"/>, or suppressed as a duplicate.
   /// </summary>
+  /// <remarks>
+  /// <para>
+  /// Unknown-start sources (radio, vinyl, USB) keep the time-based window
+  /// (<see cref="FingerprintingOptions.DuplicateSuppressionMinutes"/>): the same song comes round on every
+  /// attempt while it plays, and raising each one would only repeat itself.
+  /// </para>
+  /// <para>
+  /// Known-start sources (file, Bluetooth) are scoped to the track instead. Every new track raises its first
+  /// match, and a later match is suppressed only when it names the song last raised for this track AND the
+  /// source no longer reports needing a lookup. Before the call policy these sources used the time window
+  /// too, and it was a loop: replaying a file whose song had been identified less than five minutes
+  /// earlier had its match suppressed, so the file player never saw it, never cleared its lookup flag and
+  /// (without embedded art) never got its art back — and the loop re-called SongRec every cycle for the
+  /// rest of the window (estimated from the code at ~15-18 extra calls per such track).
+  /// </para>
+  /// </remarks>
+  private bool ShouldRaise(CallSegment segment, string trackKey, IAudioSampleProvider tap)
+  {
+    if (!segment.KnownStart)
+    {
+      return !IsDuplicateIdentification(trackKey);
+    }
+
+    var sourceStillNeedsLookup = tap.NeedsFingerprintingLookup;
+    lock (_raisedLock)
+    {
+      if (segment != _raisedSegment)
+      {
+        _raisedSegment = segment;
+        _lastRaisedKeyInSegment = null;
+      }
+
+      if (trackKey == _lastRaisedKeyInSegment && !sourceStillNeedsLookup)
+      {
+        return false;
+      }
+
+      _lastRaisedKeyInSegment = trackKey;
+      return true;
+    }
+  }
+
+  /// <summary>
+  /// Resets the song change detection state, and the call schedule, for a source switch. Wakes the loop so
+  /// the new source is planned for now rather than at the end of the old source's wait.
+  /// </summary>
+  /// <remarks>
+  /// The hourly cap and the SongRec failure back-off are deliberately NOT reset: they protect the Shazam
+  /// account, not a source, and switching sources must not be a way round them. (Before the call policy
+  /// this reset the failure count.)
+  /// </remarks>
   public void ResetSongChangeState()
   {
     _lastIdentification = null;
     _lastSongChangeAt = DateTime.MinValue;
-    _consecutiveSongRecFailures = 0;
+    _policy.ResetSegment();
     _logger.LogDebug("Song change detection state reset");
+    WakeLoop();
+  }
+
+  private FingerprintPhase CurrentPhase
+  {
+    get
+    {
+      lock (_statusLock)
+      {
+        return _currentPhase;
+      }
+    }
   }
 
   // --- Status tracking helpers ---
@@ -751,7 +911,17 @@ public class BackgroundIdentificationService : BackgroundService
   /// </remarks>
   public void ForgetRecentIdentification(TrackMetadata track)
   {
-    _recentIdentifications.TryRemove(TrackKey(track), out _);
+    var key = TrackKey(track);
+    _recentIdentifications.TryRemove(key, out _);
+
+    // The known-start (per-track) suppression in ShouldRaise is marked before the raise in the same way.
+    lock (_raisedLock)
+    {
+      if (_lastRaisedKeyInSegment == key)
+      {
+        _lastRaisedKeyInSegment = null;
+      }
+    }
   }
 
   /// <summary>Test seam (kind B — injection): writes the suppression entry a real identification cycle

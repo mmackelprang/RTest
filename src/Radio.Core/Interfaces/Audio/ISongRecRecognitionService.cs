@@ -13,8 +13,13 @@ public interface ISongRecRecognitionService
   /// </summary>
   /// <param name="samples">The audio sample buffer to recognize.</param>
   /// <param name="ct">Cancellation token.</param>
-  /// <returns>Track metadata if recognized, null if no match or error.</returns>
-  Task<TrackMetadata?> RecognizeAsync(
+  /// <returns>
+  /// <see cref="SongRecOutcome.Match"/> with the track, <see cref="SongRecOutcome.NoMatch"/> when SongRec ran
+  /// cleanly without recognising the audio, or <see cref="SongRecOutcome.Error"/> when the attempt itself
+  /// failed (not available, process start failure, timeout, non-zero exit, unparsable output). Caller
+  /// cancellation is not an outcome: it surfaces as <see cref="OperationCanceledException"/>.
+  /// </returns>
+  Task<SongRecRecognitionResult> RecognizeAsync(
     AudioSampleBuffer samples,
     CancellationToken ct = default);
 

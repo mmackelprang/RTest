@@ -38,9 +38,18 @@ public interface IAudioSampleProvider
 
   /// <summary>
   /// Gets whether the active source needs fingerprinting identification.
-  /// Returns false when the source already has complete metadata (e.g., file with tags,
-  /// Bluetooth with complete AVRCP data). Returns true for sources without metadata
-  /// (radio, vinyl, USB) or sources with incomplete metadata.
+  /// For the file player and Bluetooth: true while the current track's own metadata lacks a title, an
+  /// artist or album art and no identification has yet been applied to it; false once it is complete or
+  /// identified. Always true for sources without metadata of their own (radio, vinyl, USB).
+  /// How often an identification is attempted is decided by the call policy, not by this flag.
   /// </summary>
   bool NeedsFingerprintingLookup { get; }
+
+  /// <summary>
+  /// For a source that knows when each track begins (file player, Bluetooth): the UTC instant the current
+  /// track started, or the source last became the active one, whichever is later. A new value means a new
+  /// track, which restarts that source's identification schedule. Null for sources that cannot tell
+  /// (radio, vinyl, USB) and when nothing has been recorded yet.
+  /// </summary>
+  DateTime? CurrentTrackStartedUtc => null;
 }

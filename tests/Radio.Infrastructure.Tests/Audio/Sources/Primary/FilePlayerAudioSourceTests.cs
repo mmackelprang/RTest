@@ -1781,6 +1781,109 @@ public class FilePlayerAudioSourceTests : IDisposable
 
   #endregion
 
+  #region Fingerprint call policy: when a file asks for identification
+
+  private FilePlayerAudioSource CreateSourceWithArtCacheAndShazamFlag(bool useShazamForAllSources)
+  {
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
+    {
+      UseShazamForAllSources = useShazamForAllSources
+    });
+
+    return Track(new FilePlayerAudioSource(
+      _loggerMock.Object,
+      _optionsMock.Object,
+      _preferencesMock.Object,
+      _testDir,
+      albumArtCache: CreateAlbumArtCacheService(),
+      fingerprintingOptions: fpMonitor.Object));
+  }
+
+  // Copies the sample MP3 and writes a Title and Artist tag, with or without an embedded FrontCover.
+  private string CreateTaggedMp3(string relativePath, bool withArt)
+  {
+    var dest = withArt ? CreateMp3WithEmbeddedArt(relativePath) : CreateMp3WithoutEmbeddedArt(relativePath);
+    using (var tag = TagLib.File.Create(dest))
+    {
+      tag.Tag.Title = "Tagged Title";
+      tag.Tag.Performers = new[] { "Tagged Artist" };
+      tag.Save();
+    }
+    return dest;
+  }
+
+  /// <summary>
+  /// Regression — the latent tagged-file bug. With UseShazamForAllSources off, a fully tagged file used to
+  /// get no NeedsFingerprintingLookup key at all, and SoundFlowAudioTap treats a missing key as "needs
+  /// fingerprinting": every tagged file was fingerprinted every cycle. The key is now written either way,
+  /// and a file with a title, an artist and embedded art makes no calls whatever the (retired) flag says.
+  /// </summary>
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task LoadFile_TitleArtistAndEmbeddedArt_WritesLookupFalse_WhateverTheRetiredFlag(bool useShazamForAllSources)
+  {
+    await using var source = CreateSourceWithArtCacheAndShazamFlag(useShazamForAllSources);
+    var path = CreateTaggedMp3("complete.mp3", withArt: true);
+
+    await source.LoadFileAsync(Path.GetFileName(path));
+
+    Assert.Equal("Tagged Title", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Tagged Artist", source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.StartsWith("/api/albumart/", (string)source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+    Assert.True(source.Metadata.ContainsKey("NeedsFingerprintingLookup"), "the key must be written, not left missing");
+    Assert.Equal(false, source.Metadata["NeedsFingerprintingLookup"]);
+  }
+
+  /// <summary>Album art counts: a file with a title and artist but no embedded art still asks once.</summary>
+  [Fact]
+  public async Task LoadFile_TitleAndArtistButNoArt_WritesLookupTrue()
+  {
+    await using var source = CreateSourceWithArtCacheAndShazamFlag(useShazamForAllSources: false);
+    var path = CreateTaggedMp3("no-art.mp3", withArt: false);
+
+    await source.LoadFileAsync(Path.GetFileName(path));
+
+    Assert.Equal("Tagged Artist", source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal(true, source.Metadata["NeedsFingerprintingLookup"]);
+  }
+
+  /// <summary>An untagged file (title is only the file name) asks for identification.</summary>
+  [Fact]
+  public async Task LoadFile_NoTags_WritesLookupTrue()
+  {
+    await using var source = CreateSourceWithArtCacheAndShazamFlag(useShazamForAllSources: false);
+    CreateTestFile("untagged.mp3");
+
+    await source.LoadFileAsync("untagged.mp3");
+
+    Assert.Equal(true, source.Metadata["NeedsFingerprintingLookup"]);
+  }
+
+  /// <summary>The track boundary the call policy schedules against moves when a different file loads.</summary>
+  [Fact]
+  public async Task FingerprintTrackBoundary_MovesOnANewFile_NotOnAReloadOfTheSameOne()
+  {
+    await using var source = CreateSource();
+    CreateTestFile("a.mp3");
+    CreateTestFile("b.mp3");
+
+    await source.LoadFileAsync("a.mp3");
+    var first = source.FingerprintTrackBoundaryUtc;
+    await Task.Delay(20); // a strictly later wall-clock tick for the next stamp
+    await source.LoadFileAsync("a.mp3");
+    var reload = source.FingerprintTrackBoundaryUtc;
+    await source.LoadFileAsync("b.mp3");
+    var next = source.FingerprintTrackBoundaryUtc;
+
+    Assert.NotNull(first);
+    Assert.Equal(first, reload);
+    Assert.True(next > first);
+  }
+
+  #endregion
+
   #region Cross-Source Contamination Tests
 
   // TrackIdentified is broadcast to EVERY subscriber, so the
@@ -2170,9 +2273,8 @@ public class FilePlayerAudioSourceTests : IDisposable
 
   /// <summary>
   /// Builds a source with UseShazamForAllSources enabled — the appliance's production
-  /// configuration. ⚠ Since AUD-1 the flag is inert for these tests: OnTrackIdentified no
-  /// longer reads it (it only gates UpdateMetadataFromFile, which these tests bypass by
-  /// setting NeedsFingerprintingLookup by hand). It is set so the fixture matches the box.
+  /// configuration. ⚠ The flag is inert: OnTrackIdentified stopped reading it with AUD-1, and
+  /// UpdateMetadataFromFile with the fingerprint call policy. It is set so the fixture matches the box.
   /// </summary>
   private FilePlayerAudioSource CreateSourceForIdentification(Func<IAudioSource?>? getActiveSource)
   {

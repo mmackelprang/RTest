@@ -30,7 +30,6 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly IAlbumArtCacheService? _albumArtCache;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
-  private readonly IOptionsMonitor<FingerprintingOptions>? _fingerprintingOptionsMonitor;
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly SemaphoreSlim _routeLock = new(1, 1);
   private string? _playbackId;
@@ -168,15 +167,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private const string DefaultTitle = "Bluetooth";
   private const string DefaultDeviceName = "Bluetooth Device";
 
-  /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
-  private FingerprintingOptions FpOptions =>
-    _fingerprintingOptionsMonitor?.CurrentValue ?? new FingerprintingOptions();
-
   /// <summary>
-  /// When true, the fingerprinting pipeline will attempt to identify the current track.
-  /// Set when AVRCP metadata is incomplete (no title/artist).
+  /// When true, the fingerprinting pipeline wants to identify the current track. Set on connect and
+  /// capture recovery; recomputed on every AVRCP metadata event — true exactly when the track lacks a
+  /// title, an artist or album art (on the appliance AVRCP never supplies art, AUD-17, so a track whose
+  /// art has not yet been resolved is always "missing"); cleared on disconnect and by the first
+  /// identification applied to the track. How often an identification is attempted is the call policy's
+  /// decision, not this flag's.
   /// </summary>
   public bool NeedsFingerprintingLookup { get; private set; }
+
+  /// <summary>
+  /// For the fingerprint call policy (via <c>SoundFlowAudioTap.CurrentTrackStartedUtc</c>): when the current
+  /// AVRCP track key took effect or Bluetooth last became the active source, whichever is later — the same
+  /// boundary <see cref="OnTrackIdentified"/> drops stale results against (AUD-33, AUD-34). Null before
+  /// either has happened.
+  /// </summary>
+  internal DateTime? FingerprintTrackBoundaryUtc => LatestTrackBoundaryUtc(Volatile.Read(ref _trackStartedAtTicks));
 
   public BluetoothAudioSource(
     ILogger<BluetoothAudioSource> logger,
@@ -199,7 +206,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _options = options;
-    _fingerprintingOptionsMonitor = fingerprintingOptions;
+    // fingerprintingOptions is not read: it carried the UseShazamForAllSources gate, which the fingerprint
+    // call policy retired (see OnMetadataChanged). Kept so the factory and existing callers construct unchanged.
     _playbackService = playbackService;
     SetDefaultMetadata(DefaultTitle, "Bluetooth", DefaultDeviceName);
 
@@ -1141,17 +1149,21 @@ public class BluetoothAudioSource : USBAudioSourceBase
       }
     }
 
-    // If metadata is incomplete (no title or artist), request fingerprinting.
-    // When UseShazamForAllSources is enabled, always fingerprint — on the appliance SongRec
-    // is the only source of BT cover art there is: LinuxBluetoothService supplies none, because
-    // BlueZ offers no URL-shaped art and here exposes no cover-art handle either (AUD-17). When
-    // SongRec does not identify the track either, the UI shows the fallback icon — accepted UX.
+    // Call policy (owner, 2026-10-07): fingerprint only while the track lacks a title, an artist or album
+    // art. Art is part of the test because on the appliance SongRec is the only source of BT cover art
+    // there is: LinuxBluetoothService supplies none, because BlueZ offers no URL-shaped art and here
+    // exposes no cover-art handle either (AUD-17). So a track whose art has not been resolved yet is
+    // always "incomplete" and gets the identification that fetches its art; one whose art the resolved-art
+    // cache restored above is complete and makes no call. When SongRec does not identify the track
+    // either, the UI shows the fallback icon — accepted UX. (This replaced the UseShazamForAllSources
+    // gate, which existed only to get that art and also fingerprinted tracks that needed nothing.)
     //
     // This is a GATE only. What is done with the answer is decided per field in
     // OnTrackIdentified and is not configurable: since AUD-1 an identification may only
     // fill fields AVRCP left missing.
-    var hasIncompleteMetadata = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist);
-    NeedsFingerprintingLookup = hasIncompleteMetadata || FpOptions.UseShazamForAllSources;
+    var hasIncompleteMetadata = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist)
+      || SourceMetadataPrecedence.ShouldFillAlbumArt(MetadataInternal);
+    NeedsFingerprintingLookup = hasIncompleteMetadata;
 
     if (NeedsFingerprintingLookup)
     {
@@ -1173,7 +1185,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // track key took effect describes the previous track: applying it would cache that track's art
     // under THIS track's key, and duplicate suppression can hold off the correcting identification
     // for minutes. Dropped before the lookup flag is cleared, so when that flag is set for this track
-    // (incomplete AVRCP metadata, or UseShazamForAllSources) it is still identified next cycle.
+    // (title, artist or art missing) the next scheduled attempt still applies to it.
     var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
     // AUD-34: the boundary is also this source's last activation, so a sample captured from the
     // previous source (or before a switch away and back on the same track) is dropped too.

@@ -257,14 +257,21 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     Assert.False(_mockBluetooth.IsAudioManagedByPlatform);
   }
 
-  [Fact]
-  public async Task MetadataChanged_WithShazamToggleOn_SetsNeedsFingerprintingEvenWithCompleteMetadata()
+  /// <summary>
+  /// Fingerprint call policy: "metadata missing" includes album art, and AVRCP never supplies art on the
+  /// appliance (AUD-17). So a track whose title and artist are complete still wants the identification
+  /// that fetches its art — and that no longer depends on UseShazamForAllSources, which used to be the only
+  /// thing between the appliance and losing Bluetooth album art (setting it false killed it, AUD-1).
+  /// </summary>
+  [Theory]
+  [InlineData(true)]
+  [InlineData(false)]
+  public async Task MetadataChanged_CompleteTitleAndArtistButNoArt_NeedsFingerprinting_WhateverTheRetiredFlag(bool useShazamForAllSources)
   {
-    // Arrange — create source with UseShazamForAllSources enabled
     var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
     fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
-      UseShazamForAllSources = true
+      UseShazamForAllSources = useShazamForAllSources
     });
 
     await _source.DisposeAsync();
@@ -277,38 +284,34 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       metricsCollector: _metricsMock.Object,
       fingerprintingOptions: fpMonitor.Object);
 
-    // Act — send complete AVRCP metadata (title + artist present)
+    // Complete AVRCP text, no art — the appliance's shape.
     _mockBluetooth.SimulateMetadataChange("Known Song", "Known Artist");
 
-    // Assert — should still request fingerprinting because toggle is ON
     Assert.True(_source.NeedsFingerprintingLookup);
   }
 
+  /// <summary>
+  /// Call policy: once a track's art has been resolved, the phone re-publishing the same track restores the
+  /// art from the per-track cache — nothing is missing, so it asks for no further identification. A new
+  /// track without art asks again.
+  /// </summary>
   [Fact]
-  public async Task MetadataChanged_WithShazamToggleOff_DoesNotFingerprintCompleteMetadata()
+  public async Task MetadataChanged_TrackWhoseArtIsAlreadyResolved_DoesNotNeedFingerprinting()
   {
-    // Arrange — create source with UseShazamForAllSources disabled (default)
-    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
-    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
-    {
-      UseShazamForAllSources = false
-    });
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Enter Sandman", "Metallica");
+    Assert.True(_source.NeedsFingerprintingLookup);
 
-    await _source.DisposeAsync();
-    _source = new BluetoothAudioSource(
-      _loggerMock.Object,
-      _deviceManagerMock.Object,
-      _mockBluetooth,
-      _options,
-      identificationService: null,
-      metricsCollector: _metricsMock.Object,
-      fingerprintingOptions: fpMonitor.Object);
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(DateTime.UtcNow, "Enter Sandman", "Metallica", "/api/albumart/sandman.jpg"));
+    Assert.Equal("/api/albumart/sandman.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
 
-    // Act — send complete AVRCP metadata
-    _mockBluetooth.SimulateMetadataChange("Known Song", "Known Artist");
-
-    // Assert — should NOT request fingerprinting because toggle is OFF and metadata is complete
+    RaiseAvrcp(bt, "Enter Sandman", "Metallica"); // an AVRCP refresh of the same track
+    Assert.Equal("/api/albumart/sandman.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
     Assert.False(_source.NeedsFingerprintingLookup);
+
+    RaiseAvrcp(bt, "Fade to Black", "Metallica");
+    Assert.True(_source.NeedsFingerprintingLookup);
   }
 
   // -----------------------------------------------------------------------
@@ -900,7 +903,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     // Assert — every field AVRCP supplied survives (MockBluetoothService.SimulateMetadataChange
     // always supplies Album = "Mock Album"), and the handler ran to completion rather than
     // being short-circuited by the active-source guard: the gate set
-    // NeedsFingerprintingLookup because the toggle is on, and nothing else in this fixture
+    // NeedsFingerprintingLookup because the track has no art, and nothing else in this fixture
     // clears it but the handler body.
     Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
     Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
@@ -939,7 +942,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
       // The appliance's effective value (its SQLite config store holds
-      // fingerprinting:useShazamForAllSources|true).
+      // fingerprinting:useShazamForAllSources|true). Not read since the fingerprint call policy.
       UseShazamForAllSources = true
     });
 
