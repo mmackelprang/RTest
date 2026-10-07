@@ -70,8 +70,8 @@ public interface IVisualizerService : IDisposable
 public sealed class SpectrumData
 {
   /// <summary>
-  /// Gets or sets each frequency bin's absolute amplitude (0.0 to 1.0, where a full-scale sine reads
-  /// 1.0). Not normalized per frame.
+  /// Gets or sets each frequency bin's absolute amplitude, clamped to 0.0–1.0 (a full-scale sine reads
+  /// 1.0; bin 0, DC, reads twice its true amplitude). Not normalized per frame.
   /// </summary>
   public float[] Magnitudes { get; set; } = [];
 

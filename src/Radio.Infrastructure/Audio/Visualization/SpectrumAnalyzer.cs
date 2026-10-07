@@ -113,9 +113,13 @@ internal sealed class SpectrumAnalyzer
   /// the frame. This used to divide every frame by its own loudest bin, which pinned the loudest bin at
   /// 1.0 and so drew broadband noise (radio static) as a full-height wall, and hid how loud anything
   /// actually was. The visualization tap runs before master volume (SoundFlow applies modifiers before
-  /// Volume), so these levels do not move with the volume knob.
+  /// Volume), so these levels do not move with the volume knob — but they do move with what is
+  /// upstream of the tap: a source's gain offset, ducking, balance, and the SDR receiver's volume.
   /// </remarks>
-  /// <returns>Array of amplitude values (0.0 to 1.0, full-scale sine = 1.0) for each frequency bin.</returns>
+  /// <returns>
+  /// Amplitude per bin, clamped to 0.0–1.0 (full-scale sine = 1.0). Bin 0 (DC) reads twice its true
+  /// amplitude; the display bands never use it.
+  /// </returns>
   public float[] GetMagnitudes()
   {
     lock (_lock)

@@ -35,7 +35,8 @@ public class LogSpectrumBandsTests
   /// <summary>
   /// The static wall: frames used to be scaled to their own loudest band, so broadband noise filled
   /// every bar. White noise at -28 dBFS RMS — radio static's level at the tap, measured on the box
-  /// 2026-10-06 — must now draw as a mid-height block, not a wall.
+  /// 2026-10-06 — must now draw well below full height (a low-to-mid ramp once tilted), not a wall.
+  /// Under the old per-frame normalization its loudest band was 1.0 on every draw.
   /// </summary>
   [Fact]
   public void StaticLevelNoise_DrawsAsAMidHeightBlock_NotAWall()

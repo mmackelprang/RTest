@@ -27,11 +27,12 @@ namespace Radio.Infrastructure.Audio.Visualization;
 /// <list type="bullet">
 ///   <item><b>Absolute, not relative to the frame.</b> Scaling each frame to its own loudest band drew
 ///   radio static — flat, broadband — as a full-height wall. Absolute levels draw it as what it is: a
-///   steady, mid-height block, below music's peaks.</item>
+///   steady ramp (white noise plus the tilt — roughly 0.1 in the bass to 0.6 at the top), well below
+///   full height.</item>
 ///   <item><b>Tilt, +<see cref="DefaultTiltDbPerOctave"/> dB/octave about <see cref="DefaultTiltPivotHz"/>.</b>
 ///   Music's energy falls with frequency — measured on the box 2026-10-06, ~26 dB from 80 Hz to 10 kHz,
 ///   about 3.7 dB/octave — so an untilted display is all bass. The tilt is the usual analyzer
-///   compensation for that; it brought the same music to within ~11 dB across the bands.</item>
+///   compensation for that; it brought the same music's band averages to within ~7 dB of each other.</item>
 /// </list>
 /// Silence and anything below the floor draw as 0.
 /// </para>
