@@ -30,34 +30,24 @@
       }
     </button>
 
-    <div class="phone-rail-divider"></div>
-
-    <button type="button" class="phone-rail-tab phone-rail-more"
-            aria-expanded="@(_moreExpanded ? "true" : "false")"
-            @onclick="@(() => _moreExpanded = !_moreExpanded)">
-      <RadzenIcon Icon="@(_moreExpanded ? "expand_more" : "chevron_right")" />
-      <span class="phone-rail-label">More</span>
+    @* Every tab is top level. These four used to sit under a collapsible "More", which hid them
+       behind an extra tap on a touch panel. *@
+    <button type="button" class="phone-rail-tab @(IsTab("dashboard") ? "active" : "")"
+            @onclick='@(() => _activeTab = "dashboard")'>
+      <RadzenIcon Icon="dashboard" /><span class="phone-rail-label">Dashboard</span>
     </button>
-
-    @if (_moreExpanded)
-    {
-      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("dashboard") ? "active" : "")"
-              @onclick='@(() => _activeTab = "dashboard")'>
-        <RadzenIcon Icon="dashboard" /><span class="phone-rail-label">Dashboard</span>
-      </button>
-      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("contacts") ? "active" : "")"
-              @onclick='@(() => _activeTab = "contacts")'>
-        <RadzenIcon Icon="contacts" /><span class="phone-rail-label">Contacts</span>
-      </button>
-      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("history") ? "active" : "")"
-              @onclick='@(() => _activeTab = "history")'>
-        <RadzenIcon Icon="history" /><span class="phone-rail-label">Call History</span>
-      </button>
-      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("diagnostics") ? "active" : "")"
-              @onclick='@(() => _activeTab = "diagnostics")'>
-        <RadzenIcon Icon="monitor_heart" /><span class="phone-rail-label">Diagnostics</span>
-      </button>
-    }
+    <button type="button" class="phone-rail-tab @(IsTab("contacts") ? "active" : "")"
+            @onclick='@(() => _activeTab = "contacts")'>
+      <RadzenIcon Icon="contacts" /><span class="phone-rail-label">Contacts</span>
+    </button>
+    <button type="button" class="phone-rail-tab @(IsTab("history") ? "active" : "")"
+            @onclick='@(() => _activeTab = "history")'>
+      <RadzenIcon Icon="history" /><span class="phone-rail-label">Call History</span>
+    </button>
+    <button type="button" class="phone-rail-tab @(IsTab("diagnostics") ? "active" : "")"
+            @onclick='@(() => _activeTab = "diagnostics")'>
+      <RadzenIcon Icon="monitor_heart" /><span class="phone-rail-label">Diagnostics</span>
+    </button>
   </div>
 
   <div style="overflow: hidden; min-height: 0;">
@@ -138,7 +128,6 @@
 
 @code {
   private string _activeTab = "messages";
-  private bool _moreExpanded;
   private bool _devTrayExpanded;
   private PhoneSystemStatusDto? _systemStatus;
   private PhoneCallStateDto _callState = new();
