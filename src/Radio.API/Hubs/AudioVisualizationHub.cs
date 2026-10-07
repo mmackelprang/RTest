@@ -203,18 +203,7 @@ public class AudioVisualizationHub : Hub
     await base.OnDisconnectedAsync(exception);
   }
 
-  private static SpectrumDataDto MapToSpectrumDto(SpectrumData data)
-  {
-    return new SpectrumDataDto
-    {
-      Magnitudes = data.Magnitudes,
-      Frequencies = data.Frequencies,
-      BinCount = data.BinCount,
-      FrequencyResolution = data.FrequencyResolution,
-      MaxFrequency = data.MaxFrequency,
-      TimestampMs = data.Timestamp.ToUnixTimeMilliseconds()
-    };
-  }
+  private static SpectrumDataDto MapToSpectrumDto(SpectrumData data) => SpectrumDataDto.FromBins(data);
 
   private static LevelDataDto MapToLevelDto(LevelData data)
   {

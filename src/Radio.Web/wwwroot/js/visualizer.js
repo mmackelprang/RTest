@@ -177,7 +177,28 @@ export const visualizer = {
 
     if (!magnitudes || magnitudes.length === 0) return;
 
-    const barCount = Math.min(magnitudes.length, 64); // Limit to 64 bars for performance
+    // The server sends log-spaced bands (128 — the ring draws one spoke per band). Bars are wider,
+    // so neighbouring bands merge into at most 64 bars: each bar shows the louder of its group, and
+    // is labelled at the group's geometric-mean frequency (bands are log-spaced, so that is its
+    // centre). Before the bands existed this sliced the first 64 raw FFT bins — 0 to ~1.5 kHz.
+    const groupSize = Math.max(1, Math.ceil(magnitudes.length / 64));
+    if (groupSize > 1) {
+      const merged = [];
+      const mergedFreqs = [];
+      for (let start = 0; start < magnitudes.length; start += groupSize) {
+        const end = Math.min(start + groupSize, magnitudes.length);
+        let peak = 0;
+        for (let j = start; j < end; j++) peak = Math.max(peak, magnitudes[j]);
+        merged.push(peak);
+        if (frequencies && end - 1 < frequencies.length) {
+          mergedFreqs.push(Math.sqrt(frequencies[start] * frequencies[end - 1]));
+        }
+      }
+      magnitudes = merged;
+      frequencies = mergedFreqs;
+    }
+
+    const barCount = magnitudes.length;
     const barWidth = width / barCount;
     const barGap = barWidth * 0.1;
 
@@ -208,7 +229,7 @@ export const visualizer = {
     
     const labelIndices = [0, Math.floor(barCount / 4), Math.floor(barCount / 2), Math.floor(barCount * 3 / 4), barCount - 1];
     labelIndices.forEach(i => {
-      if (i < frequencies.length) {
+      if (frequencies && i < frequencies.length) {
         const freq = frequencies[i];
         const labelX = i * barWidth + barWidth / 2;
         let label;
