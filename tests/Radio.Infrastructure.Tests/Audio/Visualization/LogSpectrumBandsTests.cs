@@ -19,34 +19,34 @@ public class LogSpectrumBandsTests
   [InlineData(12000f)]
   public void Tone_PeaksInTheBandContainingItsFrequency_AtItsAbsoluteLevel(float toneHz)
   {
-    // A sine of amplitude 0.1 is -20 dBFS. Untilted, that draws at (-20 - -80) / 70 = 0.857 wherever
-    // it is: the analyzer is calibrated (full-scale sine = 1.0) and the scale is absolute.
-    float[] bins = AnalyzeTone(toneHz, amplitude: 0.1f);
+    // A sine of amplitude 0.01 is -40 dBFS. Untilted and uncurved, that draws at (-40 - -65) / 40 =
+    // 0.625 wherever it is: the analyzer is calibrated (full-scale sine = 1.0) and the scale is absolute.
+    float[] bins = AnalyzeTone(toneHz, amplitude: 0.01f);
 
-    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f);
+    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f, curve: 1f);
 
     int peak = Array.IndexOf(magnitudes, magnitudes.Max());
     // One band is ~4.8% wide at 128 bands over 40 Hz–16 kHz; allow a few bands either side.
     Assert.InRange(frequencies[peak], toneHz / 1.25f, toneHz * 1.25f);
-    // A low band interpolates between bins, so it can sit a little under the bin's level.
-    Assert.InRange(magnitudes[peak], 0.8f, 0.87f);
+    // Off-bin tones lose up to ~1.4 dB to Hann scalloping, and low bands interpolate between bins.
+    Assert.InRange(magnitudes[peak], 0.58f, 0.63f);
   }
 
   /// <summary>
   /// The static wall: frames used to be scaled to their own loudest band, so broadband noise filled
   /// every bar. White noise at -28 dBFS RMS — radio static's level at the tap, measured on the box
-  /// 2026-10-06 — must now draw well below full height (a low-to-mid ramp once tilted), not a wall.
-  /// Under the old per-frame normalization its loudest band was 1.0 on every draw.
+  /// 2026-10-06 — must now draw low (a ramp rising toward the treble once tilted), not a wall. Under
+  /// the old per-frame normalization its loudest band was 1.0 on every draw.
   /// </summary>
   [Fact]
-  public void StaticLevelNoise_DrawsAsAMidHeightBlock_NotAWall()
+  public void StaticLevelNoise_DrawsLow_NotAWall()
   {
     float[] bins = AnalyzeNoise(rmsDbfs: -28f);
 
     (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, Resolution);
 
     Assert.True(magnitudes.Max() < 0.8f, $"loudest band {magnitudes.Max():F2}");
-    Assert.InRange(magnitudes.Average(), 0.3f, 0.6f);
+    Assert.InRange(magnitudes.Average(), 0.05f, 0.3f);
   }
 
   /// <summary>
@@ -68,22 +68,55 @@ public class LogSpectrumBandsTests
     // Above the interpolated region, where each band takes a real bin, the tilted display is flat.
     float[] upper = magnitudes.Where((_, b) => frequencies[b] > 500f).ToArray();
     Assert.True(upper.Max() - upper.Min() < 0.03f, $"spread {upper.Max() - upper.Min():F3}");
-    Assert.Equal(40f / 70f, upper.Average(), 2);
+    // -40 dBFS at the default window and curve: ((-40 - -65) / 40)^1.5 = 0.494. The input falls 3.01
+    // dB/octave against a 3.00 tilt, so allow a hair of drift either side.
+    Assert.InRange(upper.Average(), 0.48f, 0.51f);
   }
 
   [Theory]
-  [InlineData(1f, 1f)]           // 0 dBFS: above the ceiling
-  [InlineData(0.31623f, 1f)]     // -10 dBFS: the ceiling
-  [InlineData(0.01f, 40f / 70f)] // -40 dBFS
-  [InlineData(0.0001f, 0f)]      // -80 dBFS: the floor
-  [InlineData(0.00001f, 0f)]     // below the floor
+  [InlineData(1f, 1f)]             // 0 dBFS: above the ceiling
+  [InlineData(0.056234f, 1f)]      // -25 dBFS: the ceiling
+  [InlineData(0.01f, 0.625f)]      // -40 dBFS
+  [InlineData(0.0056234f, 0.5f)]   // -45 dBFS: mid-window
+  [InlineData(0.00056234f, 0f)]    // -65 dBFS: the floor
+  [InlineData(0.0001f, 0f)]        // below the floor
   public void Values_AreAbsoluteDbfs_MappedFromFloorToCeiling(float binValue, float expected)
   {
     float[] bins = Enumerable.Repeat(binValue, FftSize / 2).ToArray();
 
-    (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f);
+    (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f, curve: 1f);
 
     Assert.All(magnitudes, m => Assert.Equal(expected, m, 3));
+  }
+
+  /// <summary>
+  /// The contrast curve: above 1 it shortens quieter bars more than loud ones. Mid-window (-45 dBFS,
+  /// 0.5 uncurved) draws at 0.5^curve; the ends of the window are unchanged.
+  /// </summary>
+  [Theory]
+  [InlineData(1f, 0.5f)]
+  [InlineData(1.5f, 0.35355f)]
+  [InlineData(2f, 0.25f)]
+  public void Curve_ShapesTheHeight_ButKeepsTheWindowEnds(float curve, float expectedMid)
+  {
+    float[] mid = Enumerable.Repeat(0.0056234f, FftSize / 2).ToArray();
+    float[] top = Enumerable.Repeat(0.056234f, FftSize / 2).ToArray();
+
+    (float[] midBands, _) = LogSpectrumBands.Compute(mid, Resolution, tiltDbPerOctave: 0f, curve: curve);
+    (float[] topBands, _) = LogSpectrumBands.Compute(top, Resolution, tiltDbPerOctave: 0f, curve: curve);
+
+    Assert.All(midBands, m => Assert.Equal(expectedMid, m, 3));
+    Assert.All(topBands, m => Assert.Equal(1f, m, 3));
+  }
+
+  [Theory]
+  [InlineData(0f)]
+  [InlineData(-1f)]
+  [InlineData(float.NaN)]
+  public void InvalidCurve_Throws(float curve)
+  {
+    Assert.Throws<ArgumentOutOfRangeException>(
+      () => LogSpectrumBands.Compute(new float[FftSize / 2], Resolution, curve: curve));
   }
 
   [Fact]
@@ -119,13 +152,15 @@ public class LogSpectrumBandsTests
   [Fact]
   public void LowBandsNarrowerThanABin_InterpolateRatherThanRepeat()
   {
+    // A gentle ramp that stays inside the dB window across these bands (about -61 to -52 dBFS), so
+    // neither the floor nor the ceiling flattens it; tilt off so only the interpolation is under test.
     float[] bins = new float[FftSize / 2];
     for (int i = 0; i < bins.Length; i++)
     {
-      bins[i] = Math.Min(1f, 0.01f + i * 0.02f);
+      bins[i] = 0.0006f + i * 0.0002f;
     }
 
-    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(bins, Resolution);
+    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f, curve: 1f);
 
     for (int b = 1; frequencies[b] < 200f; b++)
     {

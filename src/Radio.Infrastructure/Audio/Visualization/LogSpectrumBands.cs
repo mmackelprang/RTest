@@ -22,13 +22,18 @@ namespace Radio.Infrastructure.Audio.Visualization;
 /// </para>
 ///
 /// <para>
-/// <b>Scale</b>: absolute dBFS (the analyzer's amplitudes, full-scale sine = 1.0), tilted, then mapped
-/// from <see cref="DefaultFloorDbfs"/>..<see cref="DefaultCeilingDbfs"/> onto 0..1.
+/// <b>Scale</b>: absolute dBFS (the analyzer's amplitudes, full-scale sine = 1.0), tilted, mapped from
+/// <see cref="DefaultFloorDbfs"/>..<see cref="DefaultCeilingDbfs"/> onto 0..1, then raised to
+/// <see cref="DefaultCurve"/>. All four are configurable (VisualizerOptions.Spectrum*); these are defaults.
 /// <list type="bullet">
 ///   <item><b>Absolute, not relative to the frame.</b> Scaling each frame to its own loudest band drew
-///   radio static — flat, broadband — as a full-height wall. Absolute levels draw it as what it is: a
-///   steady ramp (white noise plus the tilt — roughly 0.1 in the bass to 0.6 at the top), well below
-///   full height.</item>
+///   radio static — flat, broadband — as a full-height wall. Absolute levels draw it as a steady, low
+///   ramp instead (white noise plus the tilt rises toward the treble).</item>
+///   <item><b>A 40 dB window and a 1.5 curve, not 70 dB linear-in-dB.</b> A 70 dB window (-80..-10)
+///   put most music at half height, where a 6 dB swing moved a bar ~8% and 62% of bars sat in one
+///   colour. Measured on the box 2026-10-06 on the same audio, -65..-25 with a 1.5 curve gave bar
+///   spread 0.24 (the old per-frame-peak display: 0.27), frame-to-frame motion 0.18 (old: 0.12), and
+///   a ~38/38/24 % cyan/amber/red colour split.</item>
 ///   <item><b>Tilt, +<see cref="DefaultTiltDbPerOctave"/> dB/octave about <see cref="DefaultTiltPivotHz"/>.</b>
 ///   Music's energy falls with frequency — measured on the box 2026-10-06, ~26 dB from 80 Hz to 10 kHz,
 ///   about 3.7 dB/octave — so an untilted display is all bass. The tilt is the usual analyzer
@@ -52,10 +57,13 @@ public static class LogSpectrumBands
   public const float DefaultMaxHz = 16000f;
 
   /// <summary>Tilted level, in dBFS, that draws as 0 (and anything below it).</summary>
-  public const float DefaultFloorDbfs = -80f;
+  public const float DefaultFloorDbfs = -65f;
 
   /// <summary>Tilted level, in dBFS, that draws as 1 (and anything above it).</summary>
-  public const float DefaultCeilingDbfs = -10f;
+  public const float DefaultCeilingDbfs = -25f;
+
+  /// <summary>Exponent applied to the 0..1 height after the dB window; above 1 adds contrast.</summary>
+  public const float DefaultCurve = 1.5f;
 
   /// <summary>Gain added per octave above <see cref="DefaultTiltPivotHz"/> (removed per octave below).</summary>
   public const float DefaultTiltDbPerOctave = 3f;
@@ -75,6 +83,7 @@ public static class LogSpectrumBands
   /// <param name="ceilingDbfs">Tilted level that draws as 1; must be above <paramref name="floorDbfs"/>.</param>
   /// <param name="tiltDbPerOctave">dB added per octave above <paramref name="tiltPivotHz"/>; 0 disables the tilt.</param>
   /// <param name="tiltPivotHz">Frequency the tilt pivots about.</param>
+  /// <param name="curve">Exponent applied to the 0..1 height after the dB window; must be positive. 1 is plain dB.</param>
   /// <returns>
   /// Band magnitudes (0..1) and band centre frequencies (Hz), each of length <paramref name="bandCount"/>,
   /// or two empty arrays when there are no bins to band.
@@ -88,7 +97,8 @@ public static class LogSpectrumBands
     float floorDbfs = DefaultFloorDbfs,
     float ceilingDbfs = DefaultCeilingDbfs,
     float tiltDbPerOctave = DefaultTiltDbPerOctave,
-    float tiltPivotHz = DefaultTiltPivotHz)
+    float tiltPivotHz = DefaultTiltPivotHz,
+    float curve = DefaultCurve)
   {
     ArgumentNullException.ThrowIfNull(binMagnitudes);
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bandCount);
@@ -102,6 +112,8 @@ public static class LogSpectrumBands
     ThrowIfNaN(ceilingDbfs, nameof(ceilingDbfs));
     ThrowIfNaN(tiltDbPerOctave, nameof(tiltDbPerOctave));
     ThrowIfNaN(tiltPivotHz, nameof(tiltPivotHz));
+    ThrowIfNaN(curve, nameof(curve));
+    ArgumentOutOfRangeException.ThrowIfNegativeOrZero(curve);
     if (ceilingDbfs <= floorDbfs)
     {
       throw new ArgumentOutOfRangeException(nameof(ceilingDbfs), ceilingDbfs, "Must be above floorDbfs.");
@@ -154,7 +166,7 @@ public static class LogSpectrumBands
       }
 
       float tiltDb = tiltDbPerOctave * MathF.Log2(centreHz / tiltPivotHz);
-      magnitudes[b] = ToDisplayScale(linear, tiltDb, floorDbfs, ceilingDbfs);
+      magnitudes[b] = ToDisplayScale(linear, tiltDb, floorDbfs, ceilingDbfs, curve);
       bandLoHz = bandHiHz;
     }
 
@@ -169,7 +181,7 @@ public static class LogSpectrumBands
     }
   }
 
-  private static float ToDisplayScale(float amplitude, float tiltDb, float floorDbfs, float ceilingDbfs)
+  private static float ToDisplayScale(float amplitude, float tiltDb, float floorDbfs, float ceilingDbfs, float curve)
   {
     if (amplitude <= 0f)
     {
@@ -177,6 +189,7 @@ public static class LogSpectrumBands
     }
 
     float db = 20f * MathF.Log10(amplitude) + tiltDb;
-    return Math.Clamp((db - floorDbfs) / (ceilingDbfs - floorDbfs), 0f, 1f);
+    float linear = Math.Clamp((db - floorDbfs) / (ceilingDbfs - floorDbfs), 0f, 1f);
+    return curve == 1f ? linear : MathF.Pow(linear, curve);
   }
 }

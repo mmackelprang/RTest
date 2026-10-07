@@ -1,3 +1,4 @@
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Visualization;
 
@@ -14,8 +15,9 @@ namespace Radio.API.Models;
 public class SpectrumDataDto
 {
   /// <summary>
-  /// Gets or sets the display value of each band, 0.0–1.0: absolute dBFS with a +3 dB/octave tilt,
-  /// mapped from −80 dBFS (0) to −10 dBFS (1). See <see cref="LogSpectrumBands"/>.
+  /// Gets or sets the display value of each band, 0.0–1.0: absolute dBFS with a dB/octave tilt, mapped
+  /// through a dB window and a contrast curve (defaults +3 dB/oct, −65..−25 dBFS, 1.5; configurable via
+  /// <see cref="VisualizerOptions"/>). See <see cref="LogSpectrumBands"/>.
   /// </summary>
   public float[] Magnitudes { get; set; } = [];
 
@@ -48,9 +50,22 @@ public class SpectrumDataDto
   /// Builds the DTO from the analyzer's raw bins, grouping them into display bands. The one mapping
   /// for both the hub's <c>GetSpectrum</c> and the broadcast stream, so the two cannot drift apart.
   /// </summary>
-  public static SpectrumDataDto FromBins(SpectrumData data)
+  /// <param name="data">The analyzer's raw bins.</param>
+  /// <param name="options">
+  /// The display scale (<c>Spectrum*</c> values). Read per call, so a live config change applies on
+  /// the next frame. An unusable combination falls back to the defaults rather than throwing: this
+  /// runs 20 times a second, and one bad config value must not turn into an exception per frame.
+  /// </param>
+  public static SpectrumDataDto FromBins(SpectrumData data, VisualizerOptions? options = null)
   {
-    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(data.Magnitudes, data.FrequencyResolution);
+    (float floor, float ceiling, float curve, float tilt) = DisplayScale(options);
+    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(
+      data.Magnitudes,
+      data.FrequencyResolution,
+      floorDbfs: floor,
+      ceilingDbfs: ceiling,
+      tiltDbPerOctave: tilt,
+      curve: curve);
     return new SpectrumDataDto
     {
       Magnitudes = magnitudes,
@@ -60,6 +75,26 @@ public class SpectrumDataDto
       MaxFrequency = data.MaxFrequency,
       TimestampMs = data.Timestamp.ToUnixTimeMilliseconds()
     };
+  }
+
+  // The configured scale, or the defaults for any part that is unusable (NaN/infinite, a ceiling not
+  // above the floor, a non-positive curve). The window falls back as a pair so a half-valid window
+  // cannot invert.
+  private static (float Floor, float Ceiling, float Curve, float Tilt) DisplayScale(VisualizerOptions? o)
+  {
+    if (o is null)
+    {
+      return (LogSpectrumBands.DefaultFloorDbfs, LogSpectrumBands.DefaultCeilingDbfs,
+        LogSpectrumBands.DefaultCurve, LogSpectrumBands.DefaultTiltDbPerOctave);
+    }
+
+    bool windowOk = float.IsFinite(o.SpectrumFloorDbfs) && float.IsFinite(o.SpectrumCeilingDbfs)
+      && o.SpectrumCeilingDbfs > o.SpectrumFloorDbfs;
+    return (
+      windowOk ? o.SpectrumFloorDbfs : LogSpectrumBands.DefaultFloorDbfs,
+      windowOk ? o.SpectrumCeilingDbfs : LogSpectrumBands.DefaultCeilingDbfs,
+      float.IsFinite(o.SpectrumCurve) && o.SpectrumCurve > 0f ? o.SpectrumCurve : LogSpectrumBands.DefaultCurve,
+      float.IsFinite(o.SpectrumTiltDbPerOctave) ? o.SpectrumTiltDbPerOctave : LogSpectrumBands.DefaultTiltDbPerOctave);
   }
 }
 
