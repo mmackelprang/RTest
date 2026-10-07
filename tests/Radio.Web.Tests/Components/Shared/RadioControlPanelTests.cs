@@ -738,14 +738,14 @@ public class RadioControlPanelTests : TestContext
   /// An unrelated reload (same buffer shape) must leave the text alone.
   /// </summary>
   [Fact]
-  public void RadioText_Survives_AnUnrelatedConfigReload()
+  public async Task RadioText_Survives_AnUnrelatedConfigReload()
   {
     var monitor = new TriggerableOptionsMonitor<RdsScrollOptions>(new RdsScrollOptions());
     Services.AddSingleton<IOptionsMonitor<RdsScrollOptions>>(monitor);
     var cut = RenderPanel(BuildState(rdsStationName: "WSMW", rdsRadioText: "Edge of Seventeen"), bands: new[] { BuildFmBand() });
     cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
 
-    cut.InvokeAsync(() => monitor.Fire(new RdsScrollOptions()));
+    await cut.InvokeAsync(() => monitor.Fire(new RdsScrollOptions()));
 
     cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
   }
@@ -755,7 +755,7 @@ public class RadioControlPanelTests : TestContext
   /// state, so the text never blanks while waiting for the station's next RadioText chunk.
   /// </summary>
   [Fact]
-  public void RadioText_IsRefilled_WhenTheBufferShapeChanges()
+  public async Task RadioText_IsRefilled_WhenTheBufferShapeChanges()
   {
     var monitor = new TriggerableOptionsMonitor<RdsScrollOptions>(new RdsScrollOptions());
     Services.AddSingleton<IOptionsMonitor<RdsScrollOptions>>(monitor);
@@ -764,7 +764,7 @@ public class RadioControlPanelTests : TestContext
 
     var resized = new RdsScrollOptions();
     resized.RtBufferMaxChars = new RdsScrollOptions().RtBufferMaxChars + 50;
-    cut.InvokeAsync(() => monitor.Fire(resized));
+    await cut.InvokeAsync(() => monitor.Fire(resized));
 
     cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
   }

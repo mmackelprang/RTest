@@ -22,7 +22,7 @@
    scroll (AUD-63). When RT is empty, render the original static PS span
    (no animation). When PS is empty but RT is present (transient tune-in),
    render the marquee with just RT (empty head, no separator). When both
-   are empty, the card still renders, with a dim "No RDS" placeholder.
+   are empty, the card still renders, with a dim "—" placeholder.
 
    ⚠ The card is ALWAYS rendered, at one fixed height in every state. It used to be removed when
    there was no RDS and to change height when RadioText arrived (the marquee box carried 8 px of
@@ -64,8 +64,10 @@
     }
     else
     {
-      @* No RDS at all: hold the slot with a dim placeholder so the card keeps its size. *@
-      <span class="rds-card-station-spacer rds-card-empty">No RDS</span>
+      @* Nothing decoded: hold the slot with a dim dash so the card keeps its size. A dash, not
+         "No RDS": right after every FM tune the name is just pending (~1-2 s), and on AM/SW/WB
+         there is no RDS to have — "No RDS" would claim something untrue in both. *@
+      <span class="rds-card-station-spacer rds-card-empty">—</span>
     }
     @if (!string.IsNullOrEmpty(ProgramType))
     {
@@ -78,7 +80,7 @@
   /// <summary>
   /// RDS Program Service station name (PS field, up to 8 characters). Optional
   /// — when null/empty AND <see cref="RadioText"/> is also null/empty the
-  /// card shows a dim "No RDS" placeholder at the same size. When null/empty but RT is present, the
+  /// card shows a dim "—" placeholder at the same size. When null/empty but RT is present, the
   /// station-name slot is left blank and the marquee renders just the RT
   /// (no leading separator).
   /// </summary>

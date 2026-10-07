@@ -992,23 +992,30 @@
     // Hot-fix off PR #371: presets are no longer band-filtered, so a band
     // change doesn't require a re-fetch — the empty-slot placeholder
     // re-evaluates against the new band's count on the next render.
-    _radioState = dto;
-
-    // Only touch the RDS accumulator when the broadcast actually carried an
-    // RDS/tuning change. On telemetry-only ticks (RdsRelevantChanged == false)
-    // we skip ResetOnTuneChange + AppendChunk entirely — the buffer text is
-    // unchanged, so RdsCard's ShouldRender suppresses the marquee re-render.
-    if (dto.RdsRelevantChanged)
+    //
+    // All of it runs on the renderer (InvokeAsync), not on the SignalR callback thread: the
+    // RdsScrollOptions listener also replaces _rdsBuffer and reads _radioState there, and doing
+    // these mutations off-thread let a buffer rebuild race a chunk append into the discarded buffer.
+    await InvokeAsync(() =>
     {
-      // HANDOFF-rds-accumulating-scroll — order matters: reset BEFORE append.
-      // If the station changed, the buffer's dedup tracker resets so the first
-      // chunk on the new station can't accidentally match the last chunk on
-      // the prior station.
-      _rdsBuffer.ResetOnTuneChange(dto.Band, dto.Frequency, dto.RdsPi);
-      _rdsBuffer.AppendChunk(dto.RdsRadioText);
-    }
+      _radioState = dto;
 
-    await InvokeAsync(StateHasChanged);
+      // Only touch the RDS accumulator when the broadcast actually carried an
+      // RDS/tuning change. On telemetry-only ticks (RdsRelevantChanged == false)
+      // we skip ResetOnTuneChange + AppendChunk entirely — the buffer text is
+      // unchanged, so RdsCard's ShouldRender suppresses the marquee re-render.
+      if (dto.RdsRelevantChanged)
+      {
+        // HANDOFF-rds-accumulating-scroll — order matters: reset BEFORE append.
+        // If the station changed, the buffer's dedup tracker resets so the first
+        // chunk on the new station can't accidentally match the last chunk on
+        // the prior station.
+        _rdsBuffer.ResetOnTuneChange(dto.Band, dto.Frequency, dto.RdsPi);
+        _rdsBuffer.AppendChunk(dto.RdsRadioText);
+      }
+
+      StateHasChanged();
+    });
   }
 
   private async Task FrequencyUpAsync()

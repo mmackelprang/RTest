@@ -34,10 +34,9 @@ namespace Radio.Web.Services.Rds;
 /// reset because the station hasn't actually changed.
 /// </para>
 /// <para>
-/// Thread-affinity: Razor component lifecycle is single-threaded per circuit;
-/// the component owns one buffer instance and mutates it from the SignalR
-/// handler thread (already marshalled onto the renderer via
-/// <c>InvokeAsync(StateHasChanged)</c>). No internal locking.
+/// Thread-affinity: no internal locking. The owning component must mutate the
+/// buffer only on its renderer (inside <c>InvokeAsync</c>); RadioControlPanel's
+/// SignalR handler and its options listener both do.
 /// </para>
 /// </remarks>
 public sealed class RdsAccumulatingScrollBuffer

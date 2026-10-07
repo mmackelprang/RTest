@@ -37,7 +37,7 @@ public class RdsCardTests : TestContext
       .Add(x => x.RadioText, null));
 
     Assert.Single(cut.FindAll(".rds-card"));
-    Assert.Equal("No RDS", cut.Find(".rds-card-empty").TextContent.Trim());
+    Assert.Equal("—", cut.Find(".rds-card-empty").TextContent.Trim());
   }
 
   [Fact]

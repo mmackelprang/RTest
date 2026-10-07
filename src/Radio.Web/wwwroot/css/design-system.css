@@ -5030,8 +5030,8 @@ body {
 
 /* RDS Card — mounts above the frequency well. Hosts the RDS label tag, PS
    station name (blue), optional PTY chip, and the accumulating RT marquee.
-   Renders when EITHER StationName OR RadioText is non-empty (component
-   handles the @if).
+   ALWAYS rendered, at a fixed height — with a dim placeholder when there is no
+   RDS — so RDS arriving or going never moves the tuner below it.
 
    Layout: SINGLE flex row (post HANDOFF-rds-inline-scroll-revision). The
    PS slot itself is the marquee surface when RT is present:
@@ -5135,9 +5135,9 @@ body {
    inside an .rds-card it fills the PS slot itself (post-revision). The
    standalone variant's top margin and 420 px ceiling don't apply here; the
    marquee takes whatever flex remainder sits between the RDS label and the
-   PTY pill. height:auto drops the standalone variant's 1.6em (which was
-   tuned for the 11 px standalone typography) so the marquee height tracks
-   the in-card 14 px PS typography from the override below. */
+   PTY pill. Its height is pinned to the card's 20 px line box (below), not
+   the standalone variant's 1.6em. The container takes the track's 14 px mono
+   font so its own baseline matches the track's and the line box stays 20 px. */
 .rds-card .rcp-rds-rt-scroll {
   margin-top: 0;
   flex: 1;
@@ -5148,6 +5148,8 @@ body {
   padding: 0;
   height: 20px;
   line-height: 20px;
+  font-family: var(--font-mono);
+  font-size: 14px;
 }
 
 /* In-card marquee typography override — when the marquee occupies the PS
@@ -5292,6 +5294,16 @@ body {
        read while manually scrolling — drop it in this mode. */
     -webkit-mask-image: none;
     mask-image: none;
+  }
+
+  /* In the card the row is a fixed 20 px, and a visible (non-overlay) scrollbar would take 8-11 px
+     of it and clip the text. Hide the bar there; the text still scrolls by touch or drag. */
+  .rds-card .rcp-rds-rt-scroll {
+    scrollbar-width: none;
+  }
+
+  .rds-card .rcp-rds-rt-scroll::-webkit-scrollbar {
+    display: none;
   }
 
   .rcp-rds-rt-track {
