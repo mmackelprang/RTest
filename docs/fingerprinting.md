@@ -34,7 +34,8 @@ Identified tracks automatically feed into the **Play History** feature.
                     │
                     ▼
      ┌──────────────────────────────┐
-     │  NeedsFingerprintingLookup?  │──── NO (BT w/ AVRCP) ───► Skip
+     │  Call policy: attempt due?   │──── NO (complete metadata, not ───► Wait
+     │  (FingerprintCallPolicy)     │     yet due, hourly cap, back-off)
      └──────────────────────────────┘
                     │ YES
                     ▼
@@ -51,13 +52,14 @@ Identified tracks automatically feed into the **Play History** feature.
                     │
             ┌───────┴───────┐
             │               │
-         MATCH          NO MATCH
+         MATCH       NO MATCH / ERROR
             │               │
             ▼               ▼
-     ┌──────────────┐  ┌──────────────────┐
-     │ Same as last?│  │ Record failure   │  fingerprint.identification_failures
-     └──────────────┘  │ Backoff [15-120s]│
-       │          │    └──────────────────┘
+     ┌──────────────┐  ┌──────────────────────┐
+     │ Same as last?│  │ No match: schedule   │  fingerprint.identification_failures
+     └──────────────┘  │ Error: back off      │
+       │          │    │ 30 s → 600 s         │
+       │          │    └──────────────────────┘
       YES        NO
        │          │
        ▼          ▼
@@ -66,6 +68,55 @@ Identified tracks automatically feed into the **Play History** feature.
                │ Update Play History          │  fingerprint.song_changes
                └──────────────────────────────┘
 ```
+
+### Call policy
+
+Owner decision, 2026-10-07 (revised the same day): SongRec was being called nonstop — measured ~235
+calls/hour on radio, the same song re-identified every ~15 s, no limiter at all — at the risk of a Shazam
+ban. `FingerprintCallPolicy` now decides when the loop may capture and call. All intervals are
+**start-to-start** (capture start to capture start) and all are `Fingerprinting` options, read live
+(keys and defaults: [configuration.md § Fingerprinting](configuration.md#fingerprinting)).
+
+**Known-start sources — file player, Bluetooth.** The source knows when each track begins.
+
+- A track is sent to SongRec only while its own metadata is missing a **title, an artist or album
+  art**. A tagged file with embedded art makes no calls. A Bluetooth track normally still gets one,
+  because AVRCP never supplies art here (AUD-17) — that call is what fetches its art. Once the art is
+  resolved, an AVRCP refresh of the same track restores it from the per-track cache and makes no call.
+- First attempt 5 s after the track starts (then the 13 s capture). No match: retry 30 s later, then
+  every 60 s. Matched by SongRec: validate every 60 s until the track changes (a validation naming a
+  different song is raised like a new identification; one naming the same song is not re-raised).
+- A new track (new file, new AVRCP title/artist, or the source becoming active again) restarts the
+  schedule.
+
+**Unknown-start sources — radio, vinyl, USB, anything else.** One attempt every 15 s (a 13 s capture plus
+~2 s for the call: ~240/hour), whether or not the last one matched. A re-tune (not during a scan; the
+scan's end counts), a source switch, or a capture that found only silence makes the next attempt
+immediate, and the schedule restarts from that attempt — no extra calls on top.
+
+**Global limits, every source.**
+
+- **Hourly cap**, `MaxCallsPerHour` = 240 in any rolling 60 minutes. When reached, attempts wait for
+  the oldest call to age out; one Warning per exhaustion episode (an episode ends when demand drops
+  below the cap, not each time one slot frees).
+- **Failures are failures.** `SongRecRecognitionService` returns `Match`, `NoMatch` or `Error`;
+  a timeout, non-zero exit or unparsable output is an `Error`. Errors back off 30 s → 60 → 120 → … →
+  600 s, with no SongRec process started meanwhile, reset by the next clean call. The fifth consecutive
+  error logs one Warning ("possible Shazam throttling or ban"); per-failure lines are Debug. A source
+  switch does not reset the back-off or the cap.
+
+**Status.** The status bar's fingerprint slot reads *Listening…* while capturing, *Identifying…* only
+while SongRec is being called, *ID unavailable* while backing off after failures, and otherwise the
+last result or *Waiting to identify* — waiting between attempts never reads "Identifying".
+
+**Fixed along the way.** A fully tagged file used to get no `NeedsFingerprintingLookup` key at all when
+`UseShazamForAllSources` was off, and the tap's missing-key default fingerprinted it every cycle; the key
+is now always written. And a file replayed within the 5-minute duplicate window had its match
+suppressed, so the file player never cleared its flag and the loop re-called SongRec every cycle;
+known-start sources now scope duplicate suppression to the track.
+
+`UseShazamForAllSources` is no longer read (kept, not renamed — AUD-1): including art in "missing
+metadata" is what it existed to approximate, and keeping it would force calls on complete tracks.
 
 ### Technology Stack
 
@@ -81,7 +132,8 @@ Identified tracks automatically feed into the **Play History** feature.
 
 | File | Purpose |
 |------|---------|
-| `BackgroundIdentificationService.cs` | Periodic identification loop with backoff |
+| `BackgroundIdentificationService.cs` | Identification loop: asks the call policy, captures, calls SongRec |
+| `FingerprintCallPolicy.cs` | When an attempt may start: per-source schedules, hourly cap, failure back-off |
 | `SongRecRecognitionService.cs` | SongRec binary wrapper |
 | `MetadataLookupService.cs` | Cover art search via MusicBrainz + Cover Art Archive |
 | `SoundFlowAudioTap.cs` | Audio capture from playback pipeline |
