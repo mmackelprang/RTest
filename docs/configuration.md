@@ -670,6 +670,13 @@ deployed `appsettings.Production.json` or config store. It is still loaded into 
 
 `MinFrequency`/`MaxFrequency` are not used by the spectrum/ring bands, which span a fixed 40 Hz – 16 kHz.
 
+The four `Spectrum*` values are tuned through the config store (e.g. `POST /api/configuration/Visualizer`)
+and apply on the next frame; the Settings UI does not expose them. `POST /api/configuration/Visualizer`
+rejects a value that is not a finite number (400). If one arrives by another route, the spectrum stream
+falls back to its default scale (one Warning logged) instead of stopping, but radio-api binds these options
+at start-up, so a non-numeric value would still stop it starting — fix such a value before restarting.
+Out-of-range combinations (ceiling not above floor, curve ≤ 0) are accepted and fall back to defaults.
+
 ---
 
 ### Fingerprinting

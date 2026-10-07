@@ -173,6 +173,26 @@ public static class LogSpectrumBands
     return (magnitudes, frequencies);
   }
 
+  /// <summary>
+  /// Returns a usable display scale: the given values where they are usable, the defaults where they
+  /// are not. The window (floor, ceiling) falls back as a pair, so a half-valid window cannot invert;
+  /// NaN/infinite values, a ceiling not above the floor, and a curve of 0 or less are unusable.
+  /// </summary>
+  /// <remarks>
+  /// For callers fed by configuration, which must not throw per frame on a bad value. <see cref="Compute"/>
+  /// itself still throws on bad arguments.
+  /// </remarks>
+  public static (float FloorDbfs, float CeilingDbfs, float Curve, float TiltDbPerOctave) Sanitize(
+    float floorDbfs, float ceilingDbfs, float curve, float tiltDbPerOctave)
+  {
+    bool windowOk = float.IsFinite(floorDbfs) && float.IsFinite(ceilingDbfs) && ceilingDbfs > floorDbfs;
+    return (
+      windowOk ? floorDbfs : DefaultFloorDbfs,
+      windowOk ? ceilingDbfs : DefaultCeilingDbfs,
+      float.IsFinite(curve) && curve > 0f ? curve : DefaultCurve,
+      float.IsFinite(tiltDbPerOctave) ? tiltDbPerOctave : DefaultTiltDbPerOctave);
+  }
+
   private static void ThrowIfNaN(float value, string paramName)
   {
     if (float.IsNaN(value))

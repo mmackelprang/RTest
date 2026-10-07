@@ -210,7 +210,7 @@ public class AudioVisualizationHub : Hub
   }
 
   private SpectrumDataDto MapToSpectrumDto(SpectrumData data) =>
-    SpectrumDataDto.FromBins(data, _visualizerOptions?.CurrentValue);
+    SpectrumDataDto.FromBins(data, SpectrumDataDto.ReadOptions(_visualizerOptions, _logger));
 
   private static LevelDataDto MapToLevelDto(LevelData data)
   {

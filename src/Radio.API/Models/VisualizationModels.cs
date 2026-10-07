@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Visualization;
@@ -52,13 +53,15 @@ public class SpectrumDataDto
   /// </summary>
   /// <param name="data">The analyzer's raw bins.</param>
   /// <param name="options">
-  /// The display scale (<c>Spectrum*</c> values). Read per call, so a live config change applies on
-  /// the next frame. An unusable combination falls back to the defaults rather than throwing: this
-  /// runs 20 times a second, and one bad config value must not turn into an exception per frame.
+  /// The display scale (<c>Spectrum*</c> values), or null for the defaults. Unusable bound values
+  /// fall back to the defaults (<see cref="LogSpectrumBands.Sanitize"/>). A value that cannot bind at
+  /// all is handled before this, by <see cref="ReadOptions"/>.
   /// </param>
   public static SpectrumDataDto FromBins(SpectrumData data, VisualizerOptions? options = null)
   {
-    (float floor, float ceiling, float curve, float tilt) = DisplayScale(options);
+    (float floor, float ceiling, float curve, float tilt) = options is null
+      ? (LogSpectrumBands.DefaultFloorDbfs, LogSpectrumBands.DefaultCeilingDbfs, LogSpectrumBands.DefaultCurve, LogSpectrumBands.DefaultTiltDbPerOctave)
+      : LogSpectrumBands.Sanitize(options.SpectrumFloorDbfs, options.SpectrumCeilingDbfs, options.SpectrumCurve, options.SpectrumTiltDbPerOctave);
     (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(
       data.Magnitudes,
       data.FrequencyResolution,
@@ -77,24 +80,39 @@ public class SpectrumDataDto
     };
   }
 
-  // The configured scale, or the defaults for any part that is unusable (NaN/infinite, a ceiling not
-  // above the floor, a non-positive curve). The window falls back as a pair so a half-valid window
-  // cannot invert.
-  private static (float Floor, float Ceiling, float Curve, float Tilt) DisplayScale(VisualizerOptions? o)
+  private static int _readFailureLogged;
+
+  /// <summary>
+  /// Reads the current visualizer options for one frame, or returns null (the defaults) when they
+  /// cannot be read.
+  /// </summary>
+  /// <remarks>
+  /// The config store accepts any string for these keys, and a value that cannot bind (e.g.
+  /// <c>"1.5x"</c>) makes every <c>CurrentValue</c> read throw. In the broadcast loop that would abort
+  /// the frame before levels and waveform were sent — stopping all three streams — and log an Error
+  /// every second. So a read failure falls back to the defaults and is logged once, at Warning.
+  /// </remarks>
+  public static VisualizerOptions? ReadOptions(IOptionsMonitor<VisualizerOptions>? monitor, ILogger logger)
   {
-    if (o is null)
+    if (monitor is null)
     {
-      return (LogSpectrumBands.DefaultFloorDbfs, LogSpectrumBands.DefaultCeilingDbfs,
-        LogSpectrumBands.DefaultCurve, LogSpectrumBands.DefaultTiltDbPerOctave);
+      return null;
     }
 
-    bool windowOk = float.IsFinite(o.SpectrumFloorDbfs) && float.IsFinite(o.SpectrumCeilingDbfs)
-      && o.SpectrumCeilingDbfs > o.SpectrumFloorDbfs;
-    return (
-      windowOk ? o.SpectrumFloorDbfs : LogSpectrumBands.DefaultFloorDbfs,
-      windowOk ? o.SpectrumCeilingDbfs : LogSpectrumBands.DefaultCeilingDbfs,
-      float.IsFinite(o.SpectrumCurve) && o.SpectrumCurve > 0f ? o.SpectrumCurve : LogSpectrumBands.DefaultCurve,
-      float.IsFinite(o.SpectrumTiltDbPerOctave) ? o.SpectrumTiltDbPerOctave : LogSpectrumBands.DefaultTiltDbPerOctave);
+    try
+    {
+      return monitor.CurrentValue;
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+    {
+      if (Interlocked.Exchange(ref _readFailureLogged, 1) == 0)
+      {
+        logger.LogWarning(ex,
+          "Visualizer options could not be read (a Visualizer config value does not parse); the spectrum uses its default scale until the value is fixed. Logged once per process");
+      }
+
+      return null;
+    }
   }
 }
 

@@ -136,8 +136,9 @@ public class VisualizationBroadcastService : BackgroundService
   }
 
   // Options read per frame, so a live config change to the display scale applies on the next frame.
+  // ReadOptions never throws: an unparseable value must not stop all three streams (see its remarks).
   private SpectrumDataDto MapToSpectrumDto(SpectrumData data) =>
-    SpectrumDataDto.FromBins(data, _visualizerOptions?.CurrentValue);
+    SpectrumDataDto.FromBins(data, SpectrumDataDto.ReadOptions(_visualizerOptions, _logger));
 
   private static LevelDataDto MapToLevelDto(LevelData data)
   {

@@ -109,6 +109,52 @@ public class LogSpectrumBandsTests
     Assert.All(topBands, m => Assert.Equal(1f, m, 3));
   }
 
+  /// <summary>
+  /// Below the floor stays 0 with the curve on: the clamp must come before the power (a negative
+  /// value raised to 1.5 is NaN).
+  /// </summary>
+  [Fact]
+  public void BelowTheFloor_IsZero_WithTheCurveOn()
+  {
+    float[] bins = Enumerable.Repeat(0.0001f, FftSize / 2).ToArray(); // -80 dBFS
+
+    (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f, curve: 1.5f);
+
+    Assert.All(magnitudes, m => Assert.Equal(0f, m));
+  }
+
+  // Sanitize: what a config-fed caller gets for each unusable value. Defaults are -65, -25, 1.5, 3.
+  [Theory]
+  [InlineData(-60f, -30f, 2f, 4f, -60f, -30f, 2f, 4f)]             // all usable: kept
+  [InlineData(-20f, -25f, 1.5f, 3f, -65f, -25f, 1.5f, 3f)]         // floor above ceiling: window → defaults
+  [InlineData(-25f, -25f, 1.5f, 3f, -65f, -25f, 1.5f, 3f)]         // floor == ceiling: window → defaults
+  [InlineData(float.NegativeInfinity, -25f, 1.5f, 3f, -65f, -25f, 1.5f, 3f)] // infinite floor
+  [InlineData(-60f, float.NaN, 1.5f, 3f, -65f, -25f, 1.5f, 3f)]    // NaN ceiling: the pair falls back
+  [InlineData(-60f, -30f, 0f, 3f, -60f, -30f, 1.5f, 3f)]           // curve 0 → default curve only
+  [InlineData(-60f, -30f, float.NaN, 3f, -60f, -30f, 1.5f, 3f)]    // NaN curve → default curve only
+  [InlineData(-60f, -30f, 2f, float.NaN, -60f, -30f, 2f, 3f)]      // NaN tilt → default tilt only
+  [InlineData(-60f, -30f, 2f, 0f, -60f, -30f, 2f, 0f)]             // tilt 0 is valid (tilt off)
+  public void Sanitize_KeepsUsableValues_AndDefaultsTheRest(
+    float floor, float ceiling, float curve, float tilt,
+    float expFloor, float expCeiling, float expCurve, float expTilt)
+  {
+    var s = LogSpectrumBands.Sanitize(floor, ceiling, curve, tilt);
+
+    Assert.Equal((expFloor, expCeiling, expCurve, expTilt), (s.FloorDbfs, s.CeilingDbfs, s.Curve, s.TiltDbPerOctave));
+  }
+
+  /// <summary>The two copies of the defaults (Core options, Infrastructure constants) must agree.</summary>
+  [Fact]
+  public void OptionDefaults_MatchTheBandDefaults()
+  {
+    var o = new Radio.Core.Configuration.VisualizerOptions();
+
+    Assert.Equal(LogSpectrumBands.DefaultFloorDbfs, o.SpectrumFloorDbfs);
+    Assert.Equal(LogSpectrumBands.DefaultCeilingDbfs, o.SpectrumCeilingDbfs);
+    Assert.Equal(LogSpectrumBands.DefaultCurve, o.SpectrumCurve);
+    Assert.Equal(LogSpectrumBands.DefaultTiltDbPerOctave, o.SpectrumTiltDbPerOctave);
+  }
+
   [Theory]
   [InlineData(0f)]
   [InlineData(-1f)]
