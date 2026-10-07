@@ -682,13 +682,28 @@ Out-of-range combinations (ceiling not above floor, curve ≤ 0) are accepted an
 ### Fingerprinting
 
 **Section Name:** `Fingerprinting`
-**Source File:** `src/Radio.Core/Configuration/FingerprintingOptions.cs`
-**Description:** Configuration options for the audio fingerprinting system.
+**Source File:** `src/Radio.Fingerprinting/FingerprintingOptions.cs`
+**Description:** Configuration options for the audio fingerprinting system, including the SongRec (Shazam)
+call policy. Every call-policy interval is measured start-to-start (from the start of one attempt's capture
+to the start of the next), and every value is read live, so a config-store change applies to the next
+scheduling decision without a restart. Values below a setting's minimum are clamped up to it. How the
+policy behaves: [fingerprinting.md § Call policy](fingerprinting.md#call-policy).
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `Enabled` | `bool` | `true` | Enable or disable automatic fingerprinting |
-| `SampleDurationSeconds` | `int` | `15` | Duration of audio to capture for fingerprinting (seconds) |
+| `SampleDurationSeconds` | `int` | `13` | Duration of audio to capture for each attempt (seconds). With ~2 s for the SongRec call this fits the 15 s unknown-start interval. ⚠ The appliance's SQLite store holds `fingerprinting:sampleDurationSeconds = 15`, which outranks this default until it is changed there. |
+| `KnownStartFirstCallDelaySeconds` | `int` | `5` | File player / Bluetooth: seconds after the track starts before its first attempt (only while title, artist or album art is missing). Min 0. |
+| `KnownStartFirstRetryDelaySeconds` | `int` | `30` | File player / Bluetooth: seconds from the first attempt to the retry after it found no match. Min 1. |
+| `KnownStartRetryIntervalSeconds` | `int` | `60` | File player / Bluetooth: seconds between later retries after no-matches. Min 1. |
+| `KnownStartValidationIntervalSeconds` | `int` | `60` | File player / Bluetooth: once SongRec has matched the track, seconds between validation calls until the track changes. Min 1. |
+| `UnknownStartIntervalSeconds` | `int` | `15` | Radio / vinyl / USB / other: seconds between attempts, matched or not (~240/hour). A re-tune, source switch or return from silence makes the next attempt immediate and restarts the schedule from it (no extra calls on top). Min 1. |
+| `MaxCallsPerHour` | `int` | `240` | Hard cap on SongRec calls in any rolling 60 minutes, across all sources. One Warning per exhaustion episode. Min 1. |
+| `ErrorBackoffInitialSeconds` | `int` | `30` | Back-off after a SongRec failure (timeout, non-zero exit, unparsable output), doubling per consecutive failure. No SongRec process runs while backing off. Reset by the next clean call. Min 1. |
+| `ErrorBackoffMaxSeconds` | `int` | `600` | Ceiling for the failure back-off. Never below `ErrorBackoffInitialSeconds`. |
+| `ErrorWarnThreshold` | `int` | `5` | Consecutive SongRec failures after which one Warning is logged (possible Shazam throttling or ban). Min 1. |
+| `IdlePollIntervalMs` | `int` | `1000` | Longest the identification loop waits before re-reading the active source when it is not capturing (min 100). |
+| `UseShazamForAllSources` | `bool` | `false` | **Not read since the call policy.** Kept (not renamed) because the appliance's config store and `appsettings.Production.json` set it (AUD-1). Bluetooth album art no longer depends on it: missing art now counts as missing metadata. |
 | `MinimumConfidenceThreshold` | `double` | `0.5` | Minimum confidence threshold for accepting a match (0.0 to 1.0) |
 | `DuplicateSuppressionMinutes` | `int` | `5` | Minutes to suppress duplicate identifications of the same track |
 | `HighConfidenceDuplicateSuppressionMinutes` | `int` | `30` | Minutes to suppress duplicates for high-confidence matches (score > 0.9) |

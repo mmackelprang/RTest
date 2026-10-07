@@ -319,16 +319,17 @@ Continuous loop:
 
 1. **`NeedsFingerprintingLookup` checked**: Sources control whether fingerprinting runs (BT sets false after identification)
 2. **Song change detection**: Detects when track changes and fires `SongChanged` event
-3. **AVRCP metadata used**: BT metadata sets `NeedsFingerprintingLookup` based on completeness + `UseShazamForAllSources` setting
-4. **Immediate identification on demand**: `RequestImmediateIdentification()` cancels backoff delay for urgent cycles
+3. **AVRCP metadata used**: BT metadata sets `NeedsFingerprintingLookup` when title, artist or album art is missing (AVRCP supplies no art here, AUD-17)
+4. **Immediate identification on demand**: `RequestImmediateIdentification()` wakes the loop; for radio/vinyl/USB it makes the next attempt immediate and restarts the schedule
+4a. **Call policy**: `FingerprintCallPolicy` schedules attempts per source class, caps SongRec at 240 calls/hour and backs off on failures — see [fingerprinting.md § Call policy](fingerprinting.md#call-policy)
 5. **Silence detection**: Skips SongRec call when captured audio is silence
 6. **Source metadata has precedence, per field (`AUD-1`)**: an identification fills only the fields
    the source left missing — title, artist, album and cover art are decided independently, and an
    empty/whitespace string or a placeholder (`--`, the fallback art path, the filename on files, the
    default title / device name on Bluetooth) counts as missing. One rule, in
    `Radio.Core.Models.Audio.SourceMetadataPrecedence`, used by both `BluetoothAudioSource` and
-   `FilePlayerAudioSource`. `UseShazamForAllSources` (item 3) is the gate only — it decides whether
-   SongRec runs, never whether its answer replaces anything. ⚠ `PlayHistoryTracker` does not follow
+   `FilePlayerAudioSource`. Whether SongRec runs at all is the call policy's decision (item 4a), never
+   whether its answer replaces anything; `UseShazamForAllSources` is no longer read. ⚠ `PlayHistoryTracker` does not follow
    this rule yet — History still records the fingerprint's title (`AUD-19`).
 
 ---

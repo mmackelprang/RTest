@@ -69,20 +69,20 @@ public class SongRecRecognitionService : ISongRecRecognitionService
   internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
   /// <inheritdoc/>
-  public async Task<TrackMetadata?> RecognizeAsync(
+  public async Task<SongRecRecognitionResult> RecognizeAsync(
     AudioSampleBuffer samples,
     CancellationToken ct = default)
   {
     if (!IsAvailable)
     {
       _logger.LogDebug("SongRec not available, skipping recognition");
-      return null;
+      return SongRecRecognitionResult.Failed("SongRec is not available");
     }
 
     if (samples.Samples.Length == 0)
     {
       _logger.LogWarning("Cannot recognize empty audio buffer");
-      return null;
+      return SongRecRecognitionResult.Failed("empty audio buffer");
     }
 
     _logger.LogDebug(
@@ -96,14 +96,22 @@ public class SongRecRecognitionService : ISongRecRecognitionService
       await WriteWavFileAsync(tempFile, samples, ct);
 
       // Run songrec recognize
-      var result = await RunSongRecAsync(tempFile, ct);
-      if (result == null)
+      var run = await RunSongRecAsync(tempFile, ct);
+      if (run.Outcome != SongRecOutcome.Match)
       {
-        return null;
+        return new SongRecRecognitionResult(run.Outcome, null, run.Error);
       }
 
-      // Parse track metadata from Shazam response
-      return ParseResult(result);
+      // Parse track metadata from Shazam response. RunSongRecAsync only reports Match with a track.
+      var track = ParseResult(run.Result!);
+      return track != null ? SongRecRecognitionResult.Matched(track) : SongRecRecognitionResult.NoMatch;
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+      // RunSongRecAsync classifies its own failures, so what reaches here is WriteWavFileAsync (disk full,
+      // temp directory missing) or ParseResult. The attempt failed; it is not a statement about the audio.
+      _logger.LogDebug(ex, "SongRec recognition failed outside the songrec process");
+      return SongRecRecognitionResult.Failed(ex.Message);
     }
     finally
     {
@@ -119,9 +127,37 @@ public class SongRecRecognitionService : ISongRecRecognitionService
   internal virtual Process? StartProcess(ProcessStartInfo startInfo) => Process.Start(startInfo);
 
   /// <summary>
-  /// Runs the songrec recognize command and returns the parsed JSON result.
+  /// Classifies a songrec run that exited 0 with no stdout, from its stderr: no stderr, or songrec's
+  /// own "No match for this song", is a clean no-match; any other stderr text (a network error, an HTTP
+  /// refusal, …) is an error. songrec exits 0 on every recognition failure, so stderr is the only signal.
   /// </summary>
-  internal async Task<SongRecResult?> RunSongRecAsync(string wavFilePath, CancellationToken ct)
+  internal static SongRecOutcome ClassifyEmptyOutput(string? stderr)
+  {
+    if (string.IsNullOrWhiteSpace(stderr)
+      || stderr.Contains("No match for this song", StringComparison.OrdinalIgnoreCase))
+    {
+      return SongRecOutcome.NoMatch;
+    }
+
+    return SongRecOutcome.Error;
+  }
+
+  /// <summary>One songrec run: how it ended, the parsed response when it matched, and the failure when it did not run cleanly.</summary>
+  internal sealed record SongRecRun(SongRecOutcome Outcome, SongRecResult? Result = null, string? Error = null);
+
+  /// <summary>
+  /// Runs the songrec recognize command and classifies the result: <see cref="SongRecOutcome.Match"/> (with
+  /// the parsed response), <see cref="SongRecOutcome.NoMatch"/> (clean exit, no track, and no error text
+  /// other than songrec's own "No match"), or <see cref="SongRecOutcome.Error"/> (start failure, timeout,
+  /// non-zero exit, an exit-0 run whose stderr reports an error, unparsable output, any other exception). Caller cancellation propagates as <see cref="OperationCanceledException"/>.
+  /// </summary>
+  /// <remarks>
+  /// Failures are logged here at Debug only (a failure to kill the process afterwards is still a Warning). The caller counts consecutive failures and logs one Warning
+  /// when they reach <see cref="FingerprintingOptions.ErrorWarnThreshold"/> — a Warning per failure would
+  /// put a journald line on every attempt during a Shazam outage, on a box where log volume correlates
+  /// with audio distortion.
+  /// </remarks>
+  internal async Task<SongRecRun> RunSongRecAsync(string wavFilePath, CancellationToken ct)
   {
     Process? process = null;
     try
@@ -141,8 +177,8 @@ public class SongRecRecognitionService : ISongRecRecognitionService
       process = StartProcess(psi);
       if (process == null)
       {
-        _logger.LogError("Failed to start songrec process");
-        return null;
+        _logger.LogDebug("Failed to start songrec process");
+        return new SongRecRun(SongRecOutcome.Error, Error: "songrec process could not be started");
       }
 
       using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -161,28 +197,50 @@ public class SongRecRecognitionService : ISongRecRecognitionService
 
       if (process.ExitCode != 0)
       {
-        _logger.LogWarning(
-          "songrec exited with code {ExitCode}: {StdErr}",
-          process.ExitCode, stderr.Length > 200 ? stderr[..200] : stderr);
-        return null;
+        var detail = stderr.Length > 200 ? stderr[..200] : stderr;
+        _logger.LogDebug("songrec exited with code {ExitCode}: {StdErr}", process.ExitCode, detail);
+        return new SongRecRun(SongRecOutcome.Error, Error: $"songrec exited with code {process.ExitCode}: {detail.Trim()}");
       }
 
       if (string.IsNullOrWhiteSpace(stdout))
       {
+        // ⚠ Exit code 0 does NOT mean success here. songrec prints every recognition failure to stderr
+        // as "Error: <message>" and still exits 0 — measured on the box (songrec 0.7.4, 2026-10-07):
+        // pink noise gave exit 0, empty stdout, stderr "... Error: No match for this song". So a
+        // network failure or a Shazam refusal (HTTP 429) arrives the same way, and treating every
+        // empty-stdout exit-0 run as a no-match would hide exactly the failures the backoff exists for.
+        var emptyOutcome = ClassifyEmptyOutput(stderr);
+        if (emptyOutcome == SongRecOutcome.Error)
+        {
+          var detail = stderr.Length > 200 ? stderr[..200] : stderr;
+          _logger.LogDebug("songrec reported an error with exit code 0: {StdErr}", detail);
+          return new SongRecRun(SongRecOutcome.Error, Error: $"songrec reported an error: {detail.Trim()}");
+        }
+
         // LOG-12: Trace. Every no-match used to be logged twice at Information (here and in
         // BackgroundIdentificationService, 1.8k/day each); the caller's Debug line is the one kept.
         _logger.LogTrace("SongRec returned empty output (no match)");
-        return null;
+        return new SongRecRun(SongRecOutcome.NoMatch);
       }
 
       _logger.LogDebug("SongRec raw output ({Length} chars): {Output}",
         stdout.Length, stdout.Length > 300 ? stdout[..300] + "..." : stdout);
 
-      var result = JsonSerializer.Deserialize<SongRecResult>(stdout);
+      SongRecResult? result;
+      try
+      {
+        result = JsonSerializer.Deserialize<SongRecResult>(stdout);
+      }
+      catch (JsonException ex)
+      {
+        _logger.LogDebug(ex, "songrec printed output that is not a JSON recognition result");
+        return new SongRecRun(SongRecOutcome.Error, Error: "songrec output could not be parsed");
+      }
+
       if (result?.Track == null)
       {
         _logger.LogTrace("SongRec returned no track match");
-        return null;
+        return new SongRecRun(SongRecOutcome.NoMatch);
       }
 
       var key = result.Track.Title + "\u0001" + result.Track.Subtitle;
@@ -199,19 +257,19 @@ public class SongRecRecognitionService : ISongRecRecognitionService
         "SongRec recognized: '{Title}' by '{Artist}'",
         result.Track.Title, result.Track.Subtitle);
 
-      return result;
+      return new SongRecRun(SongRecOutcome.Match, result);
     }
     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
     {
-      _logger.LogWarning(
+      _logger.LogDebug(
         "SongRec process timed out after {Timeout}s; killing it so it is not orphaned",
         _timeoutSeconds);
-      return null;
+      return new SongRecRun(SongRecOutcome.Error, Error: $"songrec timed out after {_timeoutSeconds}s");
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
-      _logger.LogError(ex, "Error running songrec");
-      return null;
+      _logger.LogDebug(ex, "Error running songrec");
+      return new SongRecRun(SongRecOutcome.Error, Error: ex.Message);
     }
     finally
     {

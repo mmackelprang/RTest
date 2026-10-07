@@ -34,7 +34,7 @@ public class SongRecRecognitionServiceTests
   }
 
   [Fact]
-  public async Task RecognizeAsync_WhenNotAvailable_ReturnsNull()
+  public async Task RecognizeAsync_WhenNotAvailable_ReturnsError()
   {
     var options = Options.Create(new FingerprintingOptions
     {
@@ -45,11 +45,12 @@ public class SongRecRecognitionServiceTests
     var samples = CreateTestSamples(5.0);
     var result = await service.RecognizeAsync(samples);
 
-    Assert.Null(result);
+    Assert.Equal(SongRecOutcome.Error, result.Outcome);
+    Assert.Null(result.Track);
   }
 
   [Fact]
-  public async Task RecognizeAsync_WithEmptySamples_ReturnsNull()
+  public async Task RecognizeAsync_WithEmptySamples_ReturnsError()
   {
     var options = Options.Create(new FingerprintingOptions
     {
@@ -67,7 +68,8 @@ public class SongRecRecognitionServiceTests
 
     var result = await service.RecognizeAsync(samples);
 
-    Assert.Null(result);
+    Assert.Equal(SongRecOutcome.Error, result.Outcome);
+    Assert.Null(result.Track);
   }
 
   [Fact]
@@ -300,8 +302,10 @@ public class SongRecRecognitionServiceTests
 
     var result = await service.RunSongRecAsync("nonexistent.wav", CancellationToken.None);
 
-    // Timed out => no recognition result.
-    Assert.Null(result);
+    // Timed out => a failure, not a no-match (the call policy backs off on failures only).
+    Assert.Equal(SongRecOutcome.Error, result.Outcome);
+    Assert.Null(result.Result);
+    Assert.Contains("timed out", result.Error);
 
     // The stand-in process must actually have been launched.
     Assert.NotNull(service.StartedProcessId);
@@ -325,7 +329,7 @@ public class SongRecRecognitionServiceTests
   public async Task RunSongRecAsync_WhenCallerCancels_KillsProcessAndPropagatesCancellation()
   {
     // The kill guarantee must hold on the caller-cancellation path too, and — unlike
-    // the timeout path (which returns null) — caller cancellation must still surface
+    // the timeout path (which returns an Error outcome) — caller cancellation must still surface
     // as an OperationCanceledException to the caller. TimeoutSeconds is set high so
     // the caller's token, not the internal timeout, is what fires.
     var options = Options.Create(new FingerprintingOptions
@@ -410,6 +414,131 @@ public class SongRecRecognitionServiceTests
     Assert.Equal(
       new[] { LogLevel.Information, LogLevel.Debug, LogLevel.Information },
       log.Entries.Where(e => e.Message.StartsWith("SongRec recognized", StringComparison.Ordinal)).Select(e => e.Level));
+  }
+
+  // --- Call policy: a failure must be distinguishable from a clean no-match. Before it, every one of
+  // these returned null, so a Shazam outage looked exactly like "no match" and nothing backed off.
+
+  [Fact]
+  public async Task RunSongRecAsync_NonZeroExit_IsAnError_NotANoMatch()
+  {
+    var service = new StandInSongRecService(
+      _loggerMock.Object, Options.Create(new FingerprintingOptions()),
+      windows: ("cmd.exe", "/c exit 3"), unix: ("/bin/sh", "-c \"exit 3\""));
+
+    var run = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+
+    Assert.Equal(SongRecOutcome.Error, run.Outcome);
+    Assert.Contains("code 3", run.Error);
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_UnparsableOutput_IsAnError_NotANoMatch()
+  {
+    var service = new StandInSongRecService(
+      _loggerMock.Object, Options.Create(new FingerprintingOptions()),
+      windows: ("cmd.exe", "/c echo notjson"), unix: ("/bin/sh", "-c \"echo notjson\""));
+
+    var run = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+
+    Assert.Equal(SongRecOutcome.Error, run.Outcome);
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_CleanExitWithNoOutput_IsANoMatch()
+  {
+    var service = new StandInSongRecService(
+      _loggerMock.Object, Options.Create(new FingerprintingOptions()),
+      windows: ("cmd.exe", "/c exit 0"), unix: ("/bin/sh", "-c \"exit 0\""));
+
+    var run = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+
+    Assert.Equal(SongRecOutcome.NoMatch, run.Outcome);
+    Assert.Null(run.Error);
+  }
+
+  /// <summary>
+  /// songrec exits 0 on every recognition failure and reports it on stderr (measured on the box,
+  /// songrec 0.7.4: noise → exit 0, empty stdout, "Error: No match for this song"). Only its own
+  /// "No match" is a no-match; any other error text — a network failure, an HTTP 429 — is an error, or
+  /// the backoff would never see a Shazam refusal.
+  /// </summary>
+  [Theory]
+  [InlineData("", SongRecOutcome.NoMatch)]
+  [InlineData("[2026-10-07T16:00:14Z ERROR songrec::cli_main src/cli_main.rs:180] Error: No match for this song", SongRecOutcome.NoMatch)]
+  [InlineData("[... ERROR songrec::cli_main] Error: Network unreachable", SongRecOutcome.Error)]
+  [InlineData("[... ERROR songrec::cli_main] Error: HTTP status client error (429 Too Many Requests)", SongRecOutcome.Error)]
+  public void ClassifyEmptyOutput_OnlySongRecsOwnNoMatch_IsANoMatch(string stderr, SongRecOutcome expected)
+  {
+    Assert.Equal(expected, SongRecRecognitionService.ClassifyEmptyOutput(stderr));
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_ExitZeroWithAnErrorOnStderr_IsAnError()
+  {
+    var service = new StandInSongRecService(
+      _loggerMock.Object, Options.Create(new FingerprintingOptions()),
+      windows: ("cmd.exe", "/c echo Error: Network unreachable 1>&2"),
+      unix: ("/bin/sh", "-c \"echo 'Error: Network unreachable' >&2\""));
+
+    var run = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+
+    Assert.Equal(SongRecOutcome.Error, run.Outcome);
+    Assert.Contains("Network unreachable", run.Error);
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_ExitZeroWithSongRecsNoMatchOnStderr_IsANoMatch()
+  {
+    var service = new StandInSongRecService(
+      _loggerMock.Object, Options.Create(new FingerprintingOptions()),
+      windows: ("cmd.exe", "/c echo Error: No match for this song 1>&2"),
+      unix: ("/bin/sh", "-c \"echo 'Error: No match for this song' >&2\""));
+
+    var run = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+
+    Assert.Equal(SongRecOutcome.NoMatch, run.Outcome);
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_JsonWithoutATrack_IsANoMatch_AndWithATrack_IsAMatch()
+  {
+    if (OperatingSystem.IsWindows())
+    {
+      return; // the stand-in is /bin/sh: cmd.exe cannot echo JSON braces and quotes faithfully
+    }
+
+    var service = new ScriptedSongRecService(new LevelLog(), Options.Create(new FingerprintingOptions()));
+
+    service.NextOutput = "{\"matches\":[]}";
+    Assert.Equal(SongRecOutcome.NoMatch, (await service.RunSongRecAsync("unused.wav", CancellationToken.None)).Outcome);
+
+    service.NextOutput = "{\"track\":{\"title\":\"Song A\",\"subtitle\":\"Band\"}}";
+    var match = await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+    Assert.Equal(SongRecOutcome.Match, match.Outcome);
+    Assert.Equal("Song A", match.Result?.Track?.Title);
+  }
+
+  /// <summary>Runs a fixed shell command in place of songrec.</summary>
+  private sealed class StandInSongRecService(
+    ILogger<SongRecRecognitionService> logger,
+    IOptions<FingerprintingOptions> options,
+    (string File, string Args) windows,
+    (string File, string Args) unix) : SongRecRecognitionService(logger, options)
+  {
+    internal override Process? StartProcess(ProcessStartInfo startInfo)
+    {
+      var (file, args) = OperatingSystem.IsWindows() ? windows : unix;
+      return Process.Start(new ProcessStartInfo
+      {
+        FileName = file,
+        Arguments = args,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+      });
+    }
   }
 
   private sealed class ManualClock : TimeProvider

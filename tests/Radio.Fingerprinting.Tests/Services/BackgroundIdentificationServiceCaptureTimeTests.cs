@@ -17,7 +17,8 @@ namespace Radio.Fingerprinting.Tests.Services;
 /// <remarks>
 /// Runs one real <c>ExecuteAsync</c> cycle against <see cref="MockAudioSampleProvider"/> and a mocked
 /// SongRec. It waits on the <see cref="BackgroundIdentificationService.TrackIdentified"/> event itself —
-/// no sleep races a production timer — but the service's fixed 5 s start-up delay makes it a ~5 s test.
+/// no sleep races a production timer — but the service's fixed 5 s start-up delay, plus the call policy's
+/// 5 s first-call delay for a known-start (file) source, makes it a ~10 s test.
 /// </remarks>
 public class BackgroundIdentificationServiceCaptureTimeTests
 {
@@ -39,7 +40,7 @@ public class BackgroundIdentificationServiceCaptureTimeTests
     var songRec = new Mock<ISongRecRecognitionService>();
     songRec.SetupGet(s => s.IsAvailable).Returns(true);
     songRec.Setup(s => s.RecognizeAsync(It.IsAny<AudioSampleBuffer>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync(track);
+      .ReturnsAsync(SongRecRecognitionResult.Matched(track));
 
     var services = new ServiceCollection();
     services.AddSingleton<IAudioSampleProvider>(tap);

@@ -472,6 +472,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       {
         _isScanning = false;
         _scanDirection = null;
+        RequestIdentificationAfterTune();
       }
     }, _scanCts.Token);
 
@@ -758,7 +759,27 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     // here makes the Infrastructure-level state machine explicit.)
     _decodedCallSign = null;
 
+    RequestIdentificationAfterTune();
+
     FrequencyChanged?.Invoke(this, new RadioControlFrequencyChangedEventArgs(oldFreq, newFreq));
+  }
+
+  /// <summary>
+  /// Fingerprint call policy (owner, 2026-10-07): a re-tune makes the next identification attempt immediate
+  /// instead of waiting out the rest of the interval (15 s by default) — a new station is a new song — and the
+  /// schedule restarts from that attempt rather than gaining an extra call. Only for the active source, and
+  /// not while a scan is stepping through frequencies (each step would otherwise ask, and the audio between
+  /// stations is noise); the scan's own exit asks once for wherever it stopped. The policy's hourly cap and
+  /// failure back-off still apply.
+  /// </summary>
+  private void RequestIdentificationAfterTune()
+  {
+    if (_identificationService == null || _isScanning || !IsActiveSource)
+    {
+      return;
+    }
+
+    _identificationService.RequestImmediateIdentification();
   }
 
   /// <summary>

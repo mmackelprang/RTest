@@ -12,57 +12,108 @@ public sealed class FingerprintingOptions
   public bool Enabled { get; set; } = true;
 
   /// <summary>
-  /// When true, runs SongRec (Shazam) on Bluetooth and file sources even when their own
-  /// metadata is complete (Bluetooth: AVRCP title and artist; files: ID3 artist and album).
-  /// This is a <b>gate</b>: it decides whether fingerprinting runs at all. It does <b>not</b>
-  /// decide what is done with the answer.
+  /// <b>No longer read by anything.</b> It used to make Bluetooth and file sources run SongRec (Shazam) even
+  /// when their own metadata was complete. Since the call policy, a known-start source asks SongRec exactly
+  /// when its title, artist <i>or album art</i> is missing — and since Bluetooth never supplies art on the
+  /// appliance (AUD-17), a Bluetooth track still gets the recognition that fetches its art without this flag.
+  /// The owner's rule is that a track whose metadata is complete makes no calls, so nothing may force them.
   /// </summary>
   /// <remarks>
-  /// <para>
-  /// ⚠ <b>Since AUD-1 there is no "overwrite" decision to pair this with.</b> On Bluetooth and file
-  /// sources a fingerprint result may only fill fields the source left missing, decided per field
-  /// by <c>Radio.Core.Models.Audio.SourceMetadataPrecedence</c>; turning this flag off does not
-  /// change that, it only stops fingerprinting for tracks whose metadata is already complete.
-  /// (Radio, vinyl, generic USB and SDR sources were not changed by AUD-1: they still take an
-  /// identification's fields wholesale, and this flag is not read by them.)
-  /// </para>
-  /// <para>
-  /// ⚠ <b>Do not set this false on the appliance.</b> Bluetooth fingerprinting then hard-returns for
-  /// any track whose AVRCP supplied a title and artist, so those tracks never get cover art. The
-  /// Bluetooth service supplies <b>no</b> cover art there: BlueZ's <c>org.bluez.MediaPlayer1</c> offers
-  /// only an OBEX cover-art handle (<c>ImgHandle</c>), BlueZ does not expose even that here (experimental cover art is off), and the
-  /// service reads none (AUD-17). SongRec is the only art source Bluetooth has.
-  /// </para>
-  /// <para>
-  /// ⚠ <b>The name is imprecise and is kept deliberately.</b> It reads as "use Shazam's answer", but
-  /// it only decides whether Shazam is <i>asked</i>. Renaming it would orphan the
-  /// <c>fingerprinting:useShazamForAllSources</c> row in the appliance's SQLite config store —
-  /// which outranks both JSON layers — and the live <c>appsettings.Production.json</c>, which the
-  /// deploy never overwrites. The renamed key would then fall through to this <c>false</c> default
-  /// and take Bluetooth album art with it. <c>fingerprinting:fpcalcPath</c> is already orphaned in
-  /// that store from the AcoustID→SongRec rename, so this is observed, not hypothetical (AUD-1).
-  /// </para>
+  /// ⚠ <b>Kept, not renamed and not removed, deliberately.</b> The appliance's SQLite config store holds a
+  /// <c>fingerprinting:useShazamForAllSources</c> row and its <c>appsettings.Production.json</c> sets it
+  /// (AUD-1), and the Web's <c>FingerprintingConfigDto</c> still carries the field, so the System Config
+  /// page writes back whatever it loaded. Removing it would change none of that and gain nothing. Its value
+  /// has no effect: setting it false no longer costs Bluetooth album art, and setting it true no longer
+  /// adds calls.
   /// </remarks>
   public bool UseShazamForAllSources { get; set; } = false;
 
   /// <summary>
-  /// Duration of audio to capture for fingerprinting (seconds). A cycle that captured audio starts the
-  /// next one as soon as recognition (and any cover-art download) finishes, so while a source is playing
-  /// the loop is paced by this capture length plus SongRec's latency, not by a fixed wait. The SongRec
-  /// failure back-off and <see cref="IdlePollIntervalMs"/> add waits of their own. There is no
-  /// separate "interval between attempts" setting: <c>IdentificationIntervalSeconds</c> was read by
-  /// nothing but a start-up log line and was removed (AUD-36).
+  /// Duration of audio to capture for fingerprinting (seconds). How often a capture starts is decided by
+  /// the call policy (<see cref="UnknownStartIntervalSeconds"/> and the <c>KnownStart*</c> settings), whose
+  /// intervals are measured start-to-start and so include this capture. (<c>IdentificationIntervalSeconds</c>,
+  /// an older setting read by nothing but a start-up log line, was removed by AUD-36; the call policy
+  /// settings replace it under new names, so that orphaned store row stays unread.)
   /// </summary>
-  public int SampleDurationSeconds { get; set; } = 15;
+  public int SampleDurationSeconds { get; set; } = 13;
 
   /// <summary>
-  /// How long (ms, minimum 100) the identification loop waits before checking again when a cycle captured
-  /// nothing (no active source, no lookup needed, no samples, or the cycle failed).
-  /// <c>RequestImmediateIdentification</c> cancels the wait, so a track change that requests
-  /// identification is delayed by at most this long. AUD-35: without this wait the loop spun a CPU core
-  /// indefinitely on the appliance.
+  /// The longest (ms, minimum 100) the identification loop waits before re-checking the active source when
+  /// it is not capturing — no active source, no lookup needed, a capture that returned no samples, or a
+  /// scheduled attempt not yet due (it then waits until the attempt is due, or this long, whichever is
+  /// sooner). <c>RequestImmediateIdentification</c> cancels the wait. AUD-35: without this wait the loop
+  /// spun a CPU core indefinitely on the appliance.
   /// </summary>
   public int IdlePollIntervalMs { get; set; } = 1000;
+
+  // --- SongRec call policy (FingerprintCallPolicy). Every interval below is measured from the START of one
+  // attempt's capture to the start of the next ("start-to-start"), so the SampleDurationSeconds capture and
+  // the SongRec call itself fit inside it. All are read live through IOptionsMonitor on every scheduling
+  // decision, so a config-store change applies without a restart (an interval change takes effect from the
+  // attempt after the one already scheduled). Values below the
+  // documented minimum are clamped up to it.
+
+  /// <summary>
+  /// Known-start sources (file player, Bluetooth — the source knows when each track begins): seconds after
+  /// the track starts before the first capture for it begins. Only used while the track's own metadata is
+  /// missing a title, an artist or album art; a track whose metadata is complete is never sent to SongRec.
+  /// Minimum 0.
+  /// </summary>
+  public int KnownStartFirstCallDelaySeconds { get; set; } = 5;
+
+  /// <summary>
+  /// Known-start sources: seconds between the first attempt for a track and the retry after it found no
+  /// match. Later retries use <see cref="KnownStartRetryIntervalSeconds"/>. Minimum 1.
+  /// </summary>
+  public int KnownStartFirstRetryDelaySeconds { get; set; } = 30;
+
+  /// <summary>
+  /// Known-start sources: seconds between retries after the second and later no-matches for the same track.
+  /// Minimum 1.
+  /// </summary>
+  public int KnownStartRetryIntervalSeconds { get; set; } = 60;
+
+  /// <summary>
+  /// Known-start sources: once SongRec has matched the current track, seconds between validation calls that
+  /// confirm the match for the rest of the track. A validation naming a different song is raised like any
+  /// new identification. Minimum 1.
+  /// </summary>
+  public int KnownStartValidationIntervalSeconds { get; set; } = 60;
+
+  /// <summary>
+  /// Unknown-start sources (radio, vinyl, USB and anything else): seconds between attempts, whether or not
+  /// the last one matched. The default 15 s is the 13 s <see cref="SampleDurationSeconds"/> capture plus ~2 s
+  /// for the SongRec call: 4 calls/minute, ~240/hour — the whole <see cref="MaxCallsPerHour"/> budget. A
+  /// source change, a re-tune, or a capture that found only silence makes the next attempt immediate, and
+  /// that attempt RESTARTS the schedule (the following one is this interval after it) rather than adding a
+  /// call on top, so sustained use stays within the budget and the cap is only a backstop. When the capture
+  /// plus the call take longer than this interval, the next attempt simply starts as soon as the last ends.
+  /// Minimum 1.
+  /// </summary>
+  public int UnknownStartIntervalSeconds { get; set; } = 15;
+
+  /// <summary>
+  /// Hard cap on SongRec calls in any rolling 60-minute window, across every source. When it is reached,
+  /// attempts wait until the oldest call in the window ages out, and one Warning is logged per episode.
+  /// Minimum 1.
+  /// </summary>
+  public int MaxCallsPerHour { get; set; } = 240;
+
+  /// <summary>
+  /// Back-off after the first consecutive SongRec failure (timeout, non-zero exit, unparsable output),
+  /// doubling with each further failure up to <see cref="ErrorBackoffMaxSeconds"/>. No SongRec process is
+  /// started while backing off. Reset by the next call that runs cleanly (match or no-match). Minimum 1.
+  /// </summary>
+  public int ErrorBackoffInitialSeconds { get; set; } = 30;
+
+  /// <summary>Ceiling for the SongRec failure back-off, in seconds. Never below <see cref="ErrorBackoffInitialSeconds"/>.</summary>
+  public int ErrorBackoffMaxSeconds { get; set; } = 600;
+
+  /// <summary>
+  /// Consecutive SongRec failures after which one Warning is logged (possible Shazam throttling or a ban).
+  /// Logged once per run of failures, not once per failure. Minimum 1.
+  /// </summary>
+  public int ErrorWarnThreshold { get; set; } = 5;
 
   /// <summary>Minimum confidence threshold for accepting a match (0.0 to 1.0).</summary>
   public double MinimumConfidenceThreshold { get; set; } = 0.5;
