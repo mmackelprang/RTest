@@ -5,7 +5,6 @@
 @inject ConfigurationApiService ConfigApi
 @inject ILogger<NowPlayingPanel> Logger
 @inject NotificationService NotificationService
-@inject Radio.Web.Services.GainPopoverService GainPopover
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden;">
@@ -30,56 +29,9 @@
     <div style="position: absolute; inset: 0; background: var(--surface-inset);"></div>
   }
 
-  @* PR 4 status strip (handoff §P1·3) — replaces the three floating pills that
-     used to scatter the corners of the panel (Searching badge, source pill,
-     0dB gain pill). Source · Frequency · RDS · Gain in one row with 1px
-     separators. Frequency cell only renders for tuner sources; RDS cell
-     hides entirely when no station name. The gain cell is the entry point
-     for GainControlPopover. *@
-  @if (!string.IsNullOrEmpty(_nowPlayingSourceType))
-  {
-    <div class="np-status-strip @(_hasValidAlbumArt ? "has-art-bg" : null)"
-         style="position: relative; z-index: 2;">
-      @* Source cell — always shown. Coloured square uses the source-accent
-         CSS var (--source-radio / --source-file / etc) and the display name
-         comes from DisplayNames.Source so generic backend tokens like
-         "RTLSDRCore" surface as "SDR Radio". *@
-      <div class="np-status-cell np-status-cell-source">
-        <span class="np-status-swatch"
-              style="background: var(--@SourceAccentName);"></span>
-        <span class="np-status-name">@(string.IsNullOrEmpty(_source) ? _nowPlayingSourceType : _source)</span>
-      </div>
-
-      @* Frequency cell — only for radio-family sources. Routes through
-         FrequencyFormatter so AM/FM units differ correctly. *@
-      @if (_isTunerSource && _radioState != null)
-      {
-        <div class="np-status-cell np-status-cell-frequency">
-          <span class="np-status-freq">@FrequencyFormatter.FrequencyValue(_radioState.Frequency, _radioState.Band)</span>
-          <span class="unit-chip">@(_radioState.Band == "AM" ? "kHz" : "MHz")</span>
-        </div>
-      }
-
-      @* RDS station cell removed (Item 2): the RdsCard marquee in the radio
-         panel is the single RDS readout. This status-strip cell duplicated the
-         PS station name on top of that card ("RDS data shown twice"). The
-         frequency cell above and the gain cell below still bind to _radioState,
-         and the source/provenance match badge further down ("RDS · station-
-         supplied") stays — only this duplicate readout is gone. *@
-
-      @* Gain cell — entry point for the popover. Always rendered; the
-         popover's auto pill / peak meter / slider live in GainControlPopover. *@
-      <div class="np-status-cell np-status-cell-gain"
-           role="button"
-           tabindex="0"
-           @onclick="ToggleGainPopover"
-           @onkeydown="HandleGainCellKeyDown"
-           title="Adjust source gain"
-           aria-label="Adjust source gain">
-        <span class="np-status-gain">@FormatGainDb(_currentSourceGain)</span>
-      </div>
-    </div>
-  }
+  @* The 36 px source + frequency strip that used to sit here was removed by the main-page status-bar
+     redesign (owner, 2026-10-06): the source is named by the topbar's IN cluster and the frequency by
+     the radio panel. Its gain cell moved to the status bar at the top of the transport block below. *@
 
   <!-- Album art — large, nearly panel-width -->
   <div style="position: relative; z-index: 1; flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; min-height: 0;">
@@ -207,57 +159,52 @@
       </div>
     }
 
-    @* PR 4 — match badge anchored below the song title. Renders a ConfidencePips
-       widget plus a one-line summary ("Strong match · 12 s ago"). When the active
-       track came from RDS rather than the fingerprinter, the label reads
-       "RDS · station-supplied". When neither pipeline supplied the metadata,
-       the badge is hidden — no fake placeholder. Tapping the badge opens the
-       recognition stream (which is also how the legacy "Searching" pill worked,
-       so this is the new affordance). *@
-    @if (HasMatchBadge)
-    {
-      <div class="np-match-badge @(IsRdsBadge ? "is-rds" : null)"
-           role="button"
-           tabindex="0"
-           @onclick="ToggleFingerprintDetail"
-           @onkeydown="HandleMatchBadgeKeyDown"
-           title="@MatchBadgeTooltip"
-           aria-label="@MatchBadgeTooltip">
-        @if (!IsRdsBadge)
-        {
-          <ConfidencePips Bucket="@(_activeMatch?.Confidence ?? ConfidenceBucket.None)" />
-        }
-        <span class="np-match-badge-label">@MatchBadgeLabel</span>
-      </div>
-    }
-
-    @* PR 4 — gain popover. The popover anchor lives here in NowPlayingPanel
-       (so it's positioned over the gain trigger and inherits the panel's
-       column/transition). Task #15 PR E item #47 — the click-away BACKDROP
-       has moved to MainLayout via GainPopoverService so it escapes the
-       .page-transition stacking context that previously trapped its
-       z-index: 9999. The actual slider / peak meter / scale labels still
-       live in GainControlPopover.razor. *@
-    @if (_showGainPopover && !string.IsNullOrEmpty(_nowPlayingSourceType))
-    {
-      <div class="np-gain-popover-anchor">
-        <GainControlPopover IsOpen="true"
-                            SourceType="@_nowPlayingSourceType"
-                            SourceKicker="@GainPopoverKicker"
-                            Title="@GainPopoverTitle"
-                            ShowAutoToggle="@SourceSupportsAutoGain"
-                            IsAuto="@(_radioState?.AutoGain ?? false)"
-                            CurrentValue="@_currentSourceGain"
-                            AppliedGainDb="@(_radioState?.AppliedGain ?? 0.0)"
-                            OnValueChanged="OnGainSliderChanged"
-                            OnAutoToggled="ToggleAutoGainAsync"
-                            OnReset="ResetGain" />
-      </div>
-    }
   </div>
 
   <!-- Transport bar — anchored to bottom with glass effect -->
-  <div style="position: relative; z-index: 1; background: rgba(0,0,0,0.5); backdrop-filter: blur(12px); border-top: 1px solid var(--surface-separator); padding: 8px 16px 12px;">
+  @* The glass (background + backdrop blur) is its own layer rather than a style on this box. A
+     backdrop-filter or z-index here would make this box a stacking context, and the source-gain
+     popover and its backdrop below — 10000 and 9999 — would then be trapped inside it, under the
+     album-art container (z-index 1) and the radio panel. See design-system.css §Z. *@
+  <div class="np-transport">
+    <div class="np-transport-glass" aria-hidden="true"></div>
+    <div class="np-transport-body">
+    @* Status bar (main-page status-bar redesign, 2026-10-06): the first row of the transport block,
+       for every source. Three slots at fixed widths — Mute (104 px) | Fingerprint (flex) | Gain (96 px)
+       — so no state change moves anything. The fingerprint slot reports song recognition only; RDS
+       plays no part in recognition and is not shown here. CSS: design-system.css §Y. *@
+    <div class="np-status-bar" role="group" aria-label="Playback status">
+      <button type="button"
+              class="np-bar-slot np-bar-mute @(_isMuted ? "is-muted" : null)"
+              @onclick="HandleMuteAsync"
+              aria-pressed="@(_isMuted ? "true" : "false")"
+              aria-label="@(_isMuted ? "Audio is muted. Tap to unmute." : "Tap to mute")">
+        <RadzenIcon Icon="@(_isMuted ? "volume_off" : "volume_up")" />
+        <span class="np-bar-label">@(_isMuted ? "Muted" : "Sound")</span>
+      </button>
+      @{
+        var fpState = FingerprintSlot;
+      }
+      <button type="button"
+              class="np-bar-slot np-bar-fp @FingerprintSlotClass(fpState)"
+              @onclick="ToggleFingerprintDetail"
+              aria-label="@($"Song recognition: {FingerprintSlotLabel(fpState)}. Tap to view the recognition stream.")">
+        @if (fpState == FingerprintSlotState.Match)
+        {
+          <ConfidencePips Bucket="@(_activeMatch?.Confidence ?? ConfidenceBucket.None)" />
+        }
+        <span class="np-bar-fp-label">@FingerprintSlotLabel(fpState)</span>
+      </button>
+      <button type="button"
+              class="np-bar-slot np-bar-gain @(IsSourceGainOffset ? "is-offset" : null)"
+              @onclick="ToggleGainPopover"
+              disabled="@string.IsNullOrEmpty(_nowPlayingSourceType)"
+              aria-expanded="@(_showGainPopover ? "true" : "false")"
+              aria-label="@($"Source gain {GainControlPopover.FormatGainDb(_currentSourceGain)}. Tap to adjust.")">
+        <span class="np-bar-gain-value">@GainControlPopover.FormatGainDb(_currentSourceGain)</span>
+      </button>
+    </div>
+
     <!-- Progress Bar (full width) -->
     @if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
     {
@@ -304,6 +251,8 @@
 
     <!-- Volume Control -->
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+      @* Kept beside the slider by owner decision (2026-10-06), although the status bar's Mute slot
+         toggles the same state. *@
       <RadzenButton Icon="@(_isMuted ? "volume_off" : "volume_up")"
                     ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Medium"
                     Variant="Variant.Text"
@@ -355,6 +304,26 @@
                     Click="@HandleRepeatAsync"
                     title="@($"Repeat: {_repeatMode}")" />
     </div>
+    </div> @* .np-transport-body *@
+
+    @* Source-gain popover, opening upward from the bar's gain slot, with its click-away backdrop
+       (design-system.css §Z). Both are children of .np-transport, which is not a stacking context, so
+       their z-indexes compete across the whole Home page: the backdrop covers the radio panel too, and
+       a tap anywhere outside the card closes it. (The backdrop used to be mounted by MainLayout,
+       outside .page-transition, and so painted above this card as well: hit-tested in Chromium on a
+       replica of the layout's stacking, 2026-10-06, a tap on the card landed on the backdrop.) *@
+    @if (_showGainPopover && !string.IsNullOrEmpty(_nowPlayingSourceType))
+    {
+      <div class="np-gain-popover-backdrop" @onclick="CloseGainPopover" aria-hidden="true"></div>
+      <div class="np-gain-popover-anchor">
+        <GainControlPopover IsOpen="true"
+                            SourceKicker="@GainPopoverKicker"
+                            Title="Source gain"
+                            CurrentValue="@_currentSourceGain"
+                            OnValueChanged="OnGainSliderChanged"
+                            OnReset="ResetGain" />
+      </div>
+    }
   </div>
 </div>
 
@@ -395,6 +364,9 @@
   // avoids calling .Reverse() on every render.
   private List<FingerprintEventDto>? _fpEventsReversed;
   private bool _showFingerprintDetail;
+  // Set once the first fingerprint-status read has returned, either way. The API client answers a
+  // failed read with null, so a null _fpStatus after this means "unavailable", before it "not yet".
+  private bool _fpStatusReadAttempted;
 
   // PR 2 of the Radio Controller Polish arc — radio state snapshot for the
   // recognition stream's NOW-row anchor (binds against NowPlayingMatchId).
@@ -440,47 +412,21 @@
 
   private ITimer? _gainDebounceTimer;
 
-  // PR 4 — convenience predicates for the status strip / match badge. Computed
-  // off the cached _nowPlayingSourceType so the template stays readable.
   private bool _isTunerSource => SourceTypeHelper.IsRadioFamily(_nowPlayingSourceType);
 
   /// <summary>
-  /// CSS custom-property name (without the leading <c>--</c>) for the source
-  /// accent colour. The status strip's coloured square uses this — paired with
-  /// the <c>--</c> prefix in the template's inline style.
-  /// </summary>
-  private string SourceAccentName
-  {
-    get
-    {
-      var raw = SourceTypeHelper.GetAccentVar(_nowPlayingSourceType ?? string.Empty);
-      // GetAccentVar returns "--source-radio" etc. The template prepends "--",
-      // so strip the leading double-hyphen here.
-      return raw.StartsWith("--", StringComparison.Ordinal) ? raw[2..] : raw;
-    }
-  }
-
-  /// <summary>
-  /// True when the gain cell should expose an AGC toggle inside the popover —
-  /// i.e. the active source is part of the radio family (RTL-SDR). For
-  /// non-radio sources gain is purely manual.
-  /// </summary>
-  private bool SourceSupportsAutoGain => _isTunerSource;
-
-  /// <summary>
-  /// Mono kicker inside the gain popover header. Empty for sources that don't
-  /// have a meaningful "RF gain" sub-context; otherwise "SDR · {short-token}".
-  /// The short token strips the "SDR Radio (...)" wrapper from the friendly
-  /// source name so e.g. "SDR Radio (RTL-SDR)" renders as "SDR · RTL-SDR"
-  /// instead of the doubled "SDR · SDR Radio (RTL-SDR)".
+  /// Mono kicker inside the gain popover header. Empty for non-radio sources; otherwise
+  /// "SDR · {short-token}". The short token strips the "SDR Radio (...)" wrapper from the friendly
+  /// source name so e.g. "SDR Radio (RTL-SDR)" renders as "SDR · RTL-SDR" instead of the doubled
+  /// "SDR · SDR Radio (RTL-SDR)".
   /// </summary>
   private string GainPopoverKicker => _isTunerSource && !string.IsNullOrEmpty(_source)
     ? $"SDR · {GetSourceShortToken(_source)}"
     : string.Empty;
 
   /// <summary>
-  /// Strips the conventional "SDR Radio (…)" wrapper from a friendly source
-  /// name. <c>"SDR Radio (RTL-SDR)"</c> → <c>"RTL-SDR"</c>. Falls back to the
+  /// Strips the conventional "SDR Radio (…)" wrapper from a friendly
+  /// source name. <c>"SDR Radio (RTL-SDR)"</c> → <c>"RTL-SDR"</c>. Falls back to the
   /// input as-is for any source that doesn't follow the wrapper convention.
   /// </summary>
   internal static string GetSourceShortToken(string sourceName)
@@ -492,66 +438,114 @@
     return sourceName;
   }
 
-  /// <summary>Header title in the gain popover. Radio sources surface "RF gain"; everything else gets "Source gain".</summary>
-  private string GainPopoverTitle => _isTunerSource ? "RF gain" : "Source gain";
+  /// <summary>
+  /// True when the source gain reads as anything other than <c>+0.0 dB</c> at the bar's one-decimal
+  /// precision (including −∞), so the bar paints an offset in the accent colour and unity in
+  /// <c>--text-low</c>. Uses the same 0.001 floor as <see cref="GainControlPopover.FormatGainDb"/>.
+  /// </summary>
+  private bool IsSourceGainOffset =>
+    _currentSourceGain <= 0.001f || Math.Round(20.0 * Math.Log10(_currentSourceGain), 1) != 0.0;
 
-  // PR 4 — match badge state derived from _fpStatus + _radioState.
-  // _activeMatch resolves to the row whose MatchId == NowPlayingMatchId when the
-  // recognition stream has an anchor; otherwise null (no fingerprint match).
+  /// <summary>
+  /// The recognition match the bar's fingerprint slot reports. For a tuner source this is the row the
+  /// API anchored (<c>RadioStateDto.NowPlayingMatchId</c>). Other sources receive no radio state, so
+  /// the slot uses the rule the API applies to set that anchor (<c>AudioStateUpdateService.
+  /// UpdateCurrentMatchAnchor</c>): the most recent matched event. Null when there is none.
+  /// </summary>
   private FingerprintEventDto? _activeMatch
   {
     get
     {
-      var anchorId = _radioState?.NowPlayingMatchId;
-      if (string.IsNullOrEmpty(anchorId) || _fpEventsReversed == null) return null;
-      return _fpEventsReversed.FirstOrDefault(e => e.MatchId == anchorId && e.IsMatch);
+      if (_fpEventsReversed == null) return null;
+      if (_isTunerSource)
+      {
+        var anchorId = _radioState?.NowPlayingMatchId;
+        if (string.IsNullOrEmpty(anchorId)) return null;
+        return _fpEventsReversed.FirstOrDefault(e => e.MatchId == anchorId && e.IsMatch);
+      }
+      return _fpEventsReversed.FirstOrDefault(e => e.IsMatch);
     }
   }
 
-  /// <summary>
-  /// True when the now-playing track was supplied by RDS rather than by the
-  /// fingerprinter. RDS supplies a station name; track-level metadata for an
-  /// FM station is uncommon, so we treat "tuner source + station name + no
-  /// fingerprint anchor" as the RDS case.
-  /// </summary>
-  private bool IsRdsBadge =>
-    _isTunerSource
-    && !string.IsNullOrEmpty(_radioState?.RdsStationName)
-    && _activeMatch == null;
+  /// <summary>What the status bar's fingerprint slot is showing. Recognition states only — never RDS.</summary>
+  internal enum FingerprintSlotState { Waiting, Off, Identifying, Match, NoMatch, Unavailable }
 
   /// <summary>
-  /// True when the match badge should render at all — either we have a real
-  /// fingerprint match, or we're showing the RDS-supplied fallback line.
+  /// Resolves the fingerprint slot, first rule that applies:
+  /// <list type="number">
+  ///   <item>no status: <c>Unavailable</c> once a status read has been attempted (the API client
+  ///         returns null on failure), <c>Waiting</c> before the first read;</item>
+  ///   <item>recognition disabled: <c>Off</c>;</item>
+  ///   <item>an active match (see <see cref="_activeMatch"/>): <c>Match</c>. It outranks an
+  ///         in-progress cycle, which runs every few seconds and would otherwise replace the match
+  ///         with "Identifying…" on every cycle;</item>
+  ///   <item>phase <c>Error</c>: <c>Unavailable</c>; <c>Capturing</c> / <c>Fingerprinting</c> /
+  ///         <c>Querying</c>: <c>Identifying</c>; <c>NoMatch</c>: <c>NoMatch</c>;</item>
+  ///   <item>otherwise <c>NoMatch</c> when the most recent event is a failed lookup — the service
+  ///         returns to <c>Idle</c> straight after a <c>NoMatch</c>, so the phase alone would
+  ///         almost never show it — and <c>Waiting</c> when it is not.</item>
+  /// </list>
   /// </summary>
-  private bool HasMatchBadge => _activeMatch != null || IsRdsBadge;
-
-  /// <summary>
-  /// Human-readable badge label. For a fingerprint match it reads
-  /// <c>{Bucket} match · {time-ago}</c>; for RDS it reads
-  /// <c>RDS · station-supplied</c>. Never surfaces a percentage.
-  /// </summary>
-  private string MatchBadgeLabel
+  private FingerprintSlotState FingerprintSlot
   {
     get
     {
-      if (IsRdsBadge) return "RDS · station-supplied";
-      var m = _activeMatch;
-      if (m == null) return string.Empty;
-      var label = m.Confidence switch
+      if (_fpStatus == null)
       {
-        ConfidenceBucket.Strong => "Strong match",
-        ConfidenceBucket.Likely => "Likely match",
-        ConfidenceBucket.Possible => "Possible match",
-        _ => "Match"
-      };
-      return $"{label} · {Timestamps.FormatRecentRelative(m.Timestamp)}";
+        return _fpStatusReadAttempted ? FingerprintSlotState.Unavailable : FingerprintSlotState.Waiting;
+      }
+      if (!_fpStatus.IsEnabled) return FingerprintSlotState.Off;
+      if (_activeMatch != null) return FingerprintSlotState.Match;
+      switch (_fpStatus.Phase)
+      {
+        case "Error": return FingerprintSlotState.Unavailable;
+        case "Capturing":
+        case "Fingerprinting":
+        case "Querying": return FingerprintSlotState.Identifying;
+        case "NoMatch": return FingerprintSlotState.NoMatch;
+      }
+      var latest = _fpEventsReversed?.FirstOrDefault();
+      return latest is { IsMatch: false } ? FingerprintSlotState.NoMatch : FingerprintSlotState.Waiting;
     }
   }
 
-  /// <summary>Tooltip + aria-label for the match badge. Doubles as a hint that taps open the recognition stream.</summary>
-  private string MatchBadgeTooltip => IsRdsBadge
-    ? "RDS-supplied track info. Tap to view the recognition stream."
-    : "Tap to view the recognition stream.";
+  private static string FingerprintSlotClass(FingerprintSlotState state) => state switch
+  {
+    FingerprintSlotState.Off => "is-off",
+    FingerprintSlotState.Identifying => "is-identifying",
+    FingerprintSlotState.Match => "is-match",
+    FingerprintSlotState.NoMatch => "is-nomatch",
+    FingerprintSlotState.Unavailable => "is-unavailable",
+    _ => "is-waiting",
+  };
+
+  /// <summary>
+  /// The slot's text. A match reads <c>{Bucket} match · {time-ago}</c> and never a percentage.
+  /// "Identifying…" is static text: the panel must not add an infinite animation (#789 removed two
+  /// for the kiosk's CPU).
+  /// </summary>
+  private string FingerprintSlotLabel(FingerprintSlotState state)
+  {
+    switch (state)
+    {
+      case FingerprintSlotState.Off: return "ID off";
+      case FingerprintSlotState.Identifying: return "Identifying…";
+      case FingerprintSlotState.NoMatch: return "No match";
+      case FingerprintSlotState.Unavailable: return "ID unavailable";
+      case FingerprintSlotState.Match:
+        var m = _activeMatch;
+        if (m == null) return "Match";
+        var label = m.Confidence switch
+        {
+          ConfidenceBucket.Strong => "Strong match",
+          ConfidenceBucket.Likely => "Likely match",
+          ConfidenceBucket.Possible => "Possible match",
+          _ => "Match"
+        };
+        return $"{label} · {Timestamps.FormatRecentRelative(m.Timestamp)}";
+      default: return "Waiting to identify";
+    }
+  }
 
   // Periodic fallback poll for now playing updates (safety net for missed SignalR events)
   private System.Threading.Timer? _nowPlayingPollTimer;
@@ -575,11 +569,6 @@
       HubService.VolumeChanged += OnVolumeChangedEvent;
       HubService.FingerprintStatusChanged += OnFingerprintStatusChanged;
       HubService.RadioStateChanged += OnRadioStateChanged;
-
-      // Task #15 PR E item #47 — receive the backdrop-click signal from
-      // MainLayout's layout-mounted backdrop. Paired with the unsubscribe
-      // in DisposeAsync so the circuit stays leak-free.
-      GainPopover.OnClose += OnGainPopoverBackdropClicked;
 
       await RefreshPlaybackStateAsync();
       await RefreshFingerprintStatusAsync();
@@ -716,6 +705,10 @@
     {
       Logger.LogDebug(ex, "Error refreshing fingerprint status");
     }
+    finally
+    {
+      _fpStatusReadAttempted = true;
+    }
   }
 
   private async Task RefreshPlaybackStateAsync()
@@ -809,7 +802,7 @@
     _displaySubtitle = subtitle;
   }
 
-  // --- Fingerprint badge helpers ---
+  // --- Fingerprint slot helpers ---
 
   private void ToggleFingerprintDetail()
   {
@@ -817,18 +810,6 @@
     if (_showFingerprintDetail)
     {
       _ = RefreshFingerprintStatusAsync();
-    }
-  }
-
-  /// <summary>
-  /// Keyboard activator for the match badge — Enter / Space mimic the click
-  /// handler so the badge is reachable without a touch event.
-  /// </summary>
-  private void HandleMatchBadgeKeyDown(KeyboardEventArgs e)
-  {
-    if (e.Key == "Enter" || e.Key == " ")
-    {
-      ToggleFingerprintDetail();
     }
   }
 
@@ -847,79 +828,9 @@
     }
   }
 
-  private void ToggleGainPopover()
-  {
-    _showGainPopover = !_showGainPopover;
-    // Task #15 PR E item #47 — drive the layout-mounted backdrop in lock-step
-    // with the local popover visibility. Open() / Close() are idempotent on
-    // the service so a redundant call is cheap and never fires StateChanged
-    // a second time.
-    if (_showGainPopover)
-    {
-      GainPopover.Open();
-    }
-    else
-    {
-      GainPopover.Close();
-    }
-  }
+  private void ToggleGainPopover() => _showGainPopover = !_showGainPopover;
 
-  private void CloseGainPopover()
-  {
-    _showGainPopover = false;
-    GainPopover.Close();
-  }
-
-  /// <summary>
-  /// Handler subscribed to <see cref="Services.GainPopoverService.OnClose"/>.
-  /// Fired when the layout-mounted backdrop receives a click — the panel
-  /// tears down its local popover state and re-renders. Subscription paired
-  /// with the unsubscribe in <c>DisposeAsync</c>.
-  /// </summary>
-  private void OnGainPopoverBackdropClicked()
-  {
-    if (!_showGainPopover) return;
-    _showGainPopover = false;
-    _ = InvokeAsync(StateHasChanged);
-  }
-
-  /// <summary>
-  /// Keyboard activator for the status-strip gain cell — Enter / Space open
-  /// the popover, mirroring the click handler so the cell stays reachable
-  /// without a touch event.
-  /// </summary>
-  private void HandleGainCellKeyDown(KeyboardEventArgs e)
-  {
-    if (e.Key == "Enter" || e.Key == " ")
-    {
-      ToggleGainPopover();
-    }
-  }
-
-  /// <summary>
-  /// AGC toggle from inside the popover. Mirrors the path
-  /// <c>RadioControlPanel.HandleAutoGainChangedAsync</c> walks — both surfaces
-  /// converge on <see cref="RadioApiService.SetAutoGainAsync"/> and the server
-  /// then rebroadcasts the new <c>AutoGain</c> via the typed RadioStateChanged
-  /// hub event so both panels stay in sync (handoff §P2·1 / arc risk note).
-  /// </summary>
-  private async Task ToggleAutoGainAsync()
-  {
-    if (!_isTunerSource) return; // Auto only meaningful for radio sources
-    var current = _radioState?.AutoGain ?? false;
-    try
-    {
-      await RadioApi.SetAutoGainAsync(!current);
-      // Refresh via REST as a safety net — the typed hub push will normally
-      // beat this round-trip and update _radioState.AutoGain first.
-      await RefreshRadioStateAsync();
-      await InvokeAsync(StateHasChanged);
-    }
-    catch (Exception ex)
-    {
-      Logger.LogWarning(ex, "Failed to toggle AGC from gain popover");
-    }
-  }
+  private void CloseGainPopover() => _showGainPopover = false;
 
   /// <summary>
   /// Reset the per-source playback gain to unity (linear 1.0 → 0 dB). The
@@ -929,7 +840,6 @@
   /// </summary>
   private void ResetGain()
   {
-    if (_radioState?.AutoGain == true) return; // disabled while AGC is on
     OnGainSliderChanged(1.0f);
   }
 
@@ -971,13 +881,6 @@
     {
       Logger.LogWarning(ex, "Failed to set source gain for {SourceType}", _pendingGainSourceType);
     }
-  }
-
-  private static string FormatGainDb(float gain)
-  {
-    if (gain <= 0.001f) return "-∞dB";
-    var db = 20.0 * Math.Log10(gain);
-    return db >= 0 ? $"+{db:F1}dB" : $"{db:F1}dB";
   }
 
   // --- Existing handlers ---
@@ -1199,10 +1102,6 @@
     HubService.VolumeChanged -= OnVolumeChangedEvent;
     HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
     HubService.RadioStateChanged -= OnRadioStateChanged;
-    GainPopover.OnClose -= OnGainPopoverBackdropClicked;
-    // Defensive: ensure the layout backdrop unmounts if the panel is being
-    // torn down while the popover was open (page navigation, hot reload).
-    GainPopover.Close();
     _gainDebounceTimer?.Dispose();
     _volumePrefDebounceTimer?.Dispose();
     _nowPlayingPollTimer?.Dispose();

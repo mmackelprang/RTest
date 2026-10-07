@@ -85,10 +85,6 @@ public class HomePageTests : TestContext
     Services.AddHttpClient<BluetoothApiService>();
     Services.AddOptions<Radio.Web.Models.RdsScrollOptions>();
 
-    // Task #15 PR E item #47 — NowPlayingPanel (rendered inside Home) now
-    // injects GainPopoverService for the layout-portaled backdrop wiring.
-    Services.AddScoped<GainPopoverService>();
-
     // RadioApiService (used by RadioControlPanel child component)
     Services.AddHttpClient<RadioApiService>();
 

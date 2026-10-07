@@ -54,7 +54,6 @@ public class MainLayoutSourceSwitchTests : TestContext
     Services.AddSingleton(hub);
     Services.AddSingleton<DeviceDisplayStateService>();
     Services.AddSingleton<CentrePanelViewService>();
-    Services.AddSingleton<GainPopoverService>();
     Services.AddSingleton<PhoneUnreadState>();
     Services.AddSingleton<EncoderFaultAnnouncer>();
     Services.AddSingleton<VisualizerTelemetryService>();

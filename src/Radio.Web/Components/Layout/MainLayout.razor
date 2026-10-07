@@ -14,7 +14,6 @@
 @inject IJSRuntime JSRuntime
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @inject Radio.Web.Services.CentrePanelViewService CentrePanelView
-@inject Radio.Web.Services.GainPopoverService GainPopover
 @inject Radio.Web.Services.PhoneUnreadState PhoneUnread
 @inject Radio.Web.Services.BellHealthService BellHealth
 @inject AudioStateStore AudioState
@@ -80,8 +79,10 @@
       @* ENC-4a — persistent mute indicator (handoff §6.7).
          Mute previously showed only as a glyph inside NowPlayingPanel, which lives in Home's
          left rail, so /queue, /metrics, /devices, /history and /phone had NO mute indication at
-         all. A muted console with no visible reason is indistinguishable from a broken one. *@
-      @if (_isMuted)
+         all. A muted console with no visible reason is indistinguishable from a broken one.
+         Hidden on "/" only (owner decision, 2026-10-06): there NowPlayingPanel's status bar shows mute
+         in its own slot, so the chip would be a second copy. Every other route keeps it. *@
+      @if (_isMuted && !_isOnHome)
       {
         <button type="button" class="topbar-mute-chip" @onclick="UnmuteAsync"
                 title="Muted — tap to unmute" aria-label="Audio is muted. Tap to unmute.">
@@ -291,8 +292,8 @@
        - UI-25: it opens under the area that was pressed. dev-gesture.js passes the tap's x, the
          slot's top and bottom edges and the viewport size; DevTrayPlacement turns those into a
          clamped position.
-       - Now that it floats mid-screen, a tap anywhere outside it closes it, through the same kind of
-         transparent backdrop as the gain popover below, one tier under the tray. *@
+       - Now that it floats mid-screen, a tap anywhere outside it closes it, through a transparent
+         backdrop one tier under the tray. *@
   @if (_isDevTrayOpen)
   {
     <div class="dev-tray-backdrop" @onclick="CloseDevTrayAsync" aria-hidden="true"></div>
@@ -300,28 +301,10 @@
   <DevTray IsOpen="@_isDevTrayOpen" Placement="@_devTrayPlacement" OnClose="@CloseDevTrayAsync"
            ApiDocsUrl="@_apiDocsUrl" />
 
-  @* Task #15 PR E item #47 — gain-popover click-away backdrop.
-       Mounted at the layout root (outside .page-transition) so the
-       backdrop escapes the .page-transition stacking context trap that
-       previously prevented its z-index: 9999 from rendering above the
-       RadioControlPanel. NowPlayingPanel owns the popover itself; this
-       element only catches the click-away dismiss. Visibility is driven
-       by the scoped GainPopoverService — opening the popover in NowPlayingPanel
-       calls GainPopover.Open(); the backdrop's @onclick → HandleBackdropClick
-       fires the OnClose event so NowPlayingPanel can tear down its popover
-       state in sync. *@
-  @if (GainPopover.IsOpen)
-  {
-    <div class="np-gain-popover-backdrop"
-         style="position: fixed; inset: 0; z-index: 9999;"
-         @onclick="@(() => GainPopover.HandleBackdropClick())"></div>
-  }
-
   @* ENC-4 — encoder HUD host for every normal route.
-       Mounted at the layout root (outside .page-transition) for the same reason the gain backdrop
-       is: .page-transition declares transform + will-change, which creates a stacking context that
-       traps a descendant's z-index no matter how large it is. The HUD sits one tier above that
-       backdrop (10000 vs 9999).
+       Mounted at the layout root (outside .page-transition): .page-transition's children declare
+       transform + will-change, which creates a stacking context that traps a descendant's z-index
+       no matter how large it is.
        The /sleep route is on EmptyLayout and is not in this tree, so it hosts its own copy. *@
   <EncoderHud />
 
@@ -427,12 +410,6 @@
       // chip would stay hidden on a page that loads while already muted — which is precisely the
       // case it exists for (walk up to a quiet console and ask why).
       await LoadMuteStateAsync();
-
-      // Task #15 PR E item #47 — re-render when the gain popover service
-      // toggles so the layout-mounted backdrop mounts/unmounts in lock-step
-      // with NowPlayingPanel's popover open/close. Subscription is paired
-      // with the unsubscribe in Dispose().
-      GainPopover.StateChanged += OnGainPopoverStateChanged;
 
       // GV Messages: mirror the shared UI-local unread count onto the topbar
       // /phone pill badge (PhonePage owns the count; we only read + subscribe).
@@ -1398,13 +1375,6 @@
     }
   }
 
-  /// <summary>
-  /// Re-renders MainLayout when the gain-popover service flips visibility,
-  /// causing the layout-level backdrop to mount/unmount. Subscribed in
-  /// OnInitializedAsync; unsubscribed in Dispose to keep the circuit clean.
-  /// </summary>
-  private void OnGainPopoverStateChanged() => InvokeAsync(StateHasChanged);
-
   // GV Messages: re-render the topbar /phone pill when the shared unread count
   // changes (PhonePage publishes it). Subscribed in OnInitializedAsync;
   // unsubscribed in Dispose.
@@ -1734,7 +1704,6 @@
     HubService.SleepStateChanged -= OnSleepStateChanged;
     HubService.VolumeChanged -= OnVolumeChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
-    GainPopover.StateChanged -= OnGainPopoverStateChanged;
     PhoneUnread.Changed -= OnPhoneUnreadChanged;
     BellHealth.HealthChanged -= OnBellHealthChanged;
     // ENC-12. AudioStateStore is a singleton, so a missed unsubscribe here would keep every circuit

@@ -9,8 +9,8 @@ namespace Radio.Web.Services;
 /// Owns what the encoder HUD is currently showing, and for how long.
 ///
 /// <para>
-/// <b>Singleton, not scoped</b> — unlike <see cref="GainPopoverService"/>, which is per-circuit
-/// because it tracks a click the user made in that circuit. This tracks a physical knob on one
+/// <b>Singleton, not scoped</b> — per-circuit state would suit something that tracks a click the
+/// user made in that circuit. This tracks a physical knob on one
 /// cabinet: there is exactly one, and both hosts (MainLayout and Sleep) must agree about it. It
 /// also has to survive the route change between them.
 /// </para>
