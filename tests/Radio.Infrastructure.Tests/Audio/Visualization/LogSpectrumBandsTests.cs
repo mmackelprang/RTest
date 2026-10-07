@@ -17,17 +17,73 @@ public class LogSpectrumBandsTests
   [InlineData(1000f)]
   [InlineData(5000f)]
   [InlineData(12000f)]
-  public void Tone_PeaksInTheBandContainingItsFrequency(float toneHz)
+  public void Tone_PeaksInTheBandContainingItsFrequency_AtItsAbsoluteLevel(float toneHz)
   {
-    float[] bins = AnalyzeTone(toneHz);
+    // A sine of amplitude 0.1 is -20 dBFS. Untilted, that draws at (-20 - -80) / 70 = 0.857 wherever
+    // it is: the analyzer is calibrated (full-scale sine = 1.0) and the scale is absolute.
+    float[] bins = AnalyzeTone(toneHz, amplitude: 0.1f);
 
-    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(bins, Resolution);
+    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f);
 
     int peak = Array.IndexOf(magnitudes, magnitudes.Max());
     // One band is ~4.8% wide at 128 bands over 40 Hz–16 kHz; allow a few bands either side.
     Assert.InRange(frequencies[peak], toneHz / 1.25f, toneHz * 1.25f);
-    // Near full scale: a low band interpolates between bins, so it can sit just under the bin peak.
-    Assert.InRange(magnitudes[peak], 0.9f, 1f);
+    // A low band interpolates between bins, so it can sit a little under the bin's level.
+    Assert.InRange(magnitudes[peak], 0.8f, 0.87f);
+  }
+
+  /// <summary>
+  /// The static wall: frames used to be scaled to their own loudest band, so broadband noise filled
+  /// every bar. White noise at -28 dBFS RMS — radio static's level at the tap, measured on the box
+  /// 2026-10-06 — must now draw well below full height (a low-to-mid ramp once tilted), not a wall.
+  /// Under the old per-frame normalization its loudest band was 1.0 on every draw.
+  /// </summary>
+  [Fact]
+  public void StaticLevelNoise_DrawsAsAMidHeightBlock_NotAWall()
+  {
+    float[] bins = AnalyzeNoise(rmsDbfs: -28f);
+
+    (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, Resolution);
+
+    Assert.True(magnitudes.Max() < 0.8f, $"loudest band {magnitudes.Max():F2}");
+    Assert.InRange(magnitudes.Average(), 0.3f, 0.6f);
+  }
+
+  /// <summary>
+  /// The bass-heavy display: music falls ~3 dB/octave. A spectrum falling exactly 3 dB/octave must
+  /// draw flat once tilted, and the band at the pivot must draw at its true level.
+  /// </summary>
+  [Fact]
+  public void Tilt_FlattensAThreeDbPerOctaveFall()
+  {
+    float[] bins = new float[FftSize / 2];
+    for (int i = 1; i < bins.Length; i++)
+    {
+      // -40 dBFS at 1 kHz, falling 3.01 dB per octave (amplitude ∝ f^-0.5).
+      bins[i] = 0.01f * MathF.Pow(i * Resolution / 1000f, -0.5f);
+    }
+
+    (float[] magnitudes, float[] frequencies) = LogSpectrumBands.Compute(bins, Resolution);
+
+    // Above the interpolated region, where each band takes a real bin, the tilted display is flat.
+    float[] upper = magnitudes.Where((_, b) => frequencies[b] > 500f).ToArray();
+    Assert.True(upper.Max() - upper.Min() < 0.03f, $"spread {upper.Max() - upper.Min():F3}");
+    Assert.Equal(40f / 70f, upper.Average(), 2);
+  }
+
+  [Theory]
+  [InlineData(1f, 1f)]           // 0 dBFS: above the ceiling
+  [InlineData(0.31623f, 1f)]     // -10 dBFS: the ceiling
+  [InlineData(0.01f, 40f / 70f)] // -40 dBFS
+  [InlineData(0.0001f, 0f)]      // -80 dBFS: the floor
+  [InlineData(0.00001f, 0f)]     // below the floor
+  public void Values_AreAbsoluteDbfs_MappedFromFloorToCeiling(float binValue, float expected)
+  {
+    float[] bins = Enumerable.Repeat(binValue, FftSize / 2).ToArray();
+
+    (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, Resolution, tiltDbPerOctave: 0f);
+
+    Assert.All(magnitudes, m => Assert.Equal(expected, m, 3));
   }
 
   [Fact]
@@ -54,20 +110,6 @@ public class LogSpectrumBandsTests
     (float[] magnitudes, _) = LogSpectrumBands.Compute(AnalyzeSilence(), Resolution);
 
     Assert.All(magnitudes, m => Assert.Equal(0f, m));
-  }
-
-  [Theory]
-  [InlineData(1f, 1f)]          // the frame's peak
-  [InlineData(0.1f, 2f / 3f)]   // -20 dB of a 60 dB range
-  [InlineData(0.001f, 0f)]      // -60 dB: the floor
-  [InlineData(0.0001f, 0f)]     // below the floor
-  public void Values_AreDbScaledOverTheRange(float binValue, float expected)
-  {
-    float[] bins = Enumerable.Repeat(binValue, FftSize / 2).ToArray();
-
-    (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, Resolution);
-
-    Assert.All(magnitudes, m => Assert.Equal(expected, m, 3));
   }
 
   /// <summary>
@@ -145,13 +187,29 @@ public class LogSpectrumBandsTests
     Assert.All(magnitudes, m => Assert.Equal(0f, m));
   }
 
-  private static float[] AnalyzeTone(float toneHz)
+  private static float[] AnalyzeTone(float toneHz, float amplitude = 0.5f)
   {
     var analyzer = new SpectrumAnalyzer(FftSize, SampleRate, applyWindow: true, smoothingFactor: 0f);
     float[] samples = new float[FftSize];
     for (int i = 0; i < samples.Length; i++)
     {
-      samples[i] = 0.5f * MathF.Sin(2f * MathF.PI * toneHz * i / SampleRate);
+      samples[i] = amplitude * MathF.Sin(2f * MathF.PI * toneHz * i / SampleRate);
+    }
+
+    analyzer.AddSamples(samples);
+    return analyzer.GetMagnitudes();
+  }
+
+  // Seeded uniform white noise scaled to the requested RMS, through the real analyzer.
+  private static float[] AnalyzeNoise(float rmsDbfs)
+  {
+    var analyzer = new SpectrumAnalyzer(FftSize, SampleRate, applyWindow: true, smoothingFactor: 0f);
+    var random = new Random(12345);
+    float scale = MathF.Pow(10f, rmsDbfs / 20f) * MathF.Sqrt(3f); // uniform [-1,1] has RMS 1/√3
+    float[] samples = new float[FftSize];
+    for (int i = 0; i < samples.Length; i++)
+    {
+      samples[i] = scale * (float)(random.NextDouble() * 2 - 1);
     }
 
     analyzer.AddSamples(samples);

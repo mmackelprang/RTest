@@ -22,12 +22,19 @@ namespace Radio.Infrastructure.Audio.Visualization;
 /// </para>
 ///
 /// <para>
-/// <b>dB scaling</b>: on a log axis a linear scale leaves the upper bands near zero (music energy
-/// falls with frequency), so each band is mapped from 20·log10 onto 0..1 over
-/// <see cref="DefaultRangeDb"/> dB below 1.0 — the analyzer's normalized full scale. That is not
-/// exactly the frame's peak: the analyzer smooths after normalizing, so a moving peak can sit below
-/// 1.0, and it skips normalizing a frame whose raw peak is at or below 0.001, which then draws as 0
-/// (that is how silence draws nothing). A quiet but non-silent frame IS normalized up to full scale.
+/// <b>Scale</b>: absolute dBFS (the analyzer's amplitudes, full-scale sine = 1.0), tilted, then mapped
+/// from <see cref="DefaultFloorDbfs"/>..<see cref="DefaultCeilingDbfs"/> onto 0..1.
+/// <list type="bullet">
+///   <item><b>Absolute, not relative to the frame.</b> Scaling each frame to its own loudest band drew
+///   radio static — flat, broadband — as a full-height wall. Absolute levels draw it as what it is: a
+///   steady ramp (white noise plus the tilt — roughly 0.1 in the bass to 0.6 at the top), well below
+///   full height.</item>
+///   <item><b>Tilt, +<see cref="DefaultTiltDbPerOctave"/> dB/octave about <see cref="DefaultTiltPivotHz"/>.</b>
+///   Music's energy falls with frequency — measured on the box 2026-10-06, ~26 dB from 80 Hz to 10 kHz,
+///   about 3.7 dB/octave — so an untilted display is all bass. The tilt is the usual analyzer
+///   compensation for that; it brought the same music's band averages to within ~7 dB of each other.</item>
+/// </list>
+/// Silence and anything below the floor draw as 0.
 /// </para>
 /// </summary>
 public static class LogSpectrumBands
@@ -44,18 +51,30 @@ public static class LogSpectrumBands
   /// <summary>Upper edge of the highest band, in Hz (clamped to the Nyquist frequency).</summary>
   public const float DefaultMaxHz = 16000f;
 
-  /// <summary>Dynamic range mapped onto 0..1, in dB below full scale (1.0).</summary>
-  public const float DefaultRangeDb = 60f;
+  /// <summary>Tilted level, in dBFS, that draws as 0 (and anything below it).</summary>
+  public const float DefaultFloorDbfs = -80f;
+
+  /// <summary>Tilted level, in dBFS, that draws as 1 (and anything above it).</summary>
+  public const float DefaultCeilingDbfs = -10f;
+
+  /// <summary>Gain added per octave above <see cref="DefaultTiltPivotHz"/> (removed per octave below).</summary>
+  public const float DefaultTiltDbPerOctave = 3f;
+
+  /// <summary>Frequency the tilt pivots about: a band centred here is drawn at its true level.</summary>
+  public const float DefaultTiltPivotHz = 1000f;
 
   /// <summary>
-  /// Computes log-spaced, dB-scaled band magnitudes and each band's centre frequency.
+  /// Computes log-spaced, tilted, dBFS-scaled band values and each band's centre frequency.
   /// </summary>
-  /// <param name="binMagnitudes">Linear bin magnitudes (0..1), bin <c>i</c> at <c>i × resolution</c> Hz.</param>
+  /// <param name="binMagnitudes">Bin amplitudes (full-scale sine = 1.0), bin <c>i</c> at <c>i × resolution</c> Hz.</param>
   /// <param name="frequencyResolution">Hz per bin.</param>
   /// <param name="bandCount">Number of bands to produce.</param>
   /// <param name="minHz">Lower edge of the lowest band.</param>
   /// <param name="maxHz">Upper edge of the highest band; clamped to the highest bin's frequency.</param>
-  /// <param name="rangeDb">Dynamic range mapped onto 0..1.</param>
+  /// <param name="floorDbfs">Tilted level that draws as 0.</param>
+  /// <param name="ceilingDbfs">Tilted level that draws as 1; must be above <paramref name="floorDbfs"/>.</param>
+  /// <param name="tiltDbPerOctave">dB added per octave above <paramref name="tiltPivotHz"/>; 0 disables the tilt.</param>
+  /// <param name="tiltPivotHz">Frequency the tilt pivots about.</param>
   /// <returns>
   /// Band magnitudes (0..1) and band centre frequencies (Hz), each of length <paramref name="bandCount"/>,
   /// or two empty arrays when there are no bins to band.
@@ -66,17 +85,27 @@ public static class LogSpectrumBands
     int bandCount = DefaultBandCount,
     float minHz = DefaultMinHz,
     float maxHz = DefaultMaxHz,
-    float rangeDb = DefaultRangeDb)
+    float floorDbfs = DefaultFloorDbfs,
+    float ceilingDbfs = DefaultCeilingDbfs,
+    float tiltDbPerOctave = DefaultTiltDbPerOctave,
+    float tiltPivotHz = DefaultTiltPivotHz)
   {
     ArgumentNullException.ThrowIfNull(binMagnitudes);
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bandCount);
-    // NaN passes ThrowIfNegativeOrZero, so it is checked separately.
+    // NaN passes ThrowIfNegativeOrZero and every comparison, so it is checked separately.
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minHz);
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxHz);
-    ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rangeDb);
+    ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tiltPivotHz);
     ThrowIfNaN(minHz, nameof(minHz));
     ThrowIfNaN(maxHz, nameof(maxHz));
-    ThrowIfNaN(rangeDb, nameof(rangeDb));
+    ThrowIfNaN(floorDbfs, nameof(floorDbfs));
+    ThrowIfNaN(ceilingDbfs, nameof(ceilingDbfs));
+    ThrowIfNaN(tiltDbPerOctave, nameof(tiltDbPerOctave));
+    ThrowIfNaN(tiltPivotHz, nameof(tiltPivotHz));
+    if (ceilingDbfs <= floorDbfs)
+    {
+      throw new ArgumentOutOfRangeException(nameof(ceilingDbfs), ceilingDbfs, "Must be above floorDbfs.");
+    }
 
     int binCount = binMagnitudes.Length;
     if (binCount < 2 || frequencyResolution <= 0f)
@@ -124,7 +153,8 @@ public static class LogSpectrumBands
         linear = binMagnitudes[below] + (binMagnitudes[above] - binMagnitudes[below]) * t;
       }
 
-      magnitudes[b] = ToDisplayScale(linear, rangeDb);
+      float tiltDb = tiltDbPerOctave * MathF.Log2(centreHz / tiltPivotHz);
+      magnitudes[b] = ToDisplayScale(linear, tiltDb, floorDbfs, ceilingDbfs);
       bandLoHz = bandHiHz;
     }
 
@@ -139,14 +169,14 @@ public static class LogSpectrumBands
     }
   }
 
-  private static float ToDisplayScale(float linear, float rangeDb)
+  private static float ToDisplayScale(float amplitude, float tiltDb, float floorDbfs, float ceilingDbfs)
   {
-    if (linear <= 0f)
+    if (amplitude <= 0f)
     {
       return 0f;
     }
 
-    float db = 20f * MathF.Log10(linear);
-    return Math.Clamp((db + rangeDb) / rangeDb, 0f, 1f);
+    float db = 20f * MathF.Log10(amplitude) + tiltDb;
+    return Math.Clamp((db - floorDbfs) / (ceilingDbfs - floorDbfs), 0f, 1f);
   }
 }
