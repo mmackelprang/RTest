@@ -15,16 +15,19 @@ namespace Radio.Infrastructure.Audio.Visualization;
 /// <para>
 /// <b>Bands</b> are spaced evenly in log frequency between <see cref="DefaultMinHz"/> and
 /// <see cref="DefaultMaxHz"/>, which is how pitch is heard. A band that spans at least one whole bin
-/// takes the loudest bin inside it. A band containing no whole bin — at 48 kHz / 2048 with 128 bands, those
-/// below roughly 490 Hz — is interpolated between the two bins either side of its centre, so the bass reads as a slope
-/// rather than repeated steps.
+/// takes the loudest bin inside it. At 48 kHz / 2048 with 128 bands, bands below ~490 Hz are narrower
+/// than a bin; those containing no bin (up to ~390 Hz) are interpolated between the two bins either side
+/// of their centre, so the bass reads as a slope rather than repeated steps. Bin 0 (DC) is never used,
+/// so a DC offset on a capture source cannot light up the lowest bands at small FFT sizes.
 /// </para>
 ///
 /// <para>
-/// <b>dB scaling</b>: the analyzer normalizes each frame so its loudest bin is 1.0, linearly. On a
-/// log axis a linear scale leaves the upper bands near zero (music energy falls with frequency), so
-/// each band is mapped from 20·log10 onto 0..1 over <see cref="DefaultRangeDb"/> dB below the frame's
-/// peak. Anything quieter than that floor — including silence — draws as 0.
+/// <b>dB scaling</b>: on a log axis a linear scale leaves the upper bands near zero (music energy
+/// falls with frequency), so each band is mapped from 20·log10 onto 0..1 over
+/// <see cref="DefaultRangeDb"/> dB below 1.0 — the analyzer's normalized full scale. That is not
+/// exactly the frame's peak: the analyzer smooths after normalizing, so a moving peak can sit below
+/// 1.0, and it skips normalizing a frame whose raw peak is at or below 0.001, which then draws as 0
+/// (that is how silence draws nothing). A quiet but non-silent frame IS normalized up to full scale.
 /// </para>
 /// </summary>
 public static class LogSpectrumBands
@@ -41,7 +44,7 @@ public static class LogSpectrumBands
   /// <summary>Upper edge of the highest band, in Hz (clamped to the Nyquist frequency).</summary>
   public const float DefaultMaxHz = 16000f;
 
-  /// <summary>Dynamic range mapped onto 0..1, in dB below the frame's peak.</summary>
+  /// <summary>Dynamic range mapped onto 0..1, in dB below full scale (1.0).</summary>
   public const float DefaultRangeDb = 60f;
 
   /// <summary>
@@ -67,8 +70,13 @@ public static class LogSpectrumBands
   {
     ArgumentNullException.ThrowIfNull(binMagnitudes);
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bandCount);
+    // NaN passes ThrowIfNegativeOrZero, so it is checked separately.
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minHz);
+    ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxHz);
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rangeDb);
+    ThrowIfNaN(minHz, nameof(minHz));
+    ThrowIfNaN(maxHz, nameof(maxHz));
+    ThrowIfNaN(rangeDb, nameof(rangeDb));
 
     int binCount = binMagnitudes.Length;
     if (binCount < 2 || frequencyResolution <= 0f)
@@ -92,7 +100,8 @@ public static class LogSpectrumBands
       float centreHz = MathF.Sqrt(bandLoHz * bandHiHz);
       frequencies[b] = centreHz;
 
-      int firstBin = (int)MathF.Ceiling(bandLoHz / frequencyResolution);
+      // Bin 0 is DC, not audio: never used.
+      int firstBin = Math.Max(1, (int)MathF.Ceiling(bandLoHz / frequencyResolution));
       int lastBin = Math.Min((int)MathF.Floor(bandHiHz / frequencyResolution), binCount - 1);
 
       float linear;
@@ -107,7 +116,8 @@ public static class LogSpectrumBands
       else
       {
         // Narrower than a bin: interpolate at the band's centre between its neighbouring bins.
-        float position = centreHz / frequencyResolution;
+        // Clamped to bin 1 so a band below the first audio bin takes that bin rather than DC.
+        float position = Math.Max(1f, centreHz / frequencyResolution);
         int below = Math.Min((int)position, binCount - 1);
         int above = Math.Min(below + 1, binCount - 1);
         float t = position - below;
@@ -119,6 +129,14 @@ public static class LogSpectrumBands
     }
 
     return (magnitudes, frequencies);
+  }
+
+  private static void ThrowIfNaN(float value, string paramName)
+  {
+    if (float.IsNaN(value))
+    {
+      throw new ArgumentOutOfRangeException(paramName, value, "Must be a number.");
+    }
   }
 
   private static float ToDisplayScale(float linear, float rangeDb)

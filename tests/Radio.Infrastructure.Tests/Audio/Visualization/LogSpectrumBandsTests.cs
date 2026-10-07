@@ -112,6 +112,39 @@ public class LogSpectrumBandsTests
     Assert.True(frequencies[^1] <= (FftSize / 2 - 1) * lowRateResolution);
   }
 
+  [Theory]
+  [InlineData(0f)]
+  [InlineData(-1f)]
+  [InlineData(float.NaN)]
+  public void InvalidMaxHz_Throws(float maxHz)
+  {
+    Assert.Throws<ArgumentOutOfRangeException>(
+      () => LogSpectrumBands.Compute(new float[FftSize / 2], Resolution, maxHz: maxHz));
+  }
+
+  [Fact]
+  public void NaNMinHz_Throws()
+  {
+    Assert.Throws<ArgumentOutOfRangeException>(
+      () => LogSpectrumBands.Compute(new float[FftSize / 2], Resolution, minHz: float.NaN));
+  }
+
+  /// <summary>
+  /// At a small FFT (256 → 187.5 Hz per bin) the lowest bands sit below bin 1. A DC offset lives in
+  /// bin 0 and must not light them up.
+  /// </summary>
+  [Fact]
+  public void DcBin_IsNeverUsed()
+  {
+    const int smallFft = 256;
+    float[] bins = new float[smallFft / 2];
+    bins[0] = 1f; // pure DC
+
+    (float[] magnitudes, _) = LogSpectrumBands.Compute(bins, (float)SampleRate / smallFft);
+
+    Assert.All(magnitudes, m => Assert.Equal(0f, m));
+  }
+
   private static float[] AnalyzeTone(float toneHz)
   {
     var analyzer = new SpectrumAnalyzer(FftSize, SampleRate, applyWindow: true, smoothingFactor: 0f);

@@ -14,7 +14,8 @@ namespace Radio.API.Models;
 public class SpectrumDataDto
 {
   /// <summary>
-  /// Gets or sets the display value of each band, 0.0–1.0, dB-scaled relative to the frame's peak.
+  /// Gets or sets the display value of each band, 0.0–1.0, dB-scaled relative to the analyzer's
+  /// normalized full scale (1.0).
   /// </summary>
   public float[] Magnitudes { get; set; } = [];
 
