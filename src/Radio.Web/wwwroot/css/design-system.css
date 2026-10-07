@@ -5060,15 +5060,27 @@ body {
   /* UI-20: full tuner-column width (was max-width 420) — the marquee gains ~210 px of text. */
   width: 100%;
   box-sizing: border-box;
+  /* One fixed height for every state (no RDS, name only, name + scrolling text): 8 + 8 padding,
+     1 + 1 border, and a single 20 px line box that every row variant below shares. The card sits
+     in a flex column above the frequency well, so any change in its height moved the tuner. */
+  height: 38px;
+  flex-shrink: 0;
+  line-height: 20px;
 }
 
-/* Spacer used when PS station name is missing AND RT is also empty in the
-   same render — defensive only (the outer @if already gates the card on
-   either-present). Keeps the PTY chip pushed to the right so the row
-   geometry stays stable in any transient state. */
+/* Slot holder when there is no RDS at all: keeps the PTY chip pushed right and shows a dim
+   placeholder, so the card keeps its size whether or not the station sends RDS. */
 .rds-card-station-spacer {
   flex: 1;
   min-width: 0;
+}
+
+.rds-card-empty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-low);
+  opacity: 0.6;
 }
 
 .rds-card-label {
@@ -5112,6 +5124,7 @@ body {
   text-transform: uppercase;
   color: var(--text-medium);
   padding: 2px 8px;
+  line-height: 16px; /* 16 + 2 + 2 = the card's 20 px line box */
   background: var(--surface-raised, rgba(255, 255, 255, 0.04));
   border-radius: 999px;
   white-space: nowrap;
@@ -5130,7 +5143,11 @@ body {
   flex: 1;
   min-width: 0;
   max-width: 100%;
-  height: auto;
+  /* Same 20 px line box as the static name. The standalone rule's 4 px vertical padding used to
+     survive this override and make the row ~8 px taller whenever RadioText was present. */
+  padding: 0;
+  height: 20px;
+  line-height: 20px;
 }
 
 /* In-card marquee typography override — when the marquee occupies the PS
@@ -5142,6 +5159,7 @@ body {
 .rds-card .rcp-rds-rt-track {
   font-family: var(--font-mono);
   font-size: 14px;
+  line-height: 20px;
   font-weight: 700;
   color: var(--accent-primary);
   letter-spacing: 0.18em;

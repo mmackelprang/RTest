@@ -22,10 +22,15 @@
    scroll (AUD-63). When RT is empty, render the original static PS span
    (no animation). When PS is empty but RT is present (transient tune-in),
    render the marquee with just RT (empty head, no separator). When both
-   are empty, the @if gate hides the card. *@
+   are empty, the card still renders, with a dim "No RDS" placeholder.
 
-@if (!string.IsNullOrEmpty(StationName) || !string.IsNullOrEmpty(RadioText))
-{
+   ⚠ The card is ALWAYS rendered, at one fixed height in every state. It used to be removed when
+   there was no RDS and to change height when RadioText arrived (the marquee box carried 8 px of
+   padding the static name did not), and because it sits in a flex column above the frequency well,
+   every such change moved the whole tuner by a few pixels. The fixed geometry lives in
+   design-system.css (.rds-card height, one 20 px line box for every row variant). *@
+
+@{
   <div class="rds-card">
     <span class="rds-card-label">RDS</span>
     @if (!string.IsNullOrEmpty(RadioText))
@@ -59,10 +64,8 @@
     }
     else
     {
-      @* Defensive — outer @if already rules out the both-empty case, but
-         keeping a spacer here mirrors the prior intent that the row
-         geometry remain stable if both fields are momentarily null. *@
-      <span class="rds-card-station-spacer"></span>
+      @* No RDS at all: hold the slot with a dim placeholder so the card keeps its size. *@
+      <span class="rds-card-station-spacer rds-card-empty">No RDS</span>
     }
     @if (!string.IsNullOrEmpty(ProgramType))
     {
@@ -75,7 +78,7 @@
   /// <summary>
   /// RDS Program Service station name (PS field, up to 8 characters). Optional
   /// — when null/empty AND <see cref="RadioText"/> is also null/empty the
-  /// card renders nothing at all. When null/empty but RT is present, the
+  /// card shows a dim "No RDS" placeholder at the same size. When null/empty but RT is present, the
   /// station-name slot is left blank and the marquee renders just the RT
   /// (no leading separator).
   /// </summary>

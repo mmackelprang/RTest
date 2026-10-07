@@ -868,20 +868,34 @@
       _rdsScrollOptions.RtChunkSeparator);
 
     // Listen for config-bridge change tokens (SQLite store writes) so the
-    // user's UI changes take effect without a page reload. A reconfigure
-    // creates a fresh buffer — the buffer's accumulation state is bound to
-    // its size cap, so we don't try to preserve partial content across
-    // re-sizes. The visible effect on the user is "buffer briefly empties
-    // then fills again with the next RT chunk" — acceptable for a settings
-    // change the user just made.
-    _rdsScrollOptionsListener = RdsScrollOptionsMonitor.OnChange(opts =>
+    // user's UI changes take effect without a page reload.
+    //
+    // ⚠ This fires on EVERY config write, not just RDS ones: the SQLite bridge reloads the whole
+    // configuration, and IOptionsMonitor raises OnChange for every bound options type. Switching the
+    // visualizer mode saves "ui.visualizer" and lands here. This used to rebuild the buffer
+    // unconditionally, so any config write anywhere emptied the RadioText (only the station name,
+    // read straight from _radioState, survived) until the station sent a new RT chunk.
+    //
+    // So: rebuild only when the buffer's own shape changed (size cap or separator), and refill it
+    // from the current state when it is rebuilt, so it is never left blank. Anything else (scroll
+    // speed) just takes the new options.
+    _rdsScrollOptionsListener = RdsScrollOptionsMonitor.OnChange(opts => _ = InvokeAsync(() =>
     {
+      bool reshape = opts.RtBufferMaxChars != _rdsScrollOptions.RtBufferMaxChars ||
+                     !string.Equals(opts.RtChunkSeparator, _rdsScrollOptions.RtChunkSeparator, StringComparison.Ordinal);
       _rdsScrollOptions = opts;
-      _rdsBuffer = new RdsAccumulatingScrollBuffer(
-        opts.RtBufferMaxChars,
-        opts.RtChunkSeparator);
-      _ = InvokeAsync(StateHasChanged);
-    });
+      if (reshape)
+      {
+        _rdsBuffer = new RdsAccumulatingScrollBuffer(opts.RtBufferMaxChars, opts.RtChunkSeparator);
+        if (_radioState != null)
+        {
+          _rdsBuffer.ResetOnTuneChange(_radioState.Band, _radioState.Frequency, _radioState.RdsPi);
+          _rdsBuffer.AppendChunk(_radioState.RdsRadioText);
+        }
+      }
+
+      StateHasChanged();
+    }));
 
     // State and bands first, then presets. The order is historical — PR 3 of the
     // Radio Controller Polish arc band-filtered the presets, which the hot-fix off

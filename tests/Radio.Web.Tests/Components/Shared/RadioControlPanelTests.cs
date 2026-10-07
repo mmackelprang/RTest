@@ -720,16 +720,81 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
-  public void RdsCard_Hidden_WhenStationNameNullAndRadioTextNull()
+  public void RdsCard_KeepsItsSlot_WhenStationNameNullAndRadioTextNull()
   {
-    // Post-#414-hotfix: the card now renders when EITHER StationName OR
-    // RadioText is present (because RT lives inside the card). When BOTH
-    // are null the card collapses entirely — same as the pre-hotfix
-    // contract for the station-only case.
+    // The card holds its place with a "No RDS" placeholder instead of collapsing, so tuning between
+    // RDS and non-RDS stations does not move the tuner below it.
     var state = BuildState(rdsStationName: null, rdsRadioText: null);
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
-    Assert.Empty(cut.FindAll(".rds-card"));
+    Assert.Single(cut.FindAll(".rds-card"));
+    Assert.Single(cut.FindAll(".rds-card-empty"));
+  }
+
+  /// <summary>
+  /// Owner report: switching the visualizer mode blanked the RadioText. The mode switch saves a
+  /// config section, the SQLite bridge reloads ALL configuration, and IOptionsMonitor raises OnChange
+  /// for every options type — including RdsScrollOptions, whose listener rebuilt the buffer empty.
+  /// An unrelated reload (same buffer shape) must leave the text alone.
+  /// </summary>
+  [Fact]
+  public void RadioText_Survives_AnUnrelatedConfigReload()
+  {
+    var monitor = new TriggerableOptionsMonitor<RdsScrollOptions>(new RdsScrollOptions());
+    Services.AddSingleton<IOptionsMonitor<RdsScrollOptions>>(monitor);
+    var cut = RenderPanel(BuildState(rdsStationName: "WSMW", rdsRadioText: "Edge of Seventeen"), bands: new[] { BuildFmBand() });
+    cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
+
+    cut.InvokeAsync(() => monitor.Fire(new RdsScrollOptions()));
+
+    cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
+  }
+
+  /// <summary>
+  /// A real buffer-shape change (size cap) still rebuilds the buffer, but refills it from the current
+  /// state, so the text never blanks while waiting for the station's next RadioText chunk.
+  /// </summary>
+  [Fact]
+  public void RadioText_IsRefilled_WhenTheBufferShapeChanges()
+  {
+    var monitor = new TriggerableOptionsMonitor<RdsScrollOptions>(new RdsScrollOptions());
+    Services.AddSingleton<IOptionsMonitor<RdsScrollOptions>>(monitor);
+    var cut = RenderPanel(BuildState(rdsStationName: "WSMW", rdsRadioText: "Edge of Seventeen"), bands: new[] { BuildFmBand() });
+    cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
+
+    var resized = new RdsScrollOptions();
+    resized.RtBufferMaxChars = new RdsScrollOptions().RtBufferMaxChars + 50;
+    cut.InvokeAsync(() => monitor.Fire(resized));
+
+    cut.WaitForAssertion(() => Assert.Contains("Edge of Seventeen", cut.Find(".rcp-rds-rt-scroll").TextContent));
+  }
+
+  private sealed class TriggerableOptionsMonitor<T> : IOptionsMonitor<T>
+  {
+    private readonly List<Action<T, string?>> _listeners = [];
+    public TriggerableOptionsMonitor(T value) => CurrentValue = value;
+    public T CurrentValue { get; private set; }
+    public T Get(string? name) => CurrentValue;
+
+    public IDisposable OnChange(Action<T, string?> listener)
+    {
+      _listeners.Add(listener);
+      return new Unsubscriber(() => _listeners.Remove(listener));
+    }
+
+    public void Fire(T value)
+    {
+      CurrentValue = value;
+      foreach (var listener in _listeners.ToArray())
+      {
+        listener(value, null);
+      }
+    }
+
+    private sealed class Unsubscriber(Action dispose) : IDisposable
+    {
+      public void Dispose() => dispose();
+    }
   }
 
   [Fact]
