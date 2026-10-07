@@ -27,33 +27,37 @@ public class RdsCardTests : TestContext
   }
 
   [Fact]
-  public void RdsCard_RendersNothing_WhenBothStationNameAndRadioTextNull()
+  public void RdsCard_KeepsItsSlot_WithANoRdsPlaceholder_WhenBothStationNameAndRadioTextNull()
   {
-    // Post HANDOFF-rds-inline-scroll-revision the render gate is
-    // (!IsNullOrEmpty(StationName) || !IsNullOrEmpty(RadioText)). The
-    // card hides ONLY in the both-empty case — RadioText alone is now
-    // enough to keep the card on screen during transient tune-ins. Pass
-    // RadioText explicitly so the both-empty intent is obvious at the
-    // assertion level rather than relying on the parameter default.
+    // The card used to be REMOVED when there was no RDS, and because it sits in a flex column above
+    // the frequency well, tuning between an RDS and a non-RDS station moved the whole tuner. It now
+    // always renders, at a fixed height (design-system.css), with a dim placeholder.
     var cut = RenderComponent<RdsCard>(p => p
       .Add(x => x.StationName, null)
       .Add(x => x.RadioText, null));
 
-    // No .rds-card root in DOM — the card collapses entirely so the
-    // surrounding layout doesn't have to skirt an empty box.
-    Assert.Empty(cut.FindAll(".rds-card"));
+    Assert.Single(cut.FindAll(".rds-card"));
+    Assert.Equal("—", cut.Find(".rds-card-empty").TextContent.Trim());
   }
 
   [Fact]
-  public void RdsCard_RendersNothing_WhenBothStationNameAndRadioTextEmpty()
+  public void RdsCard_KeepsItsSlot_WithANoRdsPlaceholder_WhenBothStationNameAndRadioTextEmpty()
   {
-    // Empty-string variant of the both-absent gate — IsNullOrEmpty treats
-    // null and "" the same, so both forms must collapse the card.
+    // Empty-string variant: IsNullOrEmpty treats null and "" the same.
     var cut = RenderComponent<RdsCard>(p => p
       .Add(x => x.StationName, string.Empty)
       .Add(x => x.RadioText, string.Empty));
 
-    Assert.Empty(cut.FindAll(".rds-card"));
+    Assert.Single(cut.FindAll(".rds-card"));
+    Assert.Single(cut.FindAll(".rds-card-empty"));
+  }
+
+  [Fact]
+  public void RdsCard_ShowsNoPlaceholder_WhenThereIsRds()
+  {
+    var cut = RenderComponent<RdsCard>(p => p.Add(x => x.StationName, "KQED FM"));
+
+    Assert.Empty(cut.FindAll(".rds-card-empty"));
   }
 
   [Fact]

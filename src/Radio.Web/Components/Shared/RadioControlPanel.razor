@@ -868,20 +868,34 @@
       _rdsScrollOptions.RtChunkSeparator);
 
     // Listen for config-bridge change tokens (SQLite store writes) so the
-    // user's UI changes take effect without a page reload. A reconfigure
-    // creates a fresh buffer — the buffer's accumulation state is bound to
-    // its size cap, so we don't try to preserve partial content across
-    // re-sizes. The visible effect on the user is "buffer briefly empties
-    // then fills again with the next RT chunk" — acceptable for a settings
-    // change the user just made.
-    _rdsScrollOptionsListener = RdsScrollOptionsMonitor.OnChange(opts =>
+    // user's UI changes take effect without a page reload.
+    //
+    // ⚠ This fires on EVERY config write, not just RDS ones: the SQLite bridge reloads the whole
+    // configuration, and IOptionsMonitor raises OnChange for every bound options type. Switching the
+    // visualizer mode saves "ui.visualizer" and lands here. This used to rebuild the buffer
+    // unconditionally, so any config write anywhere emptied the RadioText (only the station name,
+    // read straight from _radioState, survived) until the station sent a new RT chunk.
+    //
+    // So: rebuild only when the buffer's own shape changed (size cap or separator), and refill it
+    // from the current state when it is rebuilt, so it is never left blank. Anything else (scroll
+    // speed) just takes the new options.
+    _rdsScrollOptionsListener = RdsScrollOptionsMonitor.OnChange(opts => _ = InvokeAsync(() =>
     {
+      bool reshape = opts.RtBufferMaxChars != _rdsScrollOptions.RtBufferMaxChars ||
+                     !string.Equals(opts.RtChunkSeparator, _rdsScrollOptions.RtChunkSeparator, StringComparison.Ordinal);
       _rdsScrollOptions = opts;
-      _rdsBuffer = new RdsAccumulatingScrollBuffer(
-        opts.RtBufferMaxChars,
-        opts.RtChunkSeparator);
-      _ = InvokeAsync(StateHasChanged);
-    });
+      if (reshape)
+      {
+        _rdsBuffer = new RdsAccumulatingScrollBuffer(opts.RtBufferMaxChars, opts.RtChunkSeparator);
+        if (_radioState != null)
+        {
+          _rdsBuffer.ResetOnTuneChange(_radioState.Band, _radioState.Frequency, _radioState.RdsPi);
+          _rdsBuffer.AppendChunk(_radioState.RdsRadioText);
+        }
+      }
+
+      StateHasChanged();
+    }));
 
     // State and bands first, then presets. The order is historical — PR 3 of the
     // Radio Controller Polish arc band-filtered the presets, which the hot-fix off
@@ -978,23 +992,30 @@
     // Hot-fix off PR #371: presets are no longer band-filtered, so a band
     // change doesn't require a re-fetch — the empty-slot placeholder
     // re-evaluates against the new band's count on the next render.
-    _radioState = dto;
-
-    // Only touch the RDS accumulator when the broadcast actually carried an
-    // RDS/tuning change. On telemetry-only ticks (RdsRelevantChanged == false)
-    // we skip ResetOnTuneChange + AppendChunk entirely — the buffer text is
-    // unchanged, so RdsCard's ShouldRender suppresses the marquee re-render.
-    if (dto.RdsRelevantChanged)
+    //
+    // All of it runs on the renderer (InvokeAsync), not on the SignalR callback thread: the
+    // RdsScrollOptions listener also replaces _rdsBuffer and reads _radioState there, and doing
+    // these mutations off-thread let a buffer rebuild race a chunk append into the discarded buffer.
+    await InvokeAsync(() =>
     {
-      // HANDOFF-rds-accumulating-scroll — order matters: reset BEFORE append.
-      // If the station changed, the buffer's dedup tracker resets so the first
-      // chunk on the new station can't accidentally match the last chunk on
-      // the prior station.
-      _rdsBuffer.ResetOnTuneChange(dto.Band, dto.Frequency, dto.RdsPi);
-      _rdsBuffer.AppendChunk(dto.RdsRadioText);
-    }
+      _radioState = dto;
 
-    await InvokeAsync(StateHasChanged);
+      // Only touch the RDS accumulator when the broadcast actually carried an
+      // RDS/tuning change. On telemetry-only ticks (RdsRelevantChanged == false)
+      // we skip ResetOnTuneChange + AppendChunk entirely — the buffer text is
+      // unchanged, so RdsCard's ShouldRender suppresses the marquee re-render.
+      if (dto.RdsRelevantChanged)
+      {
+        // HANDOFF-rds-accumulating-scroll — order matters: reset BEFORE append.
+        // If the station changed, the buffer's dedup tracker resets so the first
+        // chunk on the new station can't accidentally match the last chunk on
+        // the prior station.
+        _rdsBuffer.ResetOnTuneChange(dto.Band, dto.Frequency, dto.RdsPi);
+        _rdsBuffer.AppendChunk(dto.RdsRadioText);
+      }
+
+      StateHasChanged();
+    });
   }
 
   private async Task FrequencyUpAsync()
