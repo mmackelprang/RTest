@@ -118,16 +118,11 @@ public class PhonePageTests : TestContext
   public void PhonePage_Renders_WithTabs()
   {
     var cut = RenderComponent<PhonePage>();
-    // Messages is the default rail tab; "More" collapses the legacy tabs.
-    Assert.Contains("Messages", cut.Markup);
-    Assert.Contains("More", cut.Markup);
-    // Legacy labels are hidden until "More" is expanded.
-    Assert.DoesNotContain("Dashboard", cut.Markup);
 
-    ExpandMore(cut);
-    Assert.Contains("Dashboard", cut.Markup);
-    Assert.Contains("Contacts", cut.Markup);
-    Assert.Contains("Call History", cut.Markup);
+    // Every tab is top level, in this order, with no click needed — and no "More" toggle.
+    var labels = cut.FindAll("button.phone-rail-tab .phone-rail-label").Select(l => l.TextContent.Trim()).ToList();
+    Assert.Equal(["Messages", "Dashboard", "Contacts", "Call History", "Diagnostics"], labels);
+    Assert.Empty(cut.FindAll("button[aria-expanded]"));
   }
 
   [Fact]
@@ -240,22 +235,21 @@ public class PhonePageTests : TestContext
   [Fact]
   public void PhonePage_ContactsTab_Renders_SourceColumn()
   {
-    // Rail tab buttons are always present once More is expanded. Verify the
-    // component renders without error and the Contacts tab label appears.
+    // "Contacts" is always in the markup now (it is a rail label), so open the tab and assert on
+    // the panel itself.
     var cut = RenderComponent<PhonePage>();
-    ExpandMore(cut);
-    Assert.Contains("Contacts", cut.Markup);
-    Assert.NotNull(cut);
+    OpenTab(cut, "Contacts");
+    var panel = cut.Find(".phone-contacts");
+    Assert.Contains("Source", panel.TextContent);
   }
 
   [Fact]
   public void PhonePage_ContactsTab_Renders_SyncButton()
   {
-    // Verify the component renders successfully with PbapApiService and
-    // BluetoothApiService injected (no DI error).
+    // Renders with PbapApiService and BluetoothApiService injected (no DI error).
     var cut = RenderComponent<PhonePage>();
-    ExpandMore(cut);
-    Assert.Contains("Contacts", cut.Markup);
+    OpenTab(cut, "Contacts");
+    Assert.Contains("Sync from Phone", cut.Find(".phone-contacts").TextContent);
     Assert.DoesNotContain("NullReferenceException", cut.Markup);
   }
 
@@ -350,22 +344,11 @@ public class PhonePageTests : TestContext
     Assert.Empty(_declines);
   }
 
-  // Expand the "More ▸" rail so the legacy tab buttons render.
-  private static void ExpandMore(IRenderedComponent<PhonePage> cut)
-  {
-    var moreButton = cut.FindAll("button.phone-rail-tab")
-      .First(b => b.TextContent.Contains("More"));
-    moreButton.Click();
-  }
+  // Switch the page to the Dashboard tab.
+  private static void OpenDashboard(IRenderedComponent<PhonePage> cut) => OpenTab(cut, "Dashboard");
 
-  // Switch the page to the legacy Dashboard tab (expand More first).
-  private static void OpenDashboard(IRenderedComponent<PhonePage> cut)
-  {
-    ExpandMore(cut);
-    var dashButton = cut.FindAll("button.phone-rail-tab")
-      .First(b => b.TextContent.Contains("Dashboard"));
-    dashButton.Click();
-  }
+  private static void OpenTab(IRenderedComponent<PhonePage> cut, string label) =>
+    cut.FindAll("button.phone-rail-tab").First(b => b.TextContent.Contains(label)).Click();
 
   private class EmptyResponseHandler : HttpMessageHandler
   {
