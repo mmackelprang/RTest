@@ -2,6 +2,10 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+🚫 **BLOCKED 2026-10-11: the step 0 probe received nothing usable** (only an internal 960 kHz spur; see
+§ *Step 0 results* below).
+Unblocking is the owner's call (antenna and wiring first). No code was written.
+
 🟡 **P2, first of the all-band rows** (`AUD-99` → `AUD-101` → `AUD-102` → `AUD-103`, with `AUD-104` after
 `AUD-99`). Filed 2026-10-11 by the Planner from the owner's instruction to *"get AM and SW working throughout
 the system"* now that the hardware `AUD-94` was waiting for is installed. The code facts below were read on
@@ -56,6 +60,59 @@ the probe fails, stop and report: every later row depends on it.
 
 Write the results (stations found, levels, UTC times, whether Q mode needed anything else) into this dossier
 under a dated heading before starting step 1.
+
+## Step 0 results — 2026-10-11, 21:02–21:06 UTC (Builder): ⛔ FAILED, nothing usable received; row blocked
+
+**Verdict: in Q-mode direct sampling, this dongle and antenna received no AM station and no SW signal.** The only
+carrier in the AM band is a **960 kHz spur**, consistent with a 28.8 MHz crystal harmonic. Per this row's rule (*"If the probe fails, stop and
+report"*), no code was written and `AUD-101`–`AUD-103` stay blocked behind it.
+
+**Method.** `radio-api` was stopped from 21:02:25 to 21:06:25 UTC (4 min). ⚠ **`radio-web` stops with it**
+(its unit depends on the API) and **must be started separately**. `systemctl start radio-api` alone left it
+`inactive`, which step 5 above does not say. A pure-Python `ctypes` probe against `librtlsdr.so` (no numpy)
+opened the dongle once and called `rtlsdr_set_direct_sampling(dev, 2)`, confirmed by `get_direct_sampling` = 2 and
+librtlsdr's `Enabled direct sampling mode, input 2`. It set 240 kS/s and, for each 10 kHz channel, tuned the DDC
+to `f + 30 kHz`, mixed the carrier back to DC in software and averaged it over a 5 kHz box (and in a second
+pass, a 500 Hz box). Every `set_center_freq` returned 0, and every read returned the full buffer. Identity as
+reported by the library: tuner type 5 (`R820T`), USB strings `Nooelec` / `NESDR SMArt v5` / `56001418`.
+
+**Results.**
+
+| Check | Result |
+|---|---|
+| AM survey 530–1710 kHz, Q, RTL digital AGC off | Wideband IQ power 6.4–11.4 dB (the probe's dB is 10·log10 of the mean IQ power in ADC counts, so about 2–4 counts RMS); the input is nearly starved. One channel stands out: **960 kHz, +18.0 dB** over the median. Next: 1520 +7.0, 550 +6.8, 1370 +6.5, and a broad hump across 1320–1440 at +2.9 to +6.5 |
+| Same survey, AGC on | Everything rises about 17 dB uniformly, with the same shape: 960 +18.2, 1520 +7.8, 1370 +6.9 |
+| **Spur control: I branch** (assumed unwired on this board, not measured), 900–1020 kHz | **960 kHz at 24.3 dB, against 25.3 dB on Q**: the same absolute level on the branch the antenna does not feed. 28.8 MHz ÷ 30 = 960 kHz. **Consistent with a crystal harmonic, not a station.** The I floor is about 30 dB below Q, so the antenna does deliver broadband energy to Q |
+| Narrow filter (500 Hz), AM, Q, AGC | A carrier keeps its power and noise drops: 960 rises to **+29 dB**, while the 1320–1440 hump stays at +5.1 to +7.3 (noise) |
+| `rtl_fm -E direct2 -M am -s 12k`, 7 s each at 960, 1520, 1370, 550 and 1180 (empty control) | 100 ms block-RMS coefficient of variation 0.02–0.03 on all five (control 0.02); mean RMS 43–55, except 1370 at 93. ⚠ **This instrument was not shown to be sensitive:** the 960 recording's RMS (45) equals the control's (45) despite a +18 dB carrier there. Treat it as weak supporting evidence only |
+| 1 kHz DFT of the whole ±110 kHz window around **600 kHz** (Q), and the same on I | Q (median 40.2): top bins +8.9 to +10.8 dB at 592, 580, 543, 552, 564, 535, 540 and 506 kHz. Two of them (580, 540) are on the 10 kHz grid, but at the same level as the off-grid bins, so they are indistinguishable from the expected maximum of about 220 noise bins. **Nothing at 600 kHz** (WSJS, listed as 5 kW in Winston-Salem; an external fact, not measured). I (median 13.5): top bin +7.8 |
+| Same DFT around **1 MHz** (Q) | Only the 960 kHz spur (+40.4 dB) and a 968 kHz carrier (+17.4, unexplained). Nothing else on the AM grid |
+| SW at **21:05 UTC** (17:05 EDT, daytime): ±20 kHz around WWV 2.5, 5, 10, 15 and 20 MHz, Q, AGC, 500 Hz filter | No carrier. The five readings in each run climb monotonically (cause not established; consistent with AGC settling after process start). Channel power tracks wideband at −27 to −28 dB at the start and end of every run, which is the 500 Hz / 240 kHz noise ratio (≈ −26.8 dB). The one exception is 15.010/15.020 MHz, at −25.0/−23.8 dB: up to 3.5 dB over the ratio, beside WWV rather than on it (15.000 is −25.5). 25 m / 31 m broadcasters were not scanned separately. A daytime null on 2.5/5 MHz is normal; 10 and 15 MHz WWV are usually audible in the eastern US at this hour |
+
+**Restored and re-verified (from 21:06:25 UTC).** `radio-api` and then `radio-web` were started and are `active`.
+`/api/radio/state` was back on FM 97.745 MHz, stereo, RDS `WSMW` with live RadioText, and `nowplaying` showed
+`isPlaying: true`. `Deploy-ToLinux.ps1 -VerifyOnly` found the kiosk live with 4 established connections. Its SHA
+"MISMATCH" (box `2a2893d`, `main` `8e8addb`) is docs-only: `git diff --name-only 2a2893d 8e8addb` touches only
+`docs/` and `archive/`. The warnings in the bounded journal read are start-up lines (BT not connected, BT health
+Degraded, `capture-4` missing, the GvMedia key, the Kestrel address override, https redirect) and the
+shutdown errors seen at this stop (`Error stopping Bluetooth adapter` / `ObjectDisposedException` ×4, a
+canceled capture). None names the SDR or the probe.
+
+**What this does and does not show.**
+- It shows that **the RF path does not deliver usable HF into the Q branch**. The Q branch is live (its floor
+  sits 30 dB over I's), but no carrier on the AM grid rises above that floor other than the 960 kHz spur. The area is
+  believed (external knowledge, not measured) to have several kW-class daytime AM stations.
+- It does **not** show that direct sampling is impossible on this dongle. Untested causes, cheapest first:
+  (a) the "AM-type antenna" may be a **passive loop meant to couple to a radio's ferrite bar**, or an **active
+  loop that needs power**. Either one delivers almost nothing into 50 Ω. (b) The diplexer's HF/VHF legs may be
+  swapped, or the HF leg may roll off below a few MHz. (c) Direct sampling on the RTL2832 has no front-end
+  gain, so it needs a long wire (tens of feet) or an amplified antenna to hear MW. (d) The SMArt v5's
+  software **bias-tee** could power an active antenna. ⚠ It was **deliberately not switched on**: 4.5 V DC into
+  a diplexer and an unknown antenna is a hardware risk for the owner to rule on.
+- **Suggested next step (owner):** confirm what the HF antenna is and how it is wired, or try a few metres of
+  plain wire on the diplexer's HF port. Then re-run this probe. The scripts are short and can be re-created
+  from the method above. A carrier at a known local frequency (600, 950, 1320, 1400 kHz…) that **does not
+  also appear on the I branch** is the pass condition.
 
 ## Measured facts (code, `main` `2a2893d2`)
 
