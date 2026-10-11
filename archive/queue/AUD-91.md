@@ -67,8 +67,9 @@ These are recorded, not decided. Several of them could shrink the row to "FM plu
 hardware can actually receive".
 
 1. **Can this box receive AM and SW at all?** `RtlSdrDevice` reports a fixed tuning range of
-   24 MHz to 1.766 GHz (`src/RTLSDRCore/Hardware/RtlSdrDevice.cs:103-104`). That range is hard-coded
-   with `TunerType = "RTL2832U"` (`:102`); nothing asks the dongle which tuner it has. It matches an
+   24 MHz to 1.766 GHz (`src/RTLSDRCore/Hardware/RtlSdrDevice.cs:103-104` when written; on `main` `2a2893d2` the constants
+   are at `:19,25` and used at `:115-116`). That range is hard-coded with `TunerType = "RTL2832U"` (`:102` then,
+   `:114` now); nothing asks the dongle which tuner it has. It matches an
    R820T-class tuner. `GET /api/radio/devices` on the box (read 2026-10-01) returns capabilities but no
    frequency range. All of AM (0.53 to 1.71 MHz) and SW from 1.6 to 24 MHz are below that floor.
    - RTLSDRCore has **no direct-sampling support**. Its P/Invoke surface

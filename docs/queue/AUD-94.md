@@ -2,7 +2,28 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-⛔ **ON HOLD 2026-10-02 BY OWNER RULING.** Owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."* So: **AM and SW stay exactly as they are** — option 1 (dim the pills, `UNAVAILABLE`, a toast instead of switching band; the preset-bar spec's PR 4) is **declined for now** and is not to be built. Options 2–4 become the roadmap's *All-band reception* item ([`archive/roadmaps/ROADMAP.md`](../../archive/roadmaps/ROADMAP.md) § Queued; hardware spec in [`docs/known-issues-and-future-work.md`](../known-issues-and-future-work.md) § All-band reception), executed once the owner has the hardware. Revisit the PR 4 UI then, if any band is still unreceivable. The two "still open" notes below were true until this ruling.
+✅ **HOLD LIFTED 2026-10-11: the hardware is installed.** The owner fitted a **Nooelec NESDR SMArt v5**
+(option C; `lsusb` `0bda:2838`, iManufacturer `Nooelec`, iProduct `NESDR SMArt v5`, serial `56001418`) on `radio`.
+It feeds from an **HF/VHF diplexer, with an AM antenna on the HF leg and an FM antenna on the VHF leg**. FM plays on
+it (`radio-api` opened it at 16:23 that day). Owner: *"get AM and SW working throughout the system."* The roadmap
+item is now these queued rows, in build order:
+
+1. [`AUD-99`](AUD-99.md): on-box Q-mode feasibility probe first, then the device layer (direct sampling, tuner
+   type, real range, product string, tune failures that propagate).
+2. [`AUD-101`](AUD-101.md): the AM DSP chain (software offset off the DC spike, channel filter and decimation,
+   AGC applied, in-channel level).
+3. [`AUD-102`](AUD-102.md): bands, API and UI agree (AM/SW overlap, dead `RadioOptions`, a receivable flag
+   that answers this row's data gap, validated steps, SW in kHz, preset names).
+4. [`AUD-103`](AUD-103.md): the band map on AM and SW (plans, HF mode in both sweep paths, an
+   `UnavailableReason` that reads the device).
+5. [`AUD-104`](AUD-104.md): fingerprinting on AM/SW. ⛔ Owner decision first.
+
+A fresh code survey found the old "~2 days" estimate too low. The missing AM channel filter, the AGC that is
+never applied and the swallowed tune failures (`AUD-101`, `AUD-99`) were not in it. Option 1's dimmed-pill UI
+stays declined. `AUD-102` exposes a receivable flag but does not build that UI. This row stays open as the parent
+until the five rows are closed.
+
+*(Was, 2026-10-02 to 2026-10-11:)* ⛔ **ON HOLD 2026-10-02 BY OWNER RULING.** Owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."* So: **AM and SW stay exactly as they are** — option 1 (dim the pills, `UNAVAILABLE`, a toast instead of switching band; the preset-bar spec's PR 4) is **declined for now** and is not to be built. Options 2–4 become the roadmap's *All-band reception* item ([`archive/roadmaps/ROADMAP.md`](../../archive/roadmaps/ROADMAP.md) § Queued; hardware spec in [`docs/known-issues-and-future-work.md`](../known-issues-and-future-work.md) § All-band reception), executed once the owner has the hardware. Revisit the PR 4 UI then, if any band is still unreceivable. The two "still open" notes below were true until this ruling.
 
 🟢 **P3, decision row.** Filed 2026-10-01 by the `AUD-91` Builder, from that row's box feasibility
 measurements. **The reception results below are MEASURED on `radio`; the hardware options are from
@@ -29,7 +50,7 @@ silence.
 1. **Accept and say so in the panel.** Mark AM and SW as not receivable on this hardware, either
    hidden or shown disabled with the reason. This needs no hardware. It is the honest minimum.
 2. **Direct sampling (Q-branch).** librtlsdr exposes `rtlsdr_set_direct_sampling`. RTLSDRCore has no
-   P/Invoke for it (`RtlSdrDevice.cs`, P/Invoke region). On a generic R820T dongle the Q-branch input is
+   P/Invoke for it (`RtlSdrDevice.cs:571-625`, the `NativeMethods` region). On a generic R820T dongle the Q-branch input is
    not wired to the antenna connector, so it needs a **hardware mod** (an HF antenna soldered to the
    RTL2832U's Q pins) or a dongle that has it built in (RTL-SDR Blog V3). The software also needs a
    different capture rate and DC handling below 24 MHz, and per-band tuner switching.
