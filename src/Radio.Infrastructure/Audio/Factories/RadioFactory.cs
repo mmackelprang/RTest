@@ -37,8 +37,11 @@ public class RadioFactory : IRadioFactory
   private readonly SdrDeviceGate? _deviceGate;
   private readonly IScanStationMap? _scanStationMap;
 
-  // The receiver of the last radio source this factory created, for GetSdrHardware (AUD-99).
-  private RadioReceiver? _activeReceiver;
+  // The last radio source this factory created and its receiver, for GetSdrHardware (AUD-99).
+  // Cleared by GetSdrHardware once that source has been disposed.
+  private ActiveRadio? _activeRadio;
+
+  private sealed record ActiveRadio(SDRRadioAudioSource Source, RadioReceiver Receiver);
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -200,8 +203,6 @@ public class RadioFactory : IRadioFactory
         throw new InvalidOperationException("No RTL-SDR devices found");
       }
 
-      _activeReceiver = radioReceiver;
-
       var logger = _loggerFactory.CreateLogger<SDRRadioAudioSource>();
       var source = new SDRRadioAudioSource(
         logger,
@@ -214,6 +215,8 @@ public class RadioFactory : IRadioFactory
         _getActiveSource,
         _deviceGate,
         _scanStationMap);
+
+      _activeRadio = new ActiveRadio(source, radioReceiver);
 
       _logger.LogInformation("Successfully created RTL-SDR radio source");
       return source;
@@ -266,13 +269,22 @@ public class RadioFactory : IRadioFactory
   /// Enumerated RTL-SDRs (from the 30 s cache), each with the HF decision of the current
   /// <c>RTLSDR:HfDirectSampling</c> setting. The tuner type is read when a device is opened, so it
   /// is <c>Unknown (not opened yet)</c> until the radio or an idle sweep has opened the dongle in
-  /// this process. The device the last created radio source holds is reported from that source's
-  /// receiver, with <see cref="SdrHardwareInfo.IsInUse"/> and its live HF mode.
+  /// this process. The device of the last radio source this factory created is reported from that
+  /// source's receiver, with <see cref="SdrHardwareInfo.IsInUse"/> true and its live HF mode, until
+  /// that source is disposed; after that no device is reported in use.
   /// </remarks>
   public IReadOnlyList<SdrHardwareInfo> GetSdrHardware()
   {
     HfDirectSamplingSetting setting = SdrHfConfiguration.Read(_configuration, _logger);
-    RadioReceiver? active = _activeReceiver;
+    ActiveRadio? radio = _activeRadio;
+    if (radio != null && radio.Source.State == AudioSourceState.Disposed)
+    {
+      // Forget a disposed source, unless a newer one has replaced it meanwhile.
+      Interlocked.CompareExchange(ref _activeRadio, null, radio);
+      radio = null;
+    }
+
+    RadioReceiver? active = radio?.Receiver;
     DeviceInfo? inUse = active?.DeviceInfo;
 
     List<SdrHardwareInfo> result = new();

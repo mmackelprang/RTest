@@ -3,7 +3,8 @@ namespace Radio.Core.Exceptions;
 /// <summary>
 /// Thrown when the radio hardware refused a tune, a band change or the mode switch a band needs
 /// (AUD-99). A fault on the server side, not a bad request: the API maps it to 503, never to the
-/// 400 an out-of-range frequency gets.
+/// 400 an out-of-range frequency gets. Its subclass <see cref="TunerCapabilityException"/> (a band
+/// the device can never receive) maps to 409 instead.
 /// </summary>
 /// <remarks>
 /// Derives from <see cref="InvalidOperationException"/>, which <c>TuneInBandAsync</c> threw for a

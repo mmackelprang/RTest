@@ -351,7 +351,7 @@ public class SdrHardwareDto
   /// <summary>Gets or sets whether the device is open in HF direct-sampling mode now.</summary>
   public bool IsHfMode { get; set; }
 
-  /// <summary>Gets or sets whether the radio source holds this device.</summary>
+  /// <summary>Gets or sets whether this is the device of the current radio source (created and not yet disposed; it may be stopped).</summary>
   public bool IsInUse { get; set; }
 
   /// <summary>Gets or sets the lowest receivable frequency, in Hz.</summary>

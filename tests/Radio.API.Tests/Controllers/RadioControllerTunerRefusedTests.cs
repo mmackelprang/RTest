@@ -86,6 +86,61 @@ public class RadioControllerTunerRefusedTests
     Assert503(result);
   }
 
+  private static ProblemDetails Assert409NoHf(ActionResult<RadioStateDto> result)
+  {
+    ObjectResult error = Assert.IsType<ObjectResult>(result.Result);
+    Assert.Equal(409, error.StatusCode);
+    ProblemDetails problem = Assert.IsType<ProblemDetails>(error.Value);
+    Assert.Equal(409, problem.Status);
+    Assert.Contains("no HF direct sampling", problem.Title);
+    return problem;
+  }
+
+  /// <summary>A controller over a real source and receiver whose open device has no HF direct sampling.</summary>
+  private static RadioController ControllerOverADeviceWithoutHf()
+  {
+    Mock<ISdrDevice> device = new();
+    device.Setup(d => d.DeviceInfo).Returns(new RTLSDRCore.Models.DeviceInfo
+    {
+      Name = "Generic RTL-SDR",
+      Product = "RTL2838UHIDIR",
+      Type = RTLSDRCore.Enums.DeviceType.Mock,
+      IsAvailable = true,
+      MinFrequencyHz = 24_000_000,
+      MaxFrequencyHz = 1_766_000_000,
+    });
+    device.Setup(d => d.IsOpen).Returns(true);
+    device.Setup(d => d.SupportsHfDirectSampling).Returns(false);
+    device.Setup(d => d.SetFrequency(It.IsAny<long>())).Returns(true);
+
+    Mock<IOptionsMonitor<RadioOptions>> options = new();
+    options.Setup(o => o.CurrentValue).Returns(new RadioOptions());
+    SDRRadioAudioSource source = new(NullLogger<SDRRadioAudioSource>.Instance, new RTLSDRCore.RadioReceiver(device.Object), options.Object);
+    Mock<IMasterMixer> mixer = new();
+    mixer.Setup(m => m.GetActiveSources()).Returns(new IAudioSource[] { source });
+    Mock<IAudioEngine> engine = new();
+    engine.Setup(e => e.GetMasterMixer()).Returns(mixer.Object);
+    return new RadioController(
+      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>());
+  }
+
+  [Fact]
+  public async Task SetBand_ToAm_OnADeviceWithoutHf_Is409_Not503()
+  {
+    ActionResult<RadioStateDto> result = await ControllerOverADeviceWithoutHf().SetBand(new SetBandRequest { Band = "AM" });
+
+    Assert.Contains("HF direct sampling", Assert409NoHf(result).Detail);
+  }
+
+  [Fact]
+  public async Task SetFrequency_InSw_OnADeviceWithoutHf_Is409()
+  {
+    RadioController controller = ControllerOverADeviceWithoutHf();
+
+    Assert409NoHf(await controller.SetFrequency(new SetFrequencyRequest { Frequency = 6_000_000 }));
+    Assert409NoHf(await controller.SetFrequency(new SetFrequencyRequest { Frequency = 6_000_000, Band = "SW" }));
+  }
+
   [Fact]
   public async Task SetFrequency_OutsideEveryBandAndTheDevice_IsStill400()
   {

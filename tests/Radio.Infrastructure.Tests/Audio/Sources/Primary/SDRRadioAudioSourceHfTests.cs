@@ -71,14 +71,19 @@ public class SDRRadioAudioSourceHfTests
   }
 
   [Fact]
-  public async Task SetBand_ToAm_OnADeviceWithoutHf_ThrowsTunerRefused_AndStaysOnFm()
+  public async Task SetBand_ToAm_OnADeviceWithoutHf_ThrowsTunerCapability_AndStaysOnFm()
   {
     _device.Setup(d => d.SetFrequency(It.IsAny<long>())).Returns(true);
     _device.Setup(d => d.SupportsHfDirectSampling).Returns(false);
     RadioReceiver receiver = new(_device.Object);
     await using SDRRadioAudioSource source = CreateSource(receiver);
 
-    await Assert.ThrowsAsync<TunerRefusedException>(() => source.SetBandAsync(RadioBand.AM));
+    // A capability gap (409 at the API), still a TunerRefusedException for callers that catch any refusal.
+    TunerCapabilityException ex = await Assert.ThrowsAsync<TunerCapabilityException>(() => source.SetBandAsync(RadioBand.AM));
+    Assert.IsAssignableFrom<TunerRefusedException>(ex);
+    Assert.Contains("HF direct sampling", ex.Message);
+    await Assert.ThrowsAsync<TunerCapabilityException>(() => source.SetFrequencyAsync(new Frequency(1_000_000)));
+    await Assert.ThrowsAsync<TunerCapabilityException>(() => source.TuneInBandAsync(RadioBand.SW, new Frequency(6_000_000)));
 
     Assert.Equal(RadioBand.FM, source.CurrentBand);
     _device.Verify(d => d.SetHfMode(true), Times.Never);

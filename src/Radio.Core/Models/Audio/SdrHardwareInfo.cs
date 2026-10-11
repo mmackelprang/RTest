@@ -12,7 +12,7 @@ namespace Radio.Core.Models.Audio;
 /// <param name="HfDirectSampling">The direct-sampling input used for AM and SW: <c>Q</c>, <c>I</c>, or <c>Off</c> when the device has no HF bands.</param>
 /// <param name="HfSetting">The <c>RTLSDR:HfDirectSampling</c> setting the decision was made with.</param>
 /// <param name="IsHfMode">True when the device is open in HF direct-sampling mode now.</param>
-/// <param name="IsInUse">True when this is the device the radio source holds.</param>
+/// <param name="IsInUse">True when this is the device of the current radio source (created and not yet disposed; it may be stopped).</param>
 /// <param name="MinFrequencyHz">Lowest receivable frequency, in Hz.</param>
 /// <param name="MaxFrequencyHz">Highest receivable frequency, in Hz.</param>
 public sealed record SdrHardwareInfo(
