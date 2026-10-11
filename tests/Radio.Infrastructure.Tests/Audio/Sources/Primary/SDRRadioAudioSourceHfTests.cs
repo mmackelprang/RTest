@@ -1,0 +1,170 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using Radio.Core.Configuration;
+using Radio.Core.Exceptions;
+using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Factories;
+using Radio.Infrastructure.Audio.Sources.Primary;
+using RTLSDRCore;
+using RTLSDRCore.Enums;
+using RTLSDRCore.Hardware;
+using RTLSDRCore.Sweep;
+using Xunit;
+
+namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
+
+/// <summary>
+/// AUD-99: a tune the hardware refuses reaches callers as <see cref="TunerRefusedException"/>, not
+/// as the <see cref="ArgumentOutOfRangeException"/> an out-of-range frequency gets; the live-sweep
+/// HF-mode refusal is the receiver's; and <c>RTLSDR:HfDirectSampling</c> is read as documented.
+/// </summary>
+public class SDRRadioAudioSourceHfTests
+{
+  private readonly Mock<ISdrDevice> _device = new();
+
+  public SDRRadioAudioSourceHfTests()
+  {
+    _device.Setup(d => d.DeviceInfo).Returns(new RTLSDRCore.Models.DeviceInfo
+    {
+      Name = "Mock RTL-SDR Device",
+      Product = "Generic",
+      Type = DeviceType.Mock,
+      IsAvailable = true,
+      MinFrequencyHz = 24_000_000,
+      MaxFrequencyHz = 1_766_000_000,
+    });
+    _device.Setup(d => d.IsOpen).Returns(true);
+  }
+
+  private static SDRRadioAudioSource CreateSource(RadioReceiver receiver)
+  {
+    Mock<IOptionsMonitor<RadioOptions>> options = new();
+    options.Setup(o => o.CurrentValue).Returns(new RadioOptions());
+    return new SDRRadioAudioSource(NullLogger<SDRRadioAudioSource>.Instance, receiver, options.Object);
+  }
+
+  [Fact]
+  public async Task SetFrequency_RefusedByTheDevice_ThrowsTunerRefused_NotArgumentOutOfRange()
+  {
+    _device.Setup(d => d.SetFrequency(It.IsAny<long>())).Returns(false);
+    await using SDRRadioAudioSource source = CreateSource(new RadioReceiver(_device.Object));
+
+    TunerRefusedException ex = await Assert.ThrowsAsync<TunerRefusedException>(() =>
+      source.SetFrequencyAsync(new Frequency(99_500_000)));
+
+    Assert.Contains("refused", ex.Message);
+  }
+
+  [Fact]
+  public async Task SetFrequency_OutsideEveryBandAndTheDevice_StillThrowsArgumentOutOfRange()
+  {
+    _device.Setup(d => d.SetFrequency(It.IsAny<long>())).Returns(true);
+    await using SDRRadioAudioSource source = CreateSource(new RadioReceiver(_device.Object));
+
+    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+      source.SetFrequencyAsync(new Frequency(2_000_000_000)));
+
+    _device.Verify(d => d.SetFrequency(It.IsAny<long>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task SetBand_ToAm_OnADeviceWithoutHf_ThrowsTunerRefused_AndStaysOnFm()
+  {
+    _device.Setup(d => d.SetFrequency(It.IsAny<long>())).Returns(true);
+    _device.Setup(d => d.SupportsHfDirectSampling).Returns(false);
+    RadioReceiver receiver = new(_device.Object);
+    await using SDRRadioAudioSource source = CreateSource(receiver);
+
+    await Assert.ThrowsAsync<TunerRefusedException>(() => source.SetBandAsync(RadioBand.AM));
+
+    Assert.Equal(RadioBand.FM, source.CurrentBand);
+    _device.Verify(d => d.SetHfMode(true), Times.Never);
+    _device.Verify(d => d.SetFrequency(It.Is<long>(hz => hz < 24_000_000)), Times.Never);
+  }
+
+  [Fact]
+  public async Task SetBand_ToAm_WhenTheHfSwitchIsRefused_ThrowsTunerRefused()
+  {
+    _device.Setup(d => d.SetFrequency(It.IsAny<long>())).Returns(true);
+    _device.Setup(d => d.SupportsHfDirectSampling).Returns(true);
+    _device.Setup(d => d.SetHfMode(true)).Returns(false);
+    await using SDRRadioAudioSource source = CreateSource(new RadioReceiver(_device.Object));
+
+    await Assert.ThrowsAsync<TunerRefusedException>(() => source.SetBandAsync(RadioBand.AM));
+
+    _device.Verify(d => d.SetHfMode(true), Times.Once);
+    Assert.Equal(RadioBand.FM, source.CurrentBand);
+  }
+
+  [Fact]
+  public async Task LiveSweepRefusal_IsTheReceiversModeCheck()
+  {
+    // The mock device has HF (Q branch) by default.
+    RadioReceiver receiver = new(new MockSdrDevice());
+    Assert.True(receiver.SetBand(BandType.AM, 1_000_000));
+    Assert.True(receiver.Startup());
+    await using SDRRadioAudioSource source = CreateSource(receiver);
+    BandSweepPlan fm = BandSweepPlans.For(BandType.FM, null)!;
+    BandSweepPlan am = BandSweepPlans.CreateNarrowband("AM", 530_000, 4, 10_000, 525_000, 565_000);
+
+    Assert.True(receiver.IsHfMode);
+    Assert.NotNull(source.LiveSweepRefusal(fm));
+    Assert.Null(source.LiveSweepRefusal(am));
+  }
+
+  [Theory]
+  [InlineData(null, HfDirectSamplingSetting.Auto)]
+  [InlineData("Auto", HfDirectSamplingSetting.Auto)]
+  [InlineData("Q", HfDirectSamplingSetting.Q)]
+  [InlineData("i", HfDirectSamplingSetting.I)]
+  [InlineData("Off", HfDirectSamplingSetting.Off)]
+  public void HfSetting_IsReadFromRtlsdrHfDirectSampling(string? value, HfDirectSamplingSetting expected)
+  {
+    Dictionary<string, string?> values = new();
+    if (value != null)
+    {
+      values["RTLSDR:HfDirectSampling"] = value;
+    }
+    IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    Mock<ILogger> logger = new();
+
+    Assert.Equal(expected, SdrHfConfiguration.Read(configuration, logger.Object));
+    logger.Verify(l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
+      It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
+  }
+
+  [Fact]
+  public void HfSetting_Invalid_IsAuto_WithOneWarning()
+  {
+    IConfiguration configuration = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?> { ["RTLSDR:HfDirectSampling"] = "Yes please" })
+      .Build();
+    Mock<ILogger> logger = new();
+
+    Assert.Equal(HfDirectSamplingSetting.Auto, SdrHfConfiguration.Read(configuration, logger.Object));
+    logger.Verify(l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
+      It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+  }
+
+  [Fact]
+  public void ShippedAppsettings_DefaultsTheKeyToAuto()
+  {
+    string path = Path.Combine(FindRepoRoot(), "src", "Radio.API", "appsettings.json");
+    using System.Text.Json.JsonDocument json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+
+    Assert.Equal("Auto", json.RootElement.GetProperty("RTLSDR").GetProperty("HfDirectSampling").GetString());
+  }
+
+  private static string FindRepoRoot()
+  {
+    DirectoryInfo? dir = new(AppContext.BaseDirectory);
+    while (dir != null && !File.Exists(Path.Combine(dir.FullName, "RadioConsole.sln")))
+    {
+      dir = dir.Parent;
+    }
+    return dir?.FullName ?? throw new InvalidOperationException("RadioConsole.sln not found above the test binaries");
+  }
+}
