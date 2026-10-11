@@ -2,9 +2,36 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🚫 **BLOCKED 2026-10-11: the step 0 probe received nothing usable** (only an internal 960 kHz spur; see
-§ *Step 0 results* below).
-Unblocking is the owner's call (antenna and wiring first). No code was written.
+✅ **UNBLOCKED 2026-10-11 by owner ruling: the step 0 outcome is an environment limit, not a fault.** Owner, relayed
+by the coordinator on 2026-10-11: the AM antenna *"is the one that comes with the SDR dongle. It's unpowered and
+passive"*. He hears no AM stations on a separate AM radio and no SW on other hardware either, so *"you probably
+won't find a real station. Don't make tuning to a real station a requirement for developing. This same thing
+goes for SW band"*. On the bias-tee: *"the antenna is **not** powered, so switching on the antenna supply won't
+have any effect"*. **Do not enable it.**
+
+**Step 0 outcome, as ruled:** the dongle side of the direct-sampling path is **confirmed**. Mode read back as 2,
+tuner type 5 (R820T), USB product `NESDR SMArt v5`, and the Q input is live, about 30 dB above the I branch. **No
+station is receivable locally**, which is an environment limit, not a fault. The 960 kHz carrier (28.8 MHz ÷ 30)
+is a **known crystal-harmonic artifact**. Do not chase it.
+
+**Acceptance replaces "a real station heard" for this row and for `AUD-101`–`AUD-103`:**
+- **(a) Deterministic tests.** Mock-device tests show that direct sampling switches **on for AM/SW and off for
+  every other band**, in both the radio path and the band-map sweep paths. `AUD-101` adds a synthetic AM
+  carrier + tone, an off-channel interferer and a DC offset at the tuned centre through the full
+  `RadioReceiver` chain, asserting tone recovery, adjacent-channel rejection and AGC level.
+- **(b) On-box checks that need no station,** on the deployed SHA:
+  - selecting AM and SW engages Q mode (log line or readback);
+  - tunes return success;
+  - audio is low-level noise rather than silence, an error or a crash;
+  - no `PLL not locked` appears;
+  - switching back to FM restores FM stereo with RDS;
+  - BAND view AM/SW sweeps complete and render.
+
+  Keep `journalctl` reads bounded. ⚠ Stopping `radio-api` also stops `radio-web`, so check both after every
+  deploy.
+
+_(Was, briefly on 2026-10-11:)_ 🚫 BLOCKED: the step 0 probe received nothing usable (see § *Step 0 results*
+below).
 
 🟡 **P2, first of the all-band rows** (`AUD-99` → `AUD-101` → `AUD-102` → `AUD-103`, with `AUD-104` after
 `AUD-99`). Filed 2026-10-11 by the Planner from the owner's instruction to *"get AM and SW working throughout
@@ -202,8 +229,10 @@ AM audio quality (`AUD-101`), band ranges and UI (`AUD-102`), sweep plans (`AUD-
 Deploy with `./deploy/Deploy-ToLinux.ps1` and check that `/api/health/version` on both services matches
 `origin/main` (or the branch head) **before** anyone listens. Then:
 
-- Tune the reference AM station from Step 0. The radio is in Q mode and **something** of that station is
-  audible. It may sound rough until `AUD-101` lands: this row proves the RF path, not audio quality.
+- ⚠ **Replaced by owner ruling 2026-10-11** (see the top of this dossier): no real station is required. Selecting
+  AM and SW engages Q mode (log line or readback), tunes return success, and the audio is low-level noise rather
+  than silence, an error or a crash. _(Was: "Tune the reference AM station from Step 0 ... something of that
+  station is audible.")_
 - FM is unchanged: the owner's usual station, stereo and RDS behave as before, and nothing new appears in
   `journalctl -u radio-api --since '-10min'` at Warning or above.
 - AM → FM → AM switching works repeatedly with no `PLL not locked!` on AM.
