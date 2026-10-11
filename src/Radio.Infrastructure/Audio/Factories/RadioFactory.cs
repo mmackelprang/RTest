@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
@@ -35,6 +36,9 @@ public class RadioFactory : IRadioFactory
   private readonly Func<IAudioSource?>? _getActiveSource;
   private readonly SdrDeviceGate? _deviceGate;
   private readonly IScanStationMap? _scanStationMap;
+
+  // The receiver of the last radio source this factory created, for GetSdrHardware (AUD-99).
+  private RadioReceiver? _activeReceiver;
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -186,13 +190,17 @@ public class RadioFactory : IRadioFactory
   {
     try
     {
-      // Try to create a RadioReceiver with the first available device
-      var radioReceiver = RadioReceiver.CreateWithFirstAvailableDevice();
-      
+      // Try to create a RadioReceiver with the first available device. AUD-99: the device's HF
+      // input comes from RTLSDR:HfDirectSampling, read now so a changed value applies to the next
+      // radio source.
+      var radioReceiver = RadioReceiver.CreateWithFirstAvailableDevice(SdrHfConfiguration.Read(_configuration, _logger));
+
       if (radioReceiver == null)
       {
         throw new InvalidOperationException("No RTL-SDR devices found");
       }
+
+      _activeReceiver = radioReceiver;
 
       var logger = _loggerFactory.CreateLogger<SDRRadioAudioSource>();
       var source = new SDRRadioAudioSource(
@@ -251,6 +259,46 @@ public class RadioFactory : IRadioFactory
   public IReadOnlyList<DeviceInfo> GetRTLSDRDevices()
   {
     return GetCachedRTLSDRDevices();
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Enumerated RTL-SDRs (from the 30 s cache), each with the HF decision of the current
+  /// <c>RTLSDR:HfDirectSampling</c> setting. The tuner type is read when a device is opened, so it
+  /// is <c>Unknown (not opened yet)</c> until the radio or an idle sweep has opened the dongle in
+  /// this process. The device the last created radio source holds is reported from that source's
+  /// receiver, with <see cref="SdrHardwareInfo.IsInUse"/> and its live HF mode.
+  /// </remarks>
+  public IReadOnlyList<SdrHardwareInfo> GetSdrHardware()
+  {
+    HfDirectSamplingSetting setting = SdrHfConfiguration.Read(_configuration, _logger);
+    RadioReceiver? active = _activeReceiver;
+    DeviceInfo? inUse = active?.DeviceInfo;
+
+    List<SdrHardwareInfo> result = new();
+    foreach (DeviceInfo info in GetCachedRTLSDRDevices().Where(d => d.Type == RTLSDRCore.Enums.DeviceType.RTLSDR))
+    {
+      bool isInUse = inUse != null && inUse.Type == info.Type && inUse.Index == info.Index && inUse.Serial == info.Serial;
+      // The enumerated copy was made with the setting of its enumeration; the in-use copy is the
+      // one the receiver opened, which carries the tuner it read.
+      DeviceInfo source = isInUse ? inUse! : info;
+      DirectSamplingMode hf = isInUse ? source.HfDirectSampling : HfDirectSampling.Resolve(setting, source.Product);
+      result.Add(new SdrHardwareInfo(
+        source.Index,
+        source.Name,
+        source.Manufacturer,
+        source.Product,
+        source.Serial,
+        source.TunerType,
+        hf.ToString(),
+        setting.ToString(),
+        isInUse && active!.IsHfMode,
+        isInUse,
+        hf != DirectSamplingMode.Off ? HfDirectSampling.HfMinFrequencyHz : RtlSdrDevice.TunerMinFrequencyHz,
+        source.MaxFrequencyHz));
+    }
+
+    return result;
   }
 
   /// <summary>

@@ -309,6 +309,56 @@ public class RadioDeviceListDto
   /// Gets or sets the total count of available devices.
   /// </summary>
   public int Count { get; set; }
+
+  /// <summary>
+  /// Gets or sets the SDR dongles present, with product, tuner and HF direct-sampling state (AUD-99).
+  /// </summary>
+  public List<SdrHardwareDto> Hardware { get; set; } = new();
+}
+
+/// <summary>
+/// One SDR dongle (AUD-99 diagnostics).
+/// </summary>
+public class SdrHardwareDto
+{
+  /// <summary>Gets or sets the device index.</summary>
+  public int Index { get; set; }
+
+  /// <summary>Gets or sets the driver's name for the device's USB IDs (librtlsdr's table name for an RTL-SDR).</summary>
+  public string Name { get; set; } = string.Empty;
+
+  /// <summary>Gets or sets the USB manufacturer string.</summary>
+  public string Manufacturer { get; set; } = string.Empty;
+
+  /// <summary>Gets or sets the USB product string, e.g. <c>NESDR SMArt v5</c>.</summary>
+  public string Product { get; set; } = string.Empty;
+
+  /// <summary>Gets or sets the USB serial string.</summary>
+  public string Serial { get; set; } = string.Empty;
+
+  /// <summary>Gets or sets the tuner chip, read when the device was last opened; <c>Unknown (not opened yet)</c> before that.</summary>
+  public string TunerType { get; set; } = string.Empty;
+
+  /// <summary>Gets or sets the direct-sampling input used for AM and SW: <c>Q</c>, <c>I</c>, or <c>Off</c>.</summary>
+  public string HfDirectSampling { get; set; } = string.Empty;
+
+  /// <summary>Gets or sets whether AM and SW are receivable (<see cref="HfDirectSampling"/> is not <c>Off</c>).</summary>
+  public bool HfEnabled { get; set; }
+
+  /// <summary>Gets or sets the <c>RTLSDR:HfDirectSampling</c> setting the decision was made with.</summary>
+  public string HfSetting { get; set; } = string.Empty;
+
+  /// <summary>Gets or sets whether the device is open in HF direct-sampling mode now.</summary>
+  public bool IsHfMode { get; set; }
+
+  /// <summary>Gets or sets whether the radio source holds this device.</summary>
+  public bool IsInUse { get; set; }
+
+  /// <summary>Gets or sets the lowest receivable frequency, in Hz.</summary>
+  public long MinFrequencyHz { get; set; }
+
+  /// <summary>Gets or sets the highest receivable frequency, in Hz.</summary>
+  public long MaxFrequencyHz { get; set; }
 }
 
 /// <summary>
