@@ -19,7 +19,7 @@ namespace RTLSDRCore.Hardware;
       private int _ppmCorrection = 0;
       private bool _isOpen;
       private bool _isStreaming;
-      private bool _isHfMode;
+      private volatile bool _isHfMode;
       private CancellationTokenSource? _streamingCts;
       private Task? _streamingTask;
       private readonly Random _random = new();

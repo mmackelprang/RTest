@@ -42,7 +42,9 @@ namespace RTLSDRCore.Hardware;
       private DeviceInfo? _deviceInfo;
       private bool _isOpen;
       private bool _isStreaming;
-      private bool _isHfMode;
+      // The direct-sampling mode last read back from librtlsdr (0 off, 1 I, 2 Q). Volatile: the
+      // receiver's threads read IsHfMode without the lock the switch is made under.
+      private volatile int _directSamplingMode;
       private CancellationTokenSource? _streamingCts;
       private Task? _streamingTask;
 
@@ -59,7 +61,7 @@ namespace RTLSDRCore.Hardware;
       public bool SupportsHfDirectSampling => HfInput != DirectSamplingMode.Off;
 
       /// <inheritdoc/>
-      public bool IsHfMode => _isOpen && _isHfMode;
+      public bool IsHfMode => _isOpen && _directSamplingMode > 0;
 
       private DirectSamplingMode HfInput => _deviceInfo?.HfDirectSampling ?? DirectSamplingMode.Off;
 
@@ -233,8 +235,9 @@ namespace RTLSDRCore.Hardware;
               }
 
               _isOpen = true;
-              // librtlsdr opens every device with direct sampling off.
-              _isHfMode = false;
+              // Read, not assumed: rtlsdr_open switches direct sampling to mode 1 (the I branch)
+              // itself when it finds no supported tuner (RTLSDR_TUNER_UNKNOWN), and off otherwise.
+              _directSamplingMode = ReadDirectSamplingMode();
               Logger.Information("Opened RTL-SDR device {Index}: {Name}", _deviceIndex, _deviceInfo?.Name);
               ReadTunerAndLogHfDecision();
 
@@ -272,7 +275,7 @@ namespace RTLSDRCore.Hardware;
               NativeMethods.rtlsdr_close(_deviceHandle);
               _deviceHandle = IntPtr.Zero;
               _isOpen = false;
-              _isHfMode = false;
+              _directSamplingMode = 0;
               Logger.Information("Closed RTL-SDR device {Index}", _deviceIndex);
           }
           catch (Exception ex)
@@ -335,24 +338,29 @@ namespace RTLSDRCore.Hardware;
 
       /// <inheritdoc/>
       /// <remarks>
-      /// Switching on calls <c>rtlsdr_set_direct_sampling</c> with this device's
-      /// <see cref="DeviceInfo.HfDirectSampling"/> input and reads the mode back with
-      /// <c>rtlsdr_get_direct_sampling</c>; a refusal or a read-back that disagrees is logged at
-      /// Warning and returns false. A successful switch is logged at Information.
+      /// <para>
+      /// Calls <c>rtlsdr_set_direct_sampling</c> with this device's
+      /// <see cref="DeviceInfo.HfDirectSampling"/> input (or 0 for off) and reads the mode back with
+      /// <c>rtlsdr_get_direct_sampling</c>. A successful switch is logged at Information.
+      /// Idempotence compares the mode wanted with the mode last read back, so a device that
+      /// <c>rtlsdr_open</c> left in mode 1 is still switched to a Q-branch input.
+      /// </para>
+      /// <para>
+      /// A non-zero result, a read-back that disagrees, or an exception is logged at Warning and
+      /// returns false, after recovery: librtlsdr's HF-on branch calls the tuner's <c>exit</c> and
+      /// records the new mode even when a register write failed, so the hardware can be left
+      /// half-switched. The mode is read back; if it is not the mode the device was in before, the
+      /// previous mode is set once more; and <see cref="IsHfMode"/> then reports the mode read back
+      /// last (off when that read fails).
+      /// </para>
       /// </remarks>
       public bool SetHfMode(bool on)
       {
-          if (!on && !_isOpen)
-          {
-              // librtlsdr opens every device with direct sampling off, so a closed device is
-              // already in the mode asked for.
-              _isHfMode = false;
-              return true;
-          }
-
           if (!_isOpen)
           {
-              return false;
+              // A closed device has no mode: IsHfMode is false while closed, and Open reads the
+              // mode back. Switching on needs an open device.
+              return !on;
           }
 
           if (on && !SupportsHfDirectSampling)
@@ -362,12 +370,13 @@ namespace RTLSDRCore.Hardware;
               return false;
           }
 
-          if (on == _isHfMode)
+          var mode = on ? HfInput : DirectSamplingMode.Off;
+          int previous = _directSamplingMode;
+          if ((int)mode == previous)
           {
               return true;
           }
 
-          var mode = on ? HfInput : DirectSamplingMode.Off;
           try
           {
               var result = NativeMethods.rtlsdr_set_direct_sampling(_deviceHandle, (int)mode);
@@ -375,6 +384,7 @@ namespace RTLSDRCore.Hardware;
               {
                   Logger.Warning("RTL-SDR device {Index} refused direct sampling mode {Mode}: error {Error}",
                       _deviceIndex, mode, result);
+                  RecoverAfterFailedSwitch(previous);
                   return false;
               }
 
@@ -383,10 +393,11 @@ namespace RTLSDRCore.Hardware;
               {
                   Logger.Warning("RTL-SDR device {Index} reports direct sampling mode {ReadBack} after mode {Mode} was set",
                       _deviceIndex, readBack, (int)mode);
+                  RecoverAfterFailedSwitch(previous);
                   return false;
               }
 
-              _isHfMode = on;
+              _directSamplingMode = readBack;
               if (on)
               {
                   Logger.Information(
@@ -404,7 +415,56 @@ namespace RTLSDRCore.Hardware;
           catch (Exception ex)
           {
               Logger.Warning(ex, "Error switching RTL-SDR device {Index} to direct sampling mode {Mode}", _deviceIndex, mode);
+              RecoverAfterFailedSwitch(previous);
               return false;
+          }
+      }
+
+      /// <summary>
+      /// After a failed <see cref="SetHfMode"/>: reads the mode back, sets <paramref name="previous"/>
+      /// once more when the hardware is not in it, and caches the mode read back last (off when the
+      /// read fails). Logs the outcome at Warning. Never throws.
+      /// </summary>
+      private void RecoverAfterFailedSwitch(int previous)
+      {
+          int actual = ReadDirectSamplingMode();
+          if (actual != previous)
+          {
+              try
+              {
+                  int result = NativeMethods.rtlsdr_set_direct_sampling(_deviceHandle, previous);
+                  if (result != 0)
+                  {
+                      Logger.Warning("RTL-SDR device {Index}: restoring direct sampling mode {Mode} failed: error {Error}",
+                          _deviceIndex, previous, result);
+                  }
+              }
+              catch (Exception ex)
+              {
+                  Logger.Warning(ex, "RTL-SDR device {Index}: error restoring direct sampling mode {Mode}", _deviceIndex, previous);
+              }
+
+              actual = ReadDirectSamplingMode();
+          }
+
+          _directSamplingMode = actual;
+          Logger.Warning("RTL-SDR device {Index}: after the failed switch the device reads back direct sampling mode {Mode}",
+              _deviceIndex, actual);
+      }
+
+      /// <summary>
+      /// <c>rtlsdr_get_direct_sampling</c> as 0, 1 or 2; 0 when the call fails or returns an error.
+      /// </summary>
+      private int ReadDirectSamplingMode()
+      {
+          try
+          {
+              return Math.Max(0, NativeMethods.rtlsdr_get_direct_sampling(_deviceHandle));
+          }
+          catch (Exception ex)
+          {
+              Logger.Debug(ex, "Could not read the direct sampling mode of RTL-SDR device {Index}", _deviceIndex);
+              return 0;
           }
       }
 
@@ -479,7 +539,7 @@ namespace RTLSDRCore.Hardware;
       return false;
     }
 
-    if (_isHfMode)
+    if (IsHfMode)
     {
       // The tuner is in standby under direct sampling; librtlsdr's tuner gain calls have nothing
       // to act on, and a failure would log at Error on every tune.
@@ -514,7 +574,7 @@ namespace RTLSDRCore.Hardware;
       return false;
     }
 
-    if (_isHfMode)
+    if (IsHfMode)
     {
       // As SetGainMode: the tuner is in standby.
       Logger.Debug("Gain {Gain} dB not set: HF direct sampling is on and the tuner is in standby", gainDb);

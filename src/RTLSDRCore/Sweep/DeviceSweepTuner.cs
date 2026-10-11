@@ -57,7 +57,9 @@ public sealed class DeviceSweepTuner : ISweepTuner, IDisposable
       throw new InvalidOperationException("SDR device could not be opened for a band sweep");
     }
 
-    // A freshly opened device has direct sampling off, so an FM/VHF sweep makes no call here.
+    // No call when the device already reports the mode wanted. RtlSdrDevice reads the mode back
+    // at open: librtlsdr opens with direct sampling off, except that it switches to mode 1 itself
+    // when it finds no supported tuner.
     if (_device.IsHfMode != _hfMode && !_device.SetHfMode(_hfMode))
     {
       throw new InvalidOperationException(_hfMode

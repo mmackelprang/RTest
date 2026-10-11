@@ -58,10 +58,20 @@ namespace RTLSDRCore.Hardware;
       /// succeeds without touching the hardware.
       /// </summary>
       /// <remarks>
+      /// <para>
       /// On a device without HF support (<see cref="SupportsHfDirectSampling"/> false),
       /// <c>SetHfMode(true)</c> returns false and <c>SetHfMode(false)</c> returns true.
       /// While HF direct sampling is on the tuner chip is in standby, so the tuner gain calls
       /// (<see cref="SetGainMode"/>, <see cref="SetGain"/>) do nothing and return true.
+      /// </para>
+      /// <para>
+      /// After a false result, <see cref="IsHfMode"/> reports the mode the implementation knows the
+      /// device to be in, which is not necessarily the mode it was in before the call:
+      /// <see cref="RtlSdrDevice"/> reads the mode back from the hardware after a failure and tries
+      /// once to restore the previous mode, because librtlsdr can leave a failed switch half done.
+      /// Switching off with librtlsdr re-initialises the tuner, which resets its gain settings and
+      /// retunes it to the last centre frequency set; callers re-apply gain afterwards.
+      /// </para>
       /// </remarks>
       /// <param name="on">True for HF direct sampling, false for the tuner.</param>
       /// <returns>True when the device is now in the mode asked for.</returns>
