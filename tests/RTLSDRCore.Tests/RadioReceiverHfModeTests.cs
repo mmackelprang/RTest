@@ -1,3 +1,4 @@
+using RTLSDRCore.Bands;
 using RTLSDRCore.Enums;
 using RTLSDRCore.Sweep;
 using RTLSDRCore.Tests.Sweep;
@@ -100,7 +101,9 @@ public class RadioReceiverHfModeTests
 
     List<string> calls = CallsSince(device, before);
     AssertBefore(calls, "StopStreaming", "SetHfMode:False");
-    AssertBefore(calls, "SetHfMode:False", $"SetFrequency:{frequencyHz}");
+    // The real tune is the last one; the first is the pre-tune made while HF is still on.
+    Assert.True(calls.IndexOf("SetHfMode:False") < calls.LastIndexOf($"SetFrequency:{frequencyHz}"),
+      $"no tune after HF off; calls: {string.Join(", ", calls)}");
     Assert.False(receiver.IsHfMode);
   }
 
@@ -222,7 +225,8 @@ public class RadioReceiverHfModeTests
     using RadioReceiver receiver = StartOn(device, BandType.FM, FmHz);
 
     Assert.False(receiver.SetBand(BandType.AM, AmHz));
-    Assert.Equal(TuneResult.Refused, receiver.TrySetFrequency(AmHz));
+    Assert.Equal(TuneResult.Unsupported, receiver.TrySetBand(BandType.AM, AmHz));
+    Assert.Equal(TuneResult.Unsupported, receiver.TrySetFrequency(AmHz));
 
     Assert.DoesNotContain(device.SetFrequencyCalls, hz => hz < 24_000_000);
     Assert.Equal(BandType.FM, receiver.CurrentBand.Type);
@@ -256,7 +260,7 @@ public class RadioReceiverHfModeTests
   [Fact]
   public void Startup_OnAm_FailsAndClosesTheDevice_WhenHfIsRefused()
   {
-    FakeSdrDevice device = new() { SupportsHfDirectSampling = false };
+    FakeSdrDevice device = new() { HfSwitchResult = false };
     using RadioReceiver receiver = new(device);
     Assert.True(receiver.SetBand(BandType.AM, AmHz));
 
@@ -264,6 +268,237 @@ public class RadioReceiverHfModeTests
 
     Assert.False(device.IsOpen);
     Assert.Empty(device.SetFrequencyCalls);
+  }
+
+  // ---- Pre-merge fixes ----
+
+  /// <summary>H1/M1/L3: the calls of a switch from AM (manual gain 20 dB when <paramref name="autoGain"/> is false), in order.</summary>
+  private static List<string> SwitchFromAmWithGain(BandType band, long frequencyHz, bool autoGain, out RadioReceiver receiver, out FakeSdrDevice device)
+  {
+    device = new FakeSdrDevice();
+    receiver = StartOn(device, BandType.AM, AmHz);
+    receiver.AutoGainEnabled = autoGain;
+    receiver.Gain = 20f;
+    int before = device.Calls.Count;
+
+    Assert.Equal(TuneResult.Success, band == BandType.Custom
+      ? receiver.TrySetFrequency(frequencyHz)
+      : receiver.TrySetBand(band, frequencyHz));
+
+    return CallsSince(device, before);
+  }
+
+  [Fact]
+  public void SetBand_FromAmToFm_ReappliesManualGain_AfterHfOff()
+  {
+    List<string> calls = SwitchFromAmWithGain(BandType.FM, FmHz, autoGain: false, out RadioReceiver receiver, out _);
+    using (receiver)
+    {
+      AssertBefore(calls, "SetHfMode:False", "SetGainMode:False");
+      AssertBefore(calls, "SetHfMode:False", "SetGain:20");
+      AssertBefore(calls, "SetGain:20", "StartStreaming");
+    }
+  }
+
+  [Fact]
+  public void SetBand_FromAmToFm_ReappliesAutoGain_AfterHfOff()
+  {
+    List<string> calls = SwitchFromAmWithGain(BandType.FM, FmHz, autoGain: true, out RadioReceiver receiver, out _);
+    using (receiver)
+    {
+      AssertBefore(calls, "SetHfMode:False", "SetGainMode:True");
+      Assert.DoesNotContain(calls, c => c.StartsWith("SetGain:", StringComparison.Ordinal));
+    }
+  }
+
+  [Fact]
+  public void SetBand_FromAmToFm_PreTunesTheNewFrequency_WhileHfIsStillOn()
+  {
+    List<string> calls = SwitchFromAmWithGain(BandType.FM, FmHz, autoGain: true, out RadioReceiver receiver, out FakeSdrDevice device);
+    using (receiver)
+    {
+      // librtlsdr retunes to its last frequency when HF goes off: that must be the new one.
+      int preTune = calls.IndexOf($"SetFrequency:{FmHz}");
+      int hfOff = calls.IndexOf("SetHfMode:False");
+      int tune = calls.LastIndexOf($"SetFrequency:{FmHz}");
+      Assert.True(preTune >= 0 && preTune < hfOff && hfOff < tune, string.Join(", ", calls));
+      Assert.DoesNotContain(calls, c => c.StartsWith("SetFrequency:", StringComparison.Ordinal) && c != $"SetFrequency:{FmHz}");
+      Assert.Equal(FmHz, device.GetFrequency());
+    }
+  }
+
+  [Fact]
+  public void SetBand_FromAmToFm_RefusedPreTune_DoesNotFailTheSwitch()
+  {
+    FakeSdrDevice device = new();
+    using RadioReceiver receiver = StartOn(device, BandType.AM, AmHz);
+    int fmTunes = 0;
+    // Refuse only the first FM tune: the pre-tune made while HF is still on.
+    device.SetFrequencyResult = hz => hz != FmHz || fmTunes++ > 0;
+
+    Assert.True(receiver.SetBand(BandType.FM, FmHz));
+
+    Assert.Equal(2, fmTunes);
+    Assert.False(receiver.IsHfMode);
+    Assert.Equal(FmHz, device.GetFrequency());
+  }
+
+  [Fact]
+  public void CustomBand_FromAm_HfOff_ThenGain_ThenRate_ThenTune_ThenResume()
+  {
+    const long CustomHz = 433_920_000;
+    Assert.Null(BandPresets.FindBandForFrequency(CustomHz));
+
+    List<string> calls = SwitchFromAmWithGain(BandType.Custom, CustomHz, autoGain: false, out RadioReceiver receiver, out _);
+    using (receiver)
+    {
+      Assert.Equal(
+        new[]
+        {
+          "StopStreaming",
+          $"SetFrequency:{CustomHz}",   // pre-tune, HF still on (M1)
+          "SetHfMode:False",
+          "SetGainMode:False",          // H1
+          "SetGain:20",
+          "SetSampleRate:240000",       // H1: the tuner's init reset the IF filter
+          $"SetFrequency:{CustomHz}",
+          "StartStreaming",             // L3: after the tune
+        },
+        calls);
+      Assert.False(receiver.IsHfMode);
+      Assert.Equal(BandType.Custom, receiver.CurrentBand.Type);
+    }
+  }
+
+  [Fact]
+  public void CustomBand_FromAm_RefusedHfOff_IsRefused_AndResumesStreaming()
+  {
+    FakeSdrDevice device = new();
+    using RadioReceiver receiver = StartOn(device, BandType.AM, AmHz);
+    device.HfSwitchResult = false;
+    int before = device.Calls.Count;
+
+    Assert.Equal(TuneResult.Refused, receiver.TrySetFrequency(433_920_000));
+
+    Assert.Equal("StartStreaming", CallsSince(device, before).Last());
+    Assert.Equal(BandType.AM, receiver.CurrentBand.Type);
+    Assert.True(receiver.IsRunning);
+  }
+
+  [Fact]
+  public void Startup_RetriesARefusedSampleRateOnce()
+  {
+    FakeSdrDevice device = new() { RefuseNextSampleRates = 1 };
+    using RadioReceiver receiver = new(device);
+
+    Assert.True(receiver.Startup());
+
+    Assert.Equal(2, device.Calls.Count(c => c == "SetSampleRate:240000"));
+    Assert.True(receiver.IsRunning);
+  }
+
+  [Fact]
+  public void Startup_RetriesARefusedFirstTuneOnce()
+  {
+    int tunes = 0;
+    FakeSdrDevice device = new() { SetFrequencyResult = _ => tunes++ > 0 };
+    using RadioReceiver receiver = new(device);
+
+    Assert.True(receiver.Startup());
+
+    Assert.Equal(2, device.SetFrequencyCalls.Count);
+    Assert.True(receiver.IsRunning);
+  }
+
+  [Fact]
+  public void Startup_TwoRefusedSampleRates_FailTheStart()
+  {
+    FakeSdrDevice device = new() { RefuseNextSampleRates = 2 };
+    using RadioReceiver receiver = new(device);
+
+    Assert.False(receiver.Startup());
+
+    Assert.Equal(2, device.Calls.Count(c => c.StartsWith("SetSampleRate", StringComparison.Ordinal)));
+    Assert.False(device.IsOpen);
+  }
+
+  [Theory]
+  [InlineData(BandType.AM, AmHz)]
+  [InlineData(BandType.Shortwave, SwHz)]
+  public void Startup_OnAnHfBand_WithoutHf_FallsBackToFm_WithOneWarning(BandType band, long frequencyHz)
+  {
+    Collector sink = new();
+    ILogger logger = new LoggerConfiguration().MinimumLevel.Verbose().WriteTo.Sink(sink).CreateLogger();
+    FakeSdrDevice device = new() { SupportsHfDirectSampling = false };
+    using RadioReceiver receiver = new(device, logger);
+    Assert.True(receiver.SetBand(band, frequencyHz));   // device closed: recorded, as a persisted band is
+
+    Assert.True(receiver.Startup());
+
+    Assert.Equal(BandType.FM, receiver.CurrentBand.Type);
+    Assert.True(BandPresets.GetBand(BandType.FM).ContainsFrequency(receiver.CurrentFrequency));
+    Assert.DoesNotContain("SetHfMode:True", device.Calls);
+    Assert.DoesNotContain(device.SetFrequencyCalls, hz => hz < 24_000_000);
+    Assert.Single(sink.Events, e => e.Level >= LogEventLevel.Warning);
+    Assert.True(receiver.IsRunning);
+  }
+
+  /// <summary>S1: the audio of <paramref name="blocks"/> weak noise blocks on <paramref name="band"/>, one event per block.</summary>
+  private static List<float[]> AudioFromWeakBlocks(BandType band, long frequencyHz, int blocks, out float signalStrength)
+  {
+    FakeSdrDevice device = new()
+    {
+      // Uniform noise of +-0.03 per component: an RMS magnitude of about 0.024, under the 0.1 squelch default.
+      BlockFactory = (_, count) => SweepTestSignals.Noise(count, 0.03f),
+    };
+    using RadioReceiver receiver = StartOn(device, band, frequencyHz);
+
+    using SemaphoreSlim audioEvents = new(0);
+    List<float[]> audio = new();
+    receiver.AudioDataAvailable += (_, e) =>
+    {
+      lock (audio)
+      {
+        audio.Add(e.Samples.AsSpan(0, e.SampleCount).ToArray());
+      }
+      audioEvents.Release();
+    };
+
+    for (int i = 0; i < blocks; i++)
+    {
+      device.RaiseBlock();
+      // Synchronised on the DSP thread's audio event for this block, not on elapsed time; the
+      // timeout is only a fail-safe against a hang.
+      Assert.True(audioEvents.Wait(TimeSpan.FromSeconds(10)), "DSP thread produced no audio event");
+    }
+
+    signalStrength = receiver.SignalStrength;
+    lock (audio)
+    {
+      return audio.ToList();
+    }
+  }
+
+  [Theory]
+  [InlineData(BandType.AM, AmHz)]
+  [InlineData(BandType.Shortwave, SwHz)]
+  public void HfBand_WeakSignal_IsNotSquelched_ToSilence(BandType band, long frequencyHz)
+  {
+    List<float[]> audio = AudioFromWeakBlocks(band, frequencyHz, blocks: 2, out float strength);
+
+    Assert.True(strength < 0.1f, $"signal strength {strength} is not under the squelch threshold");
+    Assert.Equal(2, audio.Count);
+    Assert.All(audio, block => Assert.Contains(block, s => s != 0f));
+  }
+
+  [Fact]
+  public void Fm_WeakSignal_IsStillSquelched_ToSilence()
+  {
+    List<float[]> audio = AudioFromWeakBlocks(BandType.FM, FmHz, blocks: 2, out float strength);
+
+    Assert.True(strength < 0.1f, $"signal strength {strength} is not under the squelch threshold");
+    Assert.Equal(2, audio.Count);
+    Assert.All(audio, block => Assert.All(block, s => Assert.Equal(0f, s)));
   }
 
   [Fact]

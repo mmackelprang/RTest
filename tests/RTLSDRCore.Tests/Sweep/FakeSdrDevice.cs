@@ -49,6 +49,9 @@ internal sealed class FakeSdrDevice : ISdrDevice
   /// <summary>When false, SetSampleRate refuses (it is still recorded).</summary>
   public bool SampleRateResult { get; set; } = true;
 
+  /// <summary>The next this-many SetSampleRate calls refuse, whatever <see cref="SampleRateResult"/> says; counts down.</summary>
+  public int RefuseNextSampleRates { get; set; }
+
   public bool Disposed { get; private set; }
 
   /// <summary>Returned by successive ReadSamples calls; null entries mean "fill the buffer".</summary>
@@ -178,6 +181,11 @@ internal sealed class FakeSdrDevice : ISdrDevice
   public bool SetSampleRate(int sampleRate)
   {
     Record($"SetSampleRate:{sampleRate}");
+    if (RefuseNextSampleRates > 0)
+    {
+      RefuseNextSampleRates--;
+      return false;
+    }
     return SampleRateResult;
   }
 
