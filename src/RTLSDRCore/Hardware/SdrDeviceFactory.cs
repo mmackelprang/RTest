@@ -12,17 +12,25 @@ namespace RTLSDRCore.Hardware;
       private static readonly ILogger Logger = Log.ForContext(typeof(SdrDeviceFactory));
 
       /// <summary>
-      /// Enumerates all available SDR devices
+      /// Enumerates all available SDR devices, with the HF decision of the default
+      /// <see cref="HfDirectSamplingSetting.Auto"/> setting.
       /// </summary>
       /// <returns>List of device information</returns>
-      public static IReadOnlyList<DeviceInfo> EnumerateDevices()
+      public static IReadOnlyList<DeviceInfo> EnumerateDevices() => EnumerateDevices(HfDirectSamplingSetting.Auto);
+
+      /// <summary>
+      /// Enumerates all available SDR devices
+      /// </summary>
+      /// <param name="hfSetting">The <c>RTLSDR:HfDirectSampling</c> setting (AUD-99), which decides each RTL-SDR's HF input.</param>
+      /// <returns>List of device information</returns>
+      public static IReadOnlyList<DeviceInfo> EnumerateDevices(HfDirectSamplingSetting hfSetting)
       {
           var devices = new List<DeviceInfo>();
 
           // Try to enumerate RTL-SDR devices
           try
           {
-              var rtlDevices = RtlSdrDevice.EnumerateDevices();
+              var rtlDevices = RtlSdrDevice.EnumerateDevices(hfSetting);
               devices.AddRange(rtlDevices);
           }
           catch (Exception ex)
@@ -31,30 +39,25 @@ namespace RTLSDRCore.Hardware;
           }
 
           // Always add a mock device option
-          devices.Add(new DeviceInfo
-          {
-              Index = -1,
-              Name = "Mock SDR Device",
-              Manufacturer = "RTLSDRCore",
-              Serial = "MOCK-001",
-              Type = DeviceType.Mock,
-              IsAvailable = true,
-              TunerType = "Simulated",
-              MinFrequencyHz = 24_000_000,
-              MaxFrequencyHz = 1_766_000_000,
-              SupportedSampleRates = new[] { 250000, 1024000, 1536000, 1792000, 1920000, 2048000, 2400000, 2560000, 2880000, 3200000 },
-              AvailableGains = new[] { 0f, 0.9f, 1.4f, 2.7f, 3.7f, 7.7f, 8.7f, 12.5f, 14.4f, 15.7f, 16.6f, 19.7f, 20.7f, 22.9f, 25.4f, 28.0f, 29.7f, 32.8f, 33.8f, 36.4f, 37.2f, 38.6f, 40.2f, 42.1f, 43.4f, 43.9f, 44.5f, 48.0f, 49.6f }
-          });
+          devices.Add(MockSdrDevice.CreateDefaultDeviceInfo());
 
           return devices;
       }
 
       /// <summary>
-      /// Creates an SDR device instance
+      /// Creates an SDR device instance, with the default <see cref="HfDirectSamplingSetting.Auto"/> HF setting.
       /// </summary>
       /// <param name="deviceInfo">Device information</param>
       /// <returns>SDR device instance</returns>
-      public static ISdrDevice CreateDevice(DeviceInfo deviceInfo)
+      public static ISdrDevice CreateDevice(DeviceInfo deviceInfo) => CreateDevice(deviceInfo, HfDirectSamplingSetting.Auto);
+
+      /// <summary>
+      /// Creates an SDR device instance
+      /// </summary>
+      /// <param name="deviceInfo">Device information</param>
+      /// <param name="hfSetting">The HF setting for an RTL-SDR (AUD-99). A mock device takes its HF input from <paramref name="deviceInfo"/>.</param>
+      /// <returns>SDR device instance</returns>
+      public static ISdrDevice CreateDevice(DeviceInfo deviceInfo, HfDirectSamplingSetting hfSetting)
       {
           Logger.Information("Creating device: {DeviceName} (Type: {DeviceType})",
               deviceInfo.Name, deviceInfo.Type);
@@ -62,7 +65,7 @@ namespace RTLSDRCore.Hardware;
           return deviceInfo.Type switch
           {
               DeviceType.Mock => new MockSdrDevice(deviceInfo),
-              DeviceType.RTLSDR => new RtlSdrDevice(deviceInfo.Index),
+              DeviceType.RTLSDR => new RtlSdrDevice(deviceInfo.Index, hfSetting),
               _ => throw new NotSupportedException($"Device type {deviceInfo.Type} is not supported")
           };
       }
@@ -78,18 +81,26 @@ namespace RTLSDRCore.Hardware;
       }
 
       /// <summary>
-      /// Creates and opens the first available RTL-SDR device
+      /// Creates the first available RTL-SDR device (unopened), with the default
+      /// <see cref="HfDirectSamplingSetting.Auto"/> HF setting, or the mock device when there is none.
       /// </summary>
-      /// <returns>SDR device instance, or null if none available</returns>
-      public static ISdrDevice? CreateFirstAvailable()
+      /// <returns>SDR device instance</returns>
+      public static ISdrDevice? CreateFirstAvailable() => CreateFirstAvailable(HfDirectSamplingSetting.Auto);
+
+      /// <summary>
+      /// Creates the first available RTL-SDR device (unopened), or the mock device when there is none.
+      /// </summary>
+      /// <param name="hfSetting">The <c>RTLSDR:HfDirectSampling</c> setting (AUD-99).</param>
+      /// <returns>SDR device instance</returns>
+      public static ISdrDevice? CreateFirstAvailable(HfDirectSamplingSetting hfSetting)
       {
-          var devices = EnumerateDevices();
+          var devices = EnumerateDevices(hfSetting);
           var rtlDevice = devices.FirstOrDefault(d => d.Type == DeviceType.RTLSDR && d.IsAvailable);
 
           if (rtlDevice != null)
           {
-              Logger.Information("Found RTL-SDR device: {DeviceName}", rtlDevice.Name);
-              return CreateDevice(rtlDevice);
+              Logger.Information("Found RTL-SDR device: {DeviceName} (product {Product})", rtlDevice.Name, rtlDevice.Product);
+              return CreateDevice(rtlDevice, hfSetting);
           }
 
           Logger.Warning("No RTL-SDR devices found, falling back to mock device");

@@ -452,6 +452,13 @@ public sealed class BandMapServiceBandTests : IDisposable
 
     public bool IsStreaming => false;
 
+    // AUD-99: no HF; every plan these tests sweep is a tuner-path band.
+    public bool SupportsHfDirectSampling => false;
+
+    public bool IsHfMode => false;
+
+    public bool SetHfMode(bool on) => !on;
+
     public event EventHandler<IqSamplesEventArgs>? SamplesAvailable
     {
       add { }

@@ -19,6 +19,7 @@ namespace RTLSDRCore.Hardware;
       private int _ppmCorrection = 0;
       private bool _isOpen;
       private bool _isStreaming;
+      private bool _isHfMode;
       private CancellationTokenSource? _streamingCts;
       private Task? _streamingTask;
       private readonly Random _random = new();
@@ -35,6 +36,12 @@ namespace RTLSDRCore.Hardware;
 
       /// <inheritdoc/>
       public bool IsStreaming => _isStreaming;
+
+      /// <inheritdoc/>
+      public bool SupportsHfDirectSampling => _deviceInfo.HfDirectSampling != DirectSamplingMode.Off;
+
+      /// <inheritdoc/>
+      public bool IsHfMode => _isOpen && _isHfMode;
 
       /// <inheritdoc/>
       public event EventHandler<IqSamplesEventArgs>? SamplesAvailable;
@@ -59,18 +66,24 @@ namespace RTLSDRCore.Hardware;
           InitializeSimulatedSignals();
       }
 
-      private static DeviceInfo CreateDefaultDeviceInfo()
+      /// <summary>
+      /// The mock's default device information: a simulated dongle with HF direct sampling on the
+      /// Q branch (AUD-99), so its lower limit is <see cref="HfDirectSampling.HfMinFrequencyHz"/>.
+      /// </summary>
+      public static DeviceInfo CreateDefaultDeviceInfo()
       {
           return new DeviceInfo
           {
               Index = -1,
               Name = "Mock SDR Device",
               Manufacturer = "RTLSDRCore",
+              Product = "Mock SDR",
               Serial = "MOCK-001",
               Type = DeviceType.Mock,
               IsAvailable = true,
               TunerType = "Simulated",
-              MinFrequencyHz = 24_000_000,
+              HfDirectSampling = DirectSamplingMode.Q,
+              MinFrequencyHz = HfDirectSampling.HfMinFrequencyHz,
               MaxFrequencyHz = 1_766_000_000,
               SupportedSampleRates = new[] { 250000, 1024000, 1536000, 1792000, 1920000, 2048000, 2400000, 2560000, 2880000, 3200000 },
               AvailableGains = new[] { 0f, 0.9f, 1.4f, 2.7f, 3.7f, 7.7f, 8.7f, 12.5f, 14.4f, 15.7f, 16.6f, 19.7f, 20.7f, 22.9f, 25.4f, 28.0f, 29.7f, 32.8f, 33.8f, 36.4f, 37.2f, 38.6f, 40.2f, 42.1f, 43.4f, 43.9f, 44.5f, 48.0f, 49.6f }
@@ -159,16 +172,47 @@ namespace RTLSDRCore.Hardware;
     Logger.Information("Closing mock SDR device");
           StopStreaming();
           _isOpen = false;
+          _isHfMode = false;
       }
+
+      /// <inheritdoc/>
+      public bool SetHfMode(bool on)
+      {
+          if (!on)
+          {
+              _isHfMode = false;
+              return true;
+          }
+
+          if (!_isOpen || !SupportsHfDirectSampling)
+          {
+              return false;
+          }
+
+          _isHfMode = true;
+          Logger.Debug("Mock HF direct sampling on ({Mode} branch)", _deviceInfo.HfDirectSampling);
+          return true;
+      }
+
+      /// <summary>
+      /// The lowest frequency <see cref="SetFrequency"/> accepts now: <see cref="DeviceInfo.MinFrequencyHz"/>
+      /// in HF mode, or on a device without HF support; otherwise the tuner path's
+      /// <see cref="RtlSdrDevice.TunerMinFrequencyHz"/> (or the device minimum, if higher).
+      /// </summary>
+      private long CurrentMinFrequencyHz =>
+          _isHfMode || !SupportsHfDirectSampling
+              ? _deviceInfo.MinFrequencyHz
+              : Math.Max(_deviceInfo.MinFrequencyHz, RtlSdrDevice.TunerMinFrequencyHz);
 
       /// <inheritdoc/>
       public bool SetFrequency(long frequencyHz)
       {
-          if (frequencyHz < _deviceInfo.MinFrequencyHz || frequencyHz > _deviceInfo.MaxFrequencyHz)
+          long min = CurrentMinFrequencyHz;
+          if (frequencyHz < min || frequencyHz > _deviceInfo.MaxFrequencyHz)
           {
               Logger.Warning("Frequency {Frequency} out of range [{Min} - {Max}]",
                   RadioBand.FormatFrequency(frequencyHz),
-                  RadioBand.FormatFrequency(_deviceInfo.MinFrequencyHz),
+                  RadioBand.FormatFrequency(min),
                   RadioBand.FormatFrequency(_deviceInfo.MaxFrequencyHz));
               return false;
           }
@@ -184,7 +228,10 @@ namespace RTLSDRCore.Hardware;
       /// <inheritdoc/>
       public bool SetSampleRate(int sampleRate)
       {
-          if (!_deviceInfo.SupportedSampleRates.Contains(sampleRate))
+          // librtlsdr also accepts any rate in (225 kHz, 300 kHz], which is where the receiver's
+          // own rates fall (240 kHz). Rejecting them made Startup fail once its result was checked (AUD-99).
+          bool lowRange = sampleRate > 225_000 && sampleRate <= 300_000;
+          if (!lowRange && !_deviceInfo.SupportedSampleRates.Contains(sampleRate))
           {
               Logger.Warning("Sample rate {SampleRate} not supported", sampleRate);
               return false;
@@ -201,6 +248,13 @@ namespace RTLSDRCore.Hardware;
       /// <inheritdoc/>
       public bool SetGainMode(bool automatic)
       {
+          if (IsHfMode)
+          {
+              // As the real device: the tuner is in standby under direct sampling.
+              Logger.Debug("Mock gain mode not set: HF direct sampling is on");
+              return true;
+          }
+
           _autoGain = automatic;
           Logger.Debug("Set gain mode to {Mode}", automatic ? "automatic" : "manual");
           return true;
@@ -209,6 +263,12 @@ namespace RTLSDRCore.Hardware;
       /// <inheritdoc/>
       public bool SetGain(float gainDb)
       {
+          if (IsHfMode)
+          {
+              Logger.Debug("Mock gain not set: HF direct sampling is on");
+              return true;
+          }
+
           // Find nearest supported gain value
           var nearest = _deviceInfo.AvailableGains.OrderBy(g => Math.Abs(g - gainDb)).First();
           _gain = nearest;

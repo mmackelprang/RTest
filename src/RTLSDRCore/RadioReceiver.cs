@@ -14,7 +14,7 @@ namespace RTLSDRCore;
   /// </summary>
   public class RadioReceiver : IRadioControl, IDisposable
   {
-      private static readonly ILogger Logger = Log.ForContext<RadioReceiver>();
+      private readonly ILogger Logger;
 
       private readonly ISdrDevice _device;
       private readonly object _lock = new();
@@ -148,7 +148,18 @@ namespace RTLSDRCore;
       /// </summary>
       /// <param name="device">SDR device to use</param>
       public RadioReceiver(ISdrDevice device)
+          : this(device, null)
       {
+      }
+
+      /// <summary>
+      /// Creates a new radio receiver with the specified device and logger
+      /// </summary>
+      /// <param name="device">SDR device to use</param>
+      /// <param name="logger">Logger; the global Serilog logger with this type's context when null.</param>
+      public RadioReceiver(ISdrDevice device, ILogger? logger)
+      {
+          Logger = logger ?? Log.ForContext<RadioReceiver>();
           _device = device ?? throw new ArgumentNullException(nameof(device));
           _currentBand = BandPresets.FmBroadcast;
           _currentFrequencyHz = _currentBand.CenterFrequencyHz;
@@ -171,10 +182,65 @@ namespace RTLSDRCore;
       /// <summary>
       /// Creates a new radio receiver with the first available device
       /// </summary>
-      public static RadioReceiver? CreateWithFirstAvailableDevice()
+      public static RadioReceiver? CreateWithFirstAvailableDevice() =>
+          CreateWithFirstAvailableDevice(HfDirectSamplingSetting.Auto);
+
+      /// <summary>
+      /// Creates a new radio receiver with the first available device
+      /// </summary>
+      /// <param name="hfSetting">The <c>RTLSDR:HfDirectSampling</c> setting for the device (AUD-99).</param>
+      public static RadioReceiver? CreateWithFirstAvailableDevice(HfDirectSamplingSetting hfSetting)
       {
-          var device = SdrDeviceFactory.CreateFirstAvailable();
+          var device = SdrDeviceFactory.CreateFirstAvailable(hfSetting);
           return device != null ? new RadioReceiver(device) : null;
+      }
+
+      /// <summary>
+      /// Gets the device's information: product, tuner, HF input and frequency range (AUD-99).
+      /// </summary>
+      public DeviceInfo DeviceInfo => _device.DeviceInfo;
+
+      /// <summary>
+      /// Gets whether the device is in HF direct-sampling mode now. False while the device is closed.
+      /// </summary>
+      public bool IsHfMode => _device.IsHfMode;
+
+      /// <summary>
+      /// Puts the open device in the mode <paramref name="band"/> needs (<see cref="HfBands.Requires(BandType)"/>):
+      /// HF direct sampling for AM and Shortwave, the tuner for every other band. Does nothing when
+      /// the device is already in that mode. Must be called with streaming stopped and before the
+      /// centre frequency for <paramref name="band"/> is set.
+      /// </summary>
+      /// <returns>True when the device is in the mode <paramref name="band"/> needs.</returns>
+      private bool ApplyHfModeFor(RadioBand band)
+      {
+          bool wanted = HfBands.Requires(band.Type);
+          if (_device.IsHfMode == wanted)
+          {
+              return true;
+          }
+
+          if (wanted && !_device.SupportsHfDirectSampling)
+          {
+              Logger.Warning(
+                  "The {Band} band needs HF direct sampling, which this device does not have (product {Product}; see RTLSDR:HfDirectSampling)",
+                  band.Name, _device.DeviceInfo.Product);
+              return false;
+          }
+
+          bool switched;
+          lock (_tuneLock)
+          {
+              switched = _device.SetHfMode(wanted);
+          }
+
+          if (!switched)
+          {
+              Logger.Warning("The device refused to switch HF direct sampling {State} for the {Band} band",
+                  wanted ? "on" : "off", band.Name);
+          }
+
+          return switched;
       }
 
       #region IRadioControl Lifecycle Implementation
@@ -207,9 +273,44 @@ namespace RTLSDRCore;
                   // appropriate SDR sample rate for the current modulation)
                   SetupSignalProcessing();
 
-                  // Configure device with the modulation-appropriate sample rate
-                  _device.SetSampleRate(_sdrSampleRate);
-                  _device.SetFrequency(_currentFrequencyHz);
+                  // AUD-99: the HF mode first (AM/SW on, every other band off),
+                  // then the modulation-appropriate sample rate, then the
+                  // frequency. A refusal of any of the three fails the start:
+                  // a receiver that streams from a device that is not where
+                  // it reports being is worse than one that says it failed.
+                  if (!ApplyHfModeFor(_currentBand))
+                  {
+                      Logger.Error("Receiver start failed: the HF mode for the {Band} band was refused", _currentBand.Name);
+                      CloseDeviceAfterFailedStartup();
+                      SetState(ReceiverState.Error);
+                      return false;
+                  }
+
+                  if (!_device.SetSampleRate(_sdrSampleRate))
+                  {
+                      Logger.Error("Receiver start failed: the device refused the sample rate {SampleRate} Hz", _sdrSampleRate);
+                      CloseDeviceAfterFailedStartup();
+                      SetState(ReceiverState.Error);
+                      return false;
+                  }
+
+                  bool tuned;
+                  lock (_tuneLock)
+                  {
+                      tuned = _device.SetFrequency(_currentFrequencyHz);
+                  }
+
+                  if (!tuned)
+                  {
+                      Logger.Error("Receiver start failed: the device refused {Frequency}",
+                          RadioBand.FormatFrequency(_currentFrequencyHz));
+                      CloseDeviceAfterFailedStartup();
+                      SetState(ReceiverState.Error);
+                      return false;
+                  }
+
+                  // Gain is applied after the frequency, as before. In HF mode the
+                  // device makes these calls no-ops (the tuner is in standby).
                   _device.SetGainMode(_autoGain);
                   if (!_autoGain)
                   {
@@ -359,7 +460,27 @@ namespace RTLSDRCore;
       public long CurrentFrequency => _currentFrequencyHz;
 
       /// <inheritdoc/>
-      public bool SetFrequency(long frequencyHz)
+      /// <remarks>
+      /// <see cref="TrySetFrequency"/> says why a false result was false.
+      /// </remarks>
+      public bool SetFrequency(long frequencyHz) => TrySetFrequency(frequencyHz) == TuneResult.Success;
+
+      /// <summary>
+      /// Tunes to <paramref name="frequencyHz"/>, switching to the preset band that contains it
+      /// (<see cref="SetBand"/>) or, when none does, to a custom band around it, and reports how it went.
+      /// </summary>
+      /// <remarks>
+      /// A custom band is received with the tuner (HF direct sampling off), so its lower limit is
+      /// <see cref="RtlSdrDevice.TunerMinFrequencyHz"/> whatever the device's HF support (AUD-99).
+      /// </remarks>
+      /// <param name="frequencyHz">Frequency, in Hz.</param>
+      /// <returns>
+      /// <see cref="TuneResult.OutOfRange"/> when no preset band contains the frequency and it is
+      /// outside what the device can receive without HF; nothing is changed then.
+      /// <see cref="TuneResult.Refused"/> when the device refused the HF switch, the sample rate or
+      /// the frequency.
+      /// </returns>
+      public TuneResult TrySetFrequency(long frequencyHz)
       {
           // Try to find an appropriate band for this frequency
           var band = BandPresets.FindBandForFrequency(frequencyHz);
@@ -367,16 +488,17 @@ namespace RTLSDRCore;
           if (band != null)
           {
               // Switch to the appropriate band
-              return SetBand(band.Type, frequencyHz);
+              return SetBand(band.Type, frequencyHz) ? TuneResult.Success : TuneResult.Refused;
           }
 
-          // No matching band found - check if within device range
-          if (frequencyHz < _device.DeviceInfo.MinFrequencyHz ||
+          // No matching band found - check if within the range the tuner path receives
+          long minimumHz = Math.Max(_device.DeviceInfo.MinFrequencyHz, RtlSdrDevice.TunerMinFrequencyHz);
+          if (frequencyHz < minimumHz ||
               frequencyHz > _device.DeviceInfo.MaxFrequencyHz)
           {
               Logger.Warning("Frequency {Frequency} is outside device range",
                   RadioBand.FormatFrequency(frequencyHz));
-              return false;
+              return TuneResult.OutOfRange;
           }
 
           // Create a custom band centered on this frequency
@@ -386,10 +508,36 @@ namespace RTLSDRCore;
               frequencyHz + 1_000_000,
               ModulationType.NFM);
 
+          // A user tune wins over a live band sweep; cancelled before streaming may pause.
+          CancelSweep();
+
           lock (_lock)
           {
+              if (_device.IsOpen && _device.IsHfMode)
+              {
+                  // Leaving AM/SW for a custom band: HF off with streaming paused, before the tune.
+                  bool wasStreaming = _device.IsStreaming;
+                  if (wasStreaming)
+                  {
+                      _device.StopStreaming();
+                  }
+
+                  bool switched = ApplyHfModeFor(customBand);
+                  if (wasStreaming && !_device.StartStreaming())
+                  {
+                      Logger.Error("Failed to restart streaming after switching HF direct sampling off");
+                      SetState(ReceiverState.Error);
+                      return TuneResult.Refused;
+                  }
+
+                  if (!switched)
+                  {
+                      return TuneResult.Refused;
+                  }
+              }
+
               _currentBand = customBand;
-              return SetFrequencyInternal(frequencyHz);
+              return SetFrequencyInternal(frequencyHz) ? TuneResult.Success : TuneResult.Refused;
           }
       }
 
@@ -433,6 +581,15 @@ namespace RTLSDRCore;
           return SetFrequencyInternal(newFrequency);
       }
 
+      /// <summary>
+      /// Records <paramref name="frequencyHz"/> as the receiver's frequency and, when the device is
+      /// open, tunes the device to it.
+      /// </summary>
+      /// <remarks>
+      /// The field is updated and <see cref="FrequencyChanged"/> raised even when the device refuses
+      /// the tune, as before AUD-99; the refusal is logged at Warning and reported by the return value.
+      /// </remarks>
+      /// <returns>The device's result, or true when the device is closed (the next start tunes it).</returns>
       private bool SetFrequencyInternal(long frequencyHz)
       {
           var oldFrequency = _currentFrequencyHz;
@@ -443,11 +600,11 @@ namespace RTLSDRCore;
           // _currentFrequencyHz holds when it runs, lands on this frequency.
           CancelSweep();
 
+          bool success = true;
           if (_device.IsOpen)
           {
               // rtlsdr_set_center_freq is safe to call while streaming —
               // no need to stop/restart the USB pipe for frequency changes.
-              bool success;
               lock (_tuneLock)
               {
                   success = _device.SetFrequency(frequencyHz);
@@ -455,7 +612,8 @@ namespace RTLSDRCore;
 
               if (!success)
               {
-                  Logger.Warning("SetFrequency to {Frequency} returned false", RadioBand.FormatFrequency(frequencyHz));
+                  Logger.Warning("The device refused {Frequency} (band {Band}, HF direct sampling {HfMode})",
+                      RadioBand.FormatFrequency(frequencyHz), _currentBand.Name, _device.IsHfMode ? "on" : "off");
               }
           }
 
@@ -466,7 +624,7 @@ namespace RTLSDRCore;
           }
 
           Logger.Debug("Frequency set to {Frequency}", RadioBand.FormatFrequency(frequencyHz));
-          return true;
+          return success;
       }
 
       #endregion
@@ -745,6 +903,15 @@ namespace RTLSDRCore;
       #region IRadioControl Band and Modulation Implementation
 
       /// <inheritdoc/>
+      /// <remarks>
+      /// With the device open, streaming is paused, the device is put in the band's HF mode
+      /// (<see cref="HfBands.Requires(BandType)"/>; AUD-99), and then the sample rate and the
+      /// frequency are set, before streaming resumes. Returns false when the HF switch, the sample
+      /// rate or the frequency is refused, or streaming cannot be resumed. A refused HF switch leaves
+      /// the receiver on its previous band and frequency, with streaming resumed; a refused sample
+      /// rate or frequency leaves it on the new band, at the new frequency, with streaming resumed.
+      /// With the device closed only the band and frequency are recorded, for the next start.
+      /// </remarks>
       public bool SetBand(BandType bandType, long? specificFrequency = null)
       {
           // A band change cancels a live band sweep before streaming is paused.
@@ -766,33 +933,36 @@ namespace RTLSDRCore;
                       _device.StopStreaming();
                   }
 
+                  // The HF switch comes before anything about the band is recorded, so a refusal
+                  // leaves the receiver where it was.
+                  if (_device.IsOpen && !ApplyHfModeFor(band))
+                  {
+                      ResumeAfterBandChange(wasStreaming);
+                      return false;
+                  }
+
                   _currentBand = band;
                   _currentModulation = band.DefaultModulation;
 
                   var newFrequency = specificFrequency ?? _currentFrequencyHz;
                   newFrequency = band.ClampFrequency(newFrequency);
 
+                  bool configured = true;
                   if (_state == ReceiverState.Running || _state == ReceiverState.Scanning)
                   {
                       SetupSignalProcessing();
-                      _device.SetSampleRate(_sdrSampleRate);
-                  }
-
-                  SetFrequencyInternal(newFrequency);
-
-                  // Restart streaming
-                  if (wasStreaming)
-                  {
-                      if (!_device.StartStreaming())
+                      if (!_device.SetSampleRate(_sdrSampleRate))
                       {
-                          Logger.Error("Failed to restart streaming after band change");
-                          SetState(ReceiverState.Error);
-                          return false;
+                          Logger.Warning("The device refused the sample rate {SampleRate} Hz for the {Band} band",
+                              _sdrSampleRate, band.Name);
+                          configured = false;
                       }
-                      Logger.Debug("Streaming resumed after band change");
                   }
 
-                  return true;
+                  bool tuned = SetFrequencyInternal(newFrequency);
+
+                  bool resumed = ResumeAfterBandChange(wasStreaming);
+                  return resumed && configured && tuned;
               }
               catch (Exception ex)
               {
@@ -800,6 +970,30 @@ namespace RTLSDRCore;
                   return false;
               }
           }
+      }
+
+      /// <summary>
+      /// Restarts streaming after a band change paused it. Puts the receiver in the
+      /// <see cref="ReceiverState.Error"/> state when streaming cannot be restarted.
+      /// </summary>
+      /// <param name="wasStreaming">Whether streaming was running before the band change.</param>
+      /// <returns>False only when streaming was running and could not be restarted.</returns>
+      private bool ResumeAfterBandChange(bool wasStreaming)
+      {
+          if (!wasStreaming)
+          {
+              return true;
+          }
+
+          if (!_device.StartStreaming())
+          {
+              Logger.Error("Failed to restart streaming after band change");
+              SetState(ReceiverState.Error);
+              return false;
+          }
+
+          Logger.Debug("Streaming resumed after band change");
+          return true;
       }
 
       /// <inheritdoc/>
@@ -1087,7 +1281,8 @@ namespace RTLSDRCore;
       /// </exception>
       /// <exception cref="InvalidOperationException">
       /// The receiver is not in the <see cref="ReceiverState.Running"/> state, a
-      /// seek scan is running, or another sweep is running.
+      /// seek scan is running, another sweep is running, or the band of the first channel
+      /// needs the other HF mode (<see cref="LiveSweepModeConflict"/>; AUD-99).
       /// </exception>
       /// <exception cref="OperationCanceledException">The sweep was cancelled.</exception>
       /// <exception cref="TimeoutException">No IQ block arrived within <see cref="SweepReadTimeout"/>.</exception>
@@ -1103,9 +1298,36 @@ namespace RTLSDRCore;
 
           return RunLiveSweep(
               plan: null,
+              needsHf: channels.Count > 0 && HfBands.RequiresFrequency(channels[0]),
               gainDb,
               ct,
               (tuner, token) => BandSweeper.Sweep(tuner, channels, samplesPerMeasurement, progress, token));
+      }
+
+      /// <summary>
+      /// Why a live sweep of <paramref name="plan"/> cannot run on this receiver as it is tuned now,
+      /// or null when the HF mode allows it (AUD-99). A live sweep never switches HF direct sampling
+      /// under the playing radio, so a plan whose band needs the other mode
+      /// (<see cref="HfBands.Requires(BandSweepPlan)"/>) is refused.
+      /// </summary>
+      /// <param name="plan">The plan a live sweep would measure.</param>
+      public string? LiveSweepModeConflict(BandSweepPlan plan)
+      {
+          ArgumentNullException.ThrowIfNull(plan);
+          return ModeConflict(HfBands.Requires(plan), plan.Band);
+      }
+
+      private string? ModeConflict(bool needsHf, string what)
+      {
+          bool hfMode = _device.IsHfMode;
+          if (needsHf == hfMode)
+          {
+              return null;
+          }
+
+          return needsHf
+              ? $"A live sweep of {what} needs HF direct sampling, but the radio is playing {_currentBand.Name} with the tuner; the mode is not switched under the playing radio."
+              : $"A live sweep of {what} needs the tuner, but the radio is playing {_currentBand.Name} with HF direct sampling; the mode is not switched under the playing radio.";
       }
 
       /// <summary>
@@ -1132,8 +1354,9 @@ namespace RTLSDRCore;
       /// </exception>
       /// <exception cref="InvalidOperationException">
       /// The receiver is not in the <see cref="ReceiverState.Running"/> state, a seek scan is
-      /// running, another sweep is running, or the receiver's IQ sample rate is lower than
-      /// <see cref="BandSweepPlan.SampleRate"/>. Checked before anything else is touched.
+      /// running, another sweep is running, the receiver's IQ sample rate is lower than
+      /// <see cref="BandSweepPlan.SampleRate"/>, or the plan's band needs the other HF mode
+      /// (<see cref="LiveSweepModeConflict"/>; AUD-99). Checked before anything else is touched.
       /// </exception>
       /// <exception cref="OperationCanceledException">The sweep was cancelled.</exception>
       /// <exception cref="TimeoutException">No IQ block arrived within <see cref="SweepReadTimeout"/>.</exception>
@@ -1149,6 +1372,7 @@ namespace RTLSDRCore;
 
           return RunLiveSweep(
               plan,
+              needsHf: HfBands.Requires(plan),
               gainDb,
               ct,
               (tuner, token) => BandSweeper.Sweep(tuner, plan, samplesPerMeasurement, progress, token));
@@ -1160,11 +1384,16 @@ namespace RTLSDRCore;
       /// <paramref name="sweep"/>, and restores everything in the <c>finally</c>.
       /// </summary>
       /// <param name="plan">When not null, the receiver's sample rate is checked against it under the state lock.</param>
+      /// <param name="needsHf">
+      /// Whether the swept band needs HF direct sampling. Checked against the device's mode under the
+      /// state lock: a mismatch throws <see cref="InvalidOperationException"/> (AUD-99).
+      /// </param>
       /// <param name="gainDb">Manual tuner gain used for the sweep, in dB.</param>
       /// <param name="ct">Cancels the sweep.</param>
       /// <param name="sweep">Runs the sweep over the live tuner with the sweep's own token.</param>
       private IReadOnlyList<ChannelLevel> RunLiveSweep(
           BandSweepPlan? plan,
+          bool needsHf,
           float gainDb,
           CancellationToken ct,
           Func<ISweepTuner, CancellationToken, IReadOnlyList<ChannelLevel>> sweep)
@@ -1188,8 +1417,12 @@ namespace RTLSDRCore;
               {
                   BandSweeper.ThrowIfSampleRateTooLow(_sdrSampleRate, plan);
               }
+              if (ModeConflict(needsHf, plan?.Band ?? "these channels") is string conflict)
+              {
+                  throw new InvalidOperationException(conflict);
+              }
 
-              sweepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+              sweepCts =CancellationTokenSource.CreateLinkedTokenSource(ct);
               _sweepCts = sweepCts;
               _isSweeping = true;
               _sweepIdle.Reset();
