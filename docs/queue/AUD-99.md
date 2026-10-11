@@ -247,3 +247,100 @@ Nothing. ⛔ external: the hardware is installed. `AUD-94` is the parent row.
 `AUD-94` (parent), `AUD-101`, `AUD-102`, `AUD-103`, `AUD-104`. `AUD-95` (a band-crossing frequency tune keeps
 the old step) sits on the same `SetFrequency` → `SetBand` path. Keep its fix in mind; it is not part of this
 row.
+
+## Implementation notes (Builder, 2026-10-11)
+
+Built on `feat/aud-99-hf-direct-sampling`. Box checks (§ *On-box UAT*, as amended by the owner ruling) are still
+to run.
+
+**Device layer (`RTLSDRCore`).**
+- `RtlSdrDevice` P/Invokes `rtlsdr_set_direct_sampling`, `rtlsdr_get_direct_sampling` and `rtlsdr_get_tuner_type`.
+  The tuner is read at `Open` (it needs a handle), mapped by `HfDirectSampling.TunerName` (5 = `R820T`, which
+  covers R820T/R820T2/R860), and cached per dongle so later enumerations report it; before the first open in a
+  process it reads `Unknown (not opened yet)`. The hard-coded `TunerType = "RTL2832U"` is gone.
+- `DeviceInfo` gains `Product` (the EEPROM iProduct, e.g. `NESDR SMArt v5`) and `HfDirectSampling`
+  (`Off`/`I`/`Q`). `MinFrequencyHz` is `HfDirectSampling.HfMinFrequencyHz` (100 kHz) when HF is not `Off`,
+  otherwise `RtlSdrDevice.TunerMinFrequencyHz` (24 MHz). The mock's default info and `SdrDeviceFactory`'s mock
+  entry are now one object (`MockSdrDevice.CreateDefaultDeviceInfo`): a simulated Q-branch dongle, 100 kHz floor.
+  The mock's `SetFrequency` floor follows its HF state (24 MHz in tuner mode). `BandSweepPlans.UnavailableReason`
+  still reads the static constants, unchanged.
+- `ISdrDevice`: `SupportsHfDirectSampling`, `IsHfMode` (false while closed), `SetHfMode(bool)`, idempotent; on a
+  device without HF, `SetHfMode(true)` is false and `SetHfMode(false)` is true. `RtlSdrDevice` reads the mode back
+  after setting it and fails on a mismatch. Implemented on `RtlSdrDevice`, `MockSdrDevice`, `FakeSdrDevice`
+  (RTLSDRCore.Tests) and the two band-map test devices; Moq mocks need nothing.
+- In HF mode the tuner is in standby, so `SetGainMode`/`SetGain` on `RtlSdrDevice` and `MockSdrDevice` return true
+  and log at Debug instead of calling librtlsdr. No Error per tune.
+
+**Which bands, on which paths.** `HfBands.Requires(BandType)` is true for AM and Shortwave only (custom bands are
+tuner bands). The receiver calls `ApplyHfModeFor(band)`, which makes no device call when the mode already
+matches:
+- `Startup`: open → `SetupSignalProcessing` → HF mode → sample rate → frequency → gain → streaming.
+- `SetBand` (and `SetFrequency` → `FindBandForFrequency` → `SetBand`): stop streaming → HF mode → sample rate →
+  frequency → resume. The HF switch comes before the band is recorded, so a refused switch leaves the receiver on
+  its old band and frequency, streaming. A custom-band tune from HF mode switches HF off with streaming paused.
+- Idle sweep: `DeviceSweepTuner(device, gain, hfMode)` switches the mode in `Open`, before the sample rate and any
+  tune; `BandMapService.RunIdle` passes `HfBands.Requires(run.Plan)`.
+- Live sweep: **refused, not switched.** `BandMapService.PlanFor` builds the plan of the band *asked for*, and the
+  live path measures it with the radio's running receiver, so a request for FM while the radio plays AM does reach
+  the live path today (the reverse, AM/SW sweeps, arrives with `AUD-103`'s plans). Switching the mode would mean
+  stopping the playing radio's stream and reprogramming the dongle under it, so `RadioReceiver.RunLiveSweep`
+  throws `InvalidOperationException` when the swept band needs the other mode (`LiveSweepModeConflict`), and
+  `BandMapService` asks first through `ILiveBandSweeper.LiveSweepRefusal` and reports the new reason
+  `radio-other-hf-mode` (409 from `BandMapController`, timer evaluations record it as a skip).
+
+**Which dongles.** Config key **`RTLSDR:HfDirectSampling`** = `Auto` | `Q` | `I` | `Off`, **default `Auto`**, set
+in `src/Radio.API/appsettings.json` (not in `deploy/*/appsettings.Production.json`). `Auto` is Q when the USB
+product string is in `HfDirectSampling.KnownGoodProducts` (`NESDR SMArt v5`, compared case-insensitively after
+trimming), otherwise Off. `RTLSDRCore` stays configuration-free: the setting is a constructor/factory argument.
+`Radio.Infrastructure.Audio.Factories.SdrHfConfiguration.Read` reads it through `IConfiguration` (so a config-store
+row overrides the JSON) each time a device is created, for both `RadioFactory` (the radio) and the DI-supplied
+idle-sweep device factory. An invalid value is `Auto` plus one Warning.
+
+**Tune failures.** `SetFrequencyInternal` returns the device's result. `Startup` fails (closes the device, state
+`Error`) when the HF switch, the sample rate or the tune is refused. `SetBand` returns false for any of the three
+or a failed resume. New `RadioReceiver.TrySetFrequency` returns `TuneResult` (`Success` / `OutOfRange` /
+`Refused`); `SetFrequency` is `TrySetFrequency(...) == Success`. A hardware refusal is the new
+**`Radio.Core.Exceptions.TunerRefusedException`** (derives from `InvalidOperationException`, which
+`TuneInBandAsync` already threw for a receiver fault). `SDRRadioAudioSource` throws it from `SetFrequencyAsync`
+(`Refused`), `SetBandAsync` (was `ArgumentException`) and `TuneInBandAsync` (was `InvalidOperationException`);
+`ArgumentOutOfRangeException` stays for `OutOfRange` and out-of-band frequencies. **HTTP mapping:**
+`RadioController` answers **503 `application/problem+json`**, title *"The tuner refused the request"*, detail the
+exception message, on `POST /api/radio/frequency` (both forms), `POST /api/radio/band` and
+`POST /api/radio/presets/{id}/load`. Out-of-range is still 400.
+
+**Every caller of `SetFrequency`/`SetBand`, and what changed.**
+| Caller | Change |
+|---|---|
+| `RadioController` frequency / band / preset load | catches `TunerRefusedException` → 503 (Information log) |
+| `PresetSelectorService` (encoder preset recall) | catches it → failure card "The tuner refused that station", Information log; other exceptions unchanged |
+| `SourceSelectorService` (encoder band commit) | catches it → failure card "&lt;band&gt;: the tuner refused", Information log |
+| `RotaryEncoderActionRouter` and `/frequency/up`/`down` (`TuneFrequencyUp/Down`) | none: a step returns false at a band edge as well, so the result stays ignored; a refusal is logged at Warning by the receiver |
+| `SDRRadioAudioSource.RestorePersistedRadioPreferencesAsync` | none: it runs before `Startup`, with the device closed, so nothing reaches hardware; it already catches and warns |
+| Scan / seek (`ScanInternal`, `ScanStations`) | none: each hop's refusal is logged at Warning by the receiver and the scan carries on; no background loop can throw from it |
+| Live sweep cleanup retune (`RunLiveSweep` `finally`) | none: unchanged device call |
+| `RadioBandMemoryService` | none: it stores frequencies and does not tune |
+
+The receiver logs a refusal once at Warning; callers that catch the exception log at Information, so a refusal is
+one Warning line in journald, not three. (`RtlSdrDevice` itself still logs a native `set_center_freq` failure at
+Error, as before.)
+
+**Diagnostics.** `GET /api/radio/devices` gains `hardware[]`: `product`, `tunerType`, `hfDirectSampling`
+(`Q`/`I`/`Off`), `hfEnabled`, `hfSetting`, `isHfMode`, `isInUse`, `min/maxFrequencyHz`, plus name, manufacturer,
+serial and index (`IRadioFactory.GetSdrHardware`, a default interface member returning empty).
+
+**Other decisions.**
+- `MockSdrDevice.SetSampleRate` now also accepts librtlsdr's (225 kHz, 300 kHz] range. The receiver runs at
+  240 kHz, which the mock's discrete list rejected; that was invisible while `Startup` ignored the result.
+- `RadioReceiver` takes an optional Serilog `ILogger` (the old static logger is the default) so a test can assert
+  on its log levels.
+
+**Box checks for the Builder: the log lines.** `RTLSDRCore` is at Information in `src/Radio.API/appsettings.json`
+(`"RTLSDRCore": "Information"`, not one of `LOG-2`'s Warning holds), and the API's console sink is Warning-only
+(`LOG-11`), so **all of these are in the file sink, not the journal** (`/opt/radio-console/logs/radio-*.txt`):
+- once per process, at the first open: `[INF] [RTLSDRCore.Hardware.RtlSdrDevice] RTL-SDR device 0: product NESDR SMArt v5, tuner R820T, HF direct sampling Q branch (RTLSDR:HfDirectSampling=Auto), lower limit 100… kHz`
+- each switch to AM/SW: `[INF] [RTLSDRCore.Hardware.RtlSdrDevice] RTL-SDR device 0: HF direct sampling ON (Q branch, mode 2 read back); tuner in standby`
+- each switch back: `… HF direct sampling OFF (mode 0 read back); tuner active`
+
+What reaches the journal is Warning only: `The device refused …`, `… refused direct sampling mode …`,
+`… reports direct sampling mode … after mode … was set`, `The {Band} band needs HF direct sampling, which this
+device does not have …`. None of these should appear on the SMArt v5.
