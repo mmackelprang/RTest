@@ -103,7 +103,13 @@ the kiosk page) picks it up. The same POST with `false` switches it off. Pinned 
 
 ## All-band reception — the hardware needed to make AM (MW) and shortwave work (`AUD-94`)
 
-**Status:** Roadmap only. **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not
+**Status:** ✅ **Hardware installed 2026-10-11; the software is queued.** The owner installed the **Nooelec NESDR
+SMArt v5** (option C below; serial `56001418`), fed from an HF/VHF diplexer with an AM antenna on the HF leg and
+an FM antenna on the VHF leg. FM works on it. The work is queued as `AUD-99` (Q-mode probe and device layer),
+`AUD-101` (AM DSP), `AUD-102` (bands/API/UI), `AUD-103` (band map) and `AUD-104` (fingerprinting on AM/SW, owner
+decision). See [`queue/AUD-94.md`](queue/AUD-94.md). The "~2 days" estimate in the table below predates a code survey that
+found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the
+estimate. *History:* **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not
 many AM stations nearby."* then *"Spec out what HW I would need to make all the bands work, and add that to
 the roadmap."* No code or hardware change is planned until the owner schedules it. **2026-10-02:** owner chose to
 keep AM/SW selectable as they are in the meantime (*"#4 - keep as it is. Once I have the new hardware,
@@ -128,8 +134,8 @@ The appliance's tuner is a generic RTL2832U dongle with a **Rafael Micro R820T**
 The R820T's synthesiser cannot lock below ~24 MHz, so **no AM or SW station is receivable at any signal
 strength** — this is not a sensitivity problem an antenna can fix. The software side is closer than the
 hardware: `RTLSDRCore/DSP/AmDemodulator.cs` already exists. What is missing is an HF signal path, and the
-library has no direct-sampling or upconverter-offset support (`RtlSdrDevice.cs:102-104` hard-codes
-24 MHz – 1.766 GHz).
+library has no direct-sampling or upconverter-offset support (`RtlSdrDevice.cs:19,25` hard-code
+24 MHz – 1.766 GHz, reported at `:115-116`).
 
 ### Requirements for any option
 
@@ -219,9 +225,9 @@ Added 2026-10-02 at the owner's request after he asked about the
 
 | Item | C | A | B |
 |---|---|---|---|
-| Replace the hard-coded 24 MHz – 1.766 GHz range (`RtlSdrDevice.cs:102-104`) with the device's real range; per-band "receivable" flag (also unblocks `AUD-94`'s UI) | ✓ | ✓ | ✓ |
+| Replace the hard-coded 24 MHz – 1.766 GHz range (`RtlSdrDevice.cs:19,25`) with the device's real range; per-band "receivable" flag (also unblocks `AUD-94`'s UI) | ✓ | ✓ | ✓ |
 | Band-map sweep plans: AM 118 channels @ 10 kHz; SW the broadcast segments (49/41/31/25/19/16 m) @ 5 kHz | ✓ | ✓ | ✓ |
-| AM channel-power window (FM's `ChannelPowerMeter` uses 8–80 kHz; AM needs ~±5 kHz) | ✓ | ✓ | ✓ |
+| AM channel-power window (FM's `ChannelPowerMeter` uses 8–80 kHz; AM needs ~±5 kHz). *2026-10-11: already provided: `AUD-91`'s narrowband plans pass ±4 kHz / 1 kHz DC, see `AUD-103`* | ✓ | ✓ | ✓ |
 | Verify AM demod quality (`AmDemodulator`) and AGC on real MW/SW stations | ✓ | ✓ | ✓ |
 | P/Invoke `rtlsdr_set_direct_sampling` in `RTLSDRCore`; switch Q-mode on for AM/SW and off for the rest, in both the radio and the band-map sweep (`SdrDeviceGate`), with tests | ✓ | — | — |
 | Driver fork install in `deploy/provision/` + UAT | — | ✓ | — |
