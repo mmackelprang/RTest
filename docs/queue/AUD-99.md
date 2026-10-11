@@ -344,3 +344,44 @@ serial and index (`IRadioFactory.GetSdrHardware`, a default interface member ret
 What reaches the journal is Warning only: `The device refused …`, `… refused direct sampling mode …`,
 `… reports direct sampling mode … after mode … was set`, `The {Band} band needs HF direct sampling, which this
 device does not have …`. None of these should appear on the SMArt v5.
+
+**librtlsdr's own stderr lines are expected.** `Enabled direct sampling mode, input 2` and `Disabled direct
+sampling mode` are printed by librtlsdr itself, and stderr reaches journald, so each appears **once per band
+change** into or out of AM/SW (not once per tune). They are not a fault.
+
+### Pre-merge fixes (2026-10-11)
+
+From the pre-merge review (checked against osmocom librtlsdr master) and the box UAT on the SMArt v5:
+
+- **H1 — gain after HF off.** librtlsdr's HF-off branch runs the R820T's `init`, which resets its gain
+  registers (box: signalStrength 100 after a cold FM start, 44 after FM → AM → SW → FM on the same station).
+  Every switch that leaves the device in tuner mode now re-applies the gain mode, and the manual gain when auto
+  is off, under the tune lock; the custom-band path also sets the sample rate again (`init` resets the IF filter).
+- **M1 — no `PLL not locked!` on AM/SW → FM.** librtlsdr's HF-off branch ends with
+  `rtlsdr_set_center_freq(dev, dev->freq)`, and `dev->freq` was still the HF frequency. The receiver now tunes
+  the device to the new frequency while HF is still on (only the IF/DDC is programmed then), then switches HF
+  off, then tunes as usual. A refused pre-tune is logged at Debug and does not fail the switch.
+- **M2 — half-done switch.** On any failed `SetHfMode`, `RtlSdrDevice` reads the mode back, sets the previous
+  mode once more if the hardware is not in it, and caches the mode read back last. `ISdrDevice.SetHfMode`'s docs
+  say what `IsHfMode` means after a failure.
+- **M3 — start-up retry.** `Startup` tries the sample rate and the first tune once more before failing; no wait.
+- **M4 — saved AM/SW on a device without HF.** `Startup` falls back to FM (band centre) with one Warning instead
+  of failing.
+- **S1 — HF was digital silence.** The squelch compared the raw IQ RMS (≈ 0.02 in direct sampling, no tuner
+  gain) with 0.1 and always closed. On AM and SW the wideband squelch is no longer applied (`SquelchOpen`
+  reports open); mute and the sweep silencing still apply; FM/AIR/WB/VHF are unchanged. `AUD-101` moves the level
+  to the filtered channel and applies AGC.
+- **L2 — mode at open.** `Open` reads the direct-sampling mode back (`rtlsdr_open` sets mode 1 itself for an
+  unknown tuner); idempotence compares mode numbers.
+- **L3 — custom band.** Streaming resumes after the tune, not before it.
+- **L4 — 409 for a device without HF.** `TuneResult.Unsupported` / `RadioReceiver.TrySetBand` →
+  `TunerCapabilityException` (a `TunerRefusedException`) → **409** problem+json *"The SDR device has no HF direct
+  sampling"*. A transient refusal stays 503, out of range stays 400.
+- **L5 — `IsInUse`.** `RadioFactory` forgets its radio source once it is disposed, so `GetSdrHardware` no
+  longer reports a dongle in use after the source is gone.
+- **L6 — version.** `RTLSDRCore` 1.0.0 → 1.1.0 (`ISdrDevice` gained abstract members).
+- **L7 — threads and typo.** The device mode fields are volatile; `sweepCts =Cancellation…` typo fixed.
+
+**Not in scope, noted:** `POST /api/radio/band` lands on a band-edge frequency (measured on the box: FM → 87.5
+MHz, AM → 1710 kHz), not the band's remembered frequency. Band memory is used only by the encoder selectors and
+the preferences; this predates `AUD-99` and is not changed here.
