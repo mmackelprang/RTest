@@ -342,8 +342,9 @@ namespace RTLSDRCore.Hardware;
       /// Calls <c>rtlsdr_set_direct_sampling</c> with this device's
       /// <see cref="DeviceInfo.HfDirectSampling"/> input (or 0 for off) and reads the mode back with
       /// <c>rtlsdr_get_direct_sampling</c>. A successful switch is logged at Information.
-      /// Idempotence compares the mode wanted with the mode last read back, so a device that
-      /// <c>rtlsdr_open</c> left in mode 1 is still switched to a Q-branch input.
+      /// Idempotence compares the mode wanted with the mode last read back. Callers in this repo
+      /// (<c>RadioReceiver</c>, <c>DeviceSweepTuner</c>) skip the call when <see cref="IsHfMode"/> already
+      /// matches, so a device <c>rtlsdr_open</c> left in mode 1 (an unknown tuner) is not moved to Q by them.
       /// </para>
       /// <para>
       /// A non-zero result, a read-back that disagrees, or an exception is logged at Warning and
@@ -421,8 +422,8 @@ namespace RTLSDRCore.Hardware;
       }
 
       /// <summary>
-      /// After a failed <see cref="SetHfMode"/>: reads the mode back, sets <paramref name="previous"/>
-      /// once more when the hardware is not in it, and caches the mode read back last (off when the
+      /// After a failed <see cref="SetHfMode"/>: reads librtlsdr's recorded mode back, sets
+      /// <paramref name="previous"/> once more when that mode is not it, and caches the mode read back last (off when the
       /// read fails). Logs the outcome at Warning. Never throws.
       /// </summary>
       private void RecoverAfterFailedSwitch(int previous)

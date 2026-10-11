@@ -383,6 +383,29 @@ public class RadioReceiverHfModeTests
     Assert.Equal("StartStreaming", CallsSince(device, before).Last());
     Assert.Equal(BandType.AM, receiver.CurrentBand.Type);
     Assert.True(receiver.IsRunning);
+    // The pre-tune moved the device to the custom frequency; after the refusal it is back where the
+    // receiver says it is.
+    Assert.True(device.IsHfMode);
+    Assert.Equal(AmHz, device.GetFrequency());
+  }
+
+  [Fact]
+  public void SetBand_FromAmToFm_RefusedHfOff_PutsTheDeviceBackOnTheAmFrequency()
+  {
+    FakeSdrDevice device = new();
+    using RadioReceiver receiver = StartOn(device, BandType.AM, AmHz);
+    device.HfSwitchResult = false;
+    int before = device.Calls.Count;
+
+    Assert.Equal(TuneResult.Refused, receiver.TrySetBand(BandType.FM, FmHz));
+
+    List<string> calls = CallsSince(device, before);
+    AssertBefore(calls, $"SetFrequency:{FmHz}", "SetHfMode:False");
+    AssertBefore(calls, "SetHfMode:False", $"SetFrequency:{AmHz}");
+    Assert.Equal(BandType.AM, receiver.CurrentBand.Type);
+    Assert.True(device.IsHfMode);
+    Assert.Equal(AmHz, device.GetFrequency());
+    Assert.True(receiver.IsRunning);
   }
 
   [Fact]

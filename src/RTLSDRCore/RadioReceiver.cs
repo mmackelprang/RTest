@@ -215,7 +215,8 @@ namespace RTLSDRCore;
       /// <para>
       /// When the switch is to the tuner, the device is first tuned to <paramref name="nextFrequencyHz"/>
       /// while direct sampling is still on. In that mode librtlsdr's <c>rtlsdr_set_center_freq</c> only
-      /// programs the RTL2832's IF/DDC, so it is harmless; its purpose is that librtlsdr's own HF-off
+      /// programs the RTL2832's IF/DDC; if the HF-off switch is then refused, the device is tuned back
+      /// to the receiver's current frequency, so the pre-tune leaves nothing behind. Its purpose is that librtlsdr's own HF-off
       /// branch of <c>rtlsdr_set_direct_sampling</c> ends with <c>rtlsdr_set_center_freq(dev, dev-&gt;freq)</c>,
       /// and without the pre-tune <c>dev-&gt;freq</c> is still the HF frequency, which the R820T cannot
       /// lock to: it prints <c>[R82XX] PLL not locked!</c> on every AM/SW → FM switch. With it, that
@@ -267,6 +268,18 @@ namespace RTLSDRCore;
               if (!_device.IsHfMode)
               {
                   ApplyGainLocked();
+              }
+              else if (!wanted)
+              {
+                  // HF off was refused and the device is still in direct sampling, but the pre-tune
+                  // above moved its IF/DDC to nextFrequencyHz. The caller keeps the receiver on
+                  // _currentFrequencyHz, so put the device back there too; otherwise it would play a
+                  // frequency the receiver does not report.
+                  if (!_device.SetFrequency(_currentFrequencyHz))
+                  {
+                      Logger.Debug("Re-tune to {Frequency} after a refused HF-off switch was refused",
+                          RadioBand.FormatFrequency(_currentFrequencyHz));
+                  }
               }
           }
 
