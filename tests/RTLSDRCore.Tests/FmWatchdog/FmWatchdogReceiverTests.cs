@@ -54,11 +54,22 @@ public class FmWatchdogReceiverTests
       }
     }
 
-    /// <summary>Runs blocks one at a time, then waits for every watchdog task they queued.</summary>
+    /// <summary>
+    /// Runs blocks one at a time and, after each, waits for every watchdog task queued so far, so a
+    /// recovery step always finishes before the next block is raised (the fake device raises blocks
+    /// whether or not it is streaming). The wait is a rendezvous; its 10 s is only a fail-safe.
+    /// </summary>
     public void Run(int blocks)
     {
-      Harness.Run(blocks);
-      Receiver.LastWatchdogTask?.Wait(TimeSpan.FromSeconds(10));
+      for (int i = 0; i < blocks; i++)
+      {
+        Harness.Run(1);
+        Task? pending = Receiver.LastWatchdogTask;
+        if (pending is not null)
+        {
+          Assert.True(pending.Wait(TimeSpan.FromSeconds(10)), "a watchdog task did not finish");
+        }
+      }
     }
 
     public void OnAir(Transmitter station)

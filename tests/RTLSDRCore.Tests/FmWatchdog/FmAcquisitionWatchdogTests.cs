@@ -23,11 +23,11 @@ public class FmAcquisitionWatchdogTests
 
   /// <summary>Feeds blocks until one closes the window; returns its outcome (null when none closed within 10 blocks).</summary>
   private static FmAcquisitionOutcome? Feed(FmAcquisitionWatchdog w, int generation, bool pilot, bool rds = false,
-    float signal = 0.5f, long frequencyHz = Station)
+    float signal = 0.5f, long frequencyHz = Station, bool? pilotLocked = null)
   {
     for (int i = 0; i < 10; i++)
     {
-      FmAcquisitionOutcome? outcome = w.Observe(generation, frequencyHz, Block, pilot, rds, signal);
+      FmAcquisitionOutcome? outcome = w.Observe(generation, frequencyHz, Block, pilot, rds, signal, pilotLocked ?? pilot);
       if (outcome is not null)
       {
         return outcome;
@@ -53,8 +53,8 @@ public class FmAcquisitionWatchdogTests
     FmAcquisitionWatchdog w = NewWatchdog();
     w.BeginStart(Station, 1, "start-up", byRecovery: false);
 
-    Assert.Null(w.Observe(1, Station, Block, pilot: true, rdsSynced: false, signal: 0.5f));
-    FmAcquisitionOutcome? outcome = w.Observe(1, Station, Block, pilot: true, rdsSynced: true, signal: 0.5f);
+    Assert.Null(w.Observe(1, Station, Block, pilot: true, rdsSynced: false, signal: 0.5f, pilotLocked: true));
+    FmAcquisitionOutcome? outcome = w.Observe(1, Station, Block, pilot: true, rdsSynced: true, signal: 0.5f, pilotLocked: true);
 
     Assert.NotNull(outcome);
     Assert.Equal(FmAcquisitionKind.Start, outcome.Kind);
@@ -134,8 +134,8 @@ public class FmAcquisitionWatchdogTests
     int g = MakeKnown(w);
     for (int i = 0; i < 20; i++)
     {
-      Assert.Null(w.Observe(g + i, Station, Block, pilot: false, rdsSynced: false, signal: 0.5f));
-      Assert.Null(w.Observe(g + i, Station, Block, pilot: false, rdsSynced: false, signal: 0.5f));
+      Assert.Null(w.Observe(g + i, Station, Block, pilot: false, rdsSynced: false, signal: 0.5f, pilotLocked: false));
+      Assert.Null(w.Observe(g + i, Station, Block, pilot: false, rdsSynced: false, signal: 0.5f, pilotLocked: false));
     }
     Assert.Equal(0, w.EpisodeStep);
   }
@@ -149,14 +149,15 @@ public class FmAcquisitionWatchdogTests
     MakeKnown(w);
     for (int i = 0; i < 50; i++)
     {
-      Assert.Null(w.Observe(1, Station, Block, pilot: false, rdsSynced: false, signal: 0.5f));
+      Assert.Null(w.Observe(1, Station, Block, pilot: false, rdsSynced: false, signal: 0.5f, pilotLocked: false));
     }
   }
 
   [Fact]
   public void AKnownStationsRetuneMiss_TriggersToo()
   {
-    // The observed fault: FM retunes after the band change did not recover it either.
+    // A retune (a new tune generation without a new chain, e.g. a seek stop) to a known station that
+    // then shows neither pilot nor RDS is judged like a start.
     FmAcquisitionWatchdog w = NewWatchdog();
     int g = MakeKnown(w);
 
@@ -194,6 +195,31 @@ public class FmAcquisitionWatchdogTests
     clock.Now += TimeSpan.FromHours(1);
     w.BeginStart(Station, ++g, "band change", byRecovery: false);
     Assert.Equal(FmWatchdogAction.RerunBandSetup, Feed(w, g, pilot: false)!.Action);
+  }
+
+  [Fact]
+  public void APilotThatIsNotLocked_DoesNotMakeAStationKnown()
+  {
+    // The stereo detector reads noise as a pilot (AUD-109): an empty channel "with a pilot" must not
+    // become a station the watchdog later tries to recover.
+    FmAcquisitionWatchdog w = NewWatchdog();
+    w.BeginStart(Station, 1, "band change", byRecovery: false);
+    FmAcquisitionOutcome? noisy = Feed(w, 1, pilot: true, pilotLocked: false);
+    Assert.False(noisy!.Missed);
+    Assert.False(w.IsKnownLocked(Station));
+
+    w.BeginStart(Station, 2, "band change", byRecovery: false);
+    Assert.Equal(FmWatchdogAction.ReportOutcome, Feed(w, 2, pilot: false)!.Action);
+  }
+
+  [Fact]
+  public void ALockedPilotWithoutRds_MakesAStationKnown()
+  {
+    FmAcquisitionWatchdog w = NewWatchdog();
+    w.BeginStart(Station, 1, "band change", byRecovery: false);
+    Feed(w, 1, pilot: true, pilotLocked: true);
+
+    Assert.True(w.IsKnownLocked(Station));
   }
 
   [Fact]

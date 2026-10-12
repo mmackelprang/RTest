@@ -64,8 +64,8 @@ namespace RTLSDRCore.Hardware;
       public bool IsHfMode => _isOpen && _directSamplingMode > 0;
 
       /// <inheritdoc/>
-      /// <remarks><c>rtlsdr_get_direct_sampling</c>; null when closed or when it returns an error (negative).</remarks>
-      public int? ReadLiveDirectSamplingMode()
+      /// <remarks><c>rtlsdr_get_direct_sampling</c> (librtlsdr's record); null when closed or when it returns an error (negative).</remarks>
+      public int? ReadDriverDirectSamplingMode()
       {
           if (!_isOpen)
           {

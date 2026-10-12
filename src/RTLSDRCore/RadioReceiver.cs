@@ -35,15 +35,16 @@ namespace RTLSDRCore;
       private volatile NfmReceiveChain? _nfmChain;
 
       // AUD-106: the FM acquisition watchdog. _fmStart is replaced (as a whole) each time a WFM chain
-      // is built, carrying why; the DSP thread compares it with the last one it saw to open a start
-      // window. _pendingFmStart is the reason the next WFM chain records, set under _lock by the
-      // caller that builds it (null: a band change).
+      // is built, carrying why and the tune generation it was published at; the DSP thread compares it
+      // with the last one it saw to open a start window. _pendingFmStart is the reason the next WFM
+      // chain records, set by the caller just before the call that builds it (null: a band change).
       private volatile FmChainStart? _fmStart;
       private FmChainStart? _watchedFmStart;
       private FmChainStart? _pendingFmStart;
-      // Counts the receiver's tunes of the device. Each IQ block is stamped with the value current
-      // when the USB thread raised it (OnSamplesAvailable), and the AM chain re-seeds its DC
-      // blocker and AGC on the second block stamped with a new value (AmReceiveChain.BeginBlock).
+      // Counts the receiver's tunes of the device, and (AUD-106) each WFM chain it publishes. Each IQ
+      // block is stamped with the value current when the USB thread raised it (OnSamplesAvailable),
+      // and the AM chain re-seeds its DC blocker and AGC on the second block stamped with a new value
+      // (AmReceiveChain.BeginBlock).
       private int _tuneGeneration;
 
       // One raised IQ block and the tune generation current when it was raised. Stamping at raise
@@ -645,7 +646,9 @@ namespace RTLSDRCore;
 
           if (band != null)
           {
-              // Switch to the appropriate band
+              // Switch to the appropriate band. TrySetBand rebuilds the chain even inside FM, so the
+              // watchdog logs this as a frequency tune, not a band change (AUD-106).
+              _pendingFmStart = new FmChainStart("frequency tune", ByRecovery: false);
               return TrySetBand(band.Type, frequencyHz);
           }
 
@@ -2054,8 +2057,7 @@ namespace RTLSDRCore;
               _rdsDecoder.StationNameDecoded += OnRdsDecoderStationNameDecoded;
               _rdsDecoder.ProgramIdChanged += OnRdsDecoderProgramIdChanged;
               // AUD-106: a new WFM chain is an FM start for the acquisition watchdog.
-              _fmStart = _pendingFmStart ?? new FmChainStart("band change", ByRecovery: false);
-              _pendingFmStart = null;
+              PublishFmStart();
           }
           else
           {

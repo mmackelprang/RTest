@@ -7,9 +7,13 @@ using RTLSDRCore.Models;
 namespace RTLSDRCore;
 
 /// <summary>Why a WFM chain was built, for the FM acquisition watchdog (AUD-106).</summary>
-/// <param name="Reason">For the log: "band change", "start-up", "modulation change", or the watchdog step.</param>
+/// <param name="Reason">For the log: "band change", "frequency tune", "start-up", "modulation change", or the watchdog step.</param>
 /// <param name="ByRecovery">Whether a watchdog recovery step built it.</param>
-internal sealed record FmChainStart(string Reason, bool ByRecovery);
+/// <param name="Generation">
+/// The tune generation the chain was published at (the receiver advances it when it publishes a WFM
+/// chain). Blocks stamped earlier were raised before the chain existed and are not judged for it.
+/// </param>
+internal sealed record FmChainStart(string Reason, bool ByRecovery, int Generation = 0);
 
 /// <summary>
 /// AUD-106: the FM stereo/RDS-loss watchdog's receiver side. <see cref="FmAcquisitionWatchdog"/> decides;
@@ -25,19 +29,31 @@ internal sealed record FmChainStart(string Reason, bool ByRecovery);
 /// one at a time, in the order the DSP thread raised them.
 /// </para>
 /// <para>
-/// <b>The snapshot</b> separates the two leading hypotheses in the AUD-106 dossier. Hypothesis 1 (tuner
-/// or RTL2832 register state after HF-off): the device's live direct-sampling mode
-/// (<c>rtlsdr_get_direct_sampling</c>) against the recorded one, the centre frequency, sample rate and
-/// gain read from the driver, the IQ DC offset and I/Q power ratio of one block, and the composite's
-/// mean, which a carrier off-centre shows as a DC offset (75 kHz deviation reads 1.0, so the mean times
-/// 75 kHz estimates the offset). Hypothesis 2 (DSP decoder state): the pilot level, the PLL frequency
-/// and the RDS sync state.
+/// <b>What the snapshot can and cannot see.</b> The device fields are librtlsdr's <i>recorded</i>
+/// state (<c>rtlsdr_get_direct_sampling</c>, <c>_get_center_freq</c>, <c>_get_sample_rate</c> and
+/// <c>_get_tuner_gain</c> return fields of its device struct, not register reads), so they cannot show
+/// a tuner or RTL2832 register left wrong by the HF-off path (the dossier's hypothesis 1); a centre of
+/// 0 does show a tune that failed. The evidence for hypothesis 1 is in the signal: the composite's mean
+/// (the discriminator reads 75 kHz deviation as 1.0, so the mean times 75 kHz estimates how far the
+/// carrier is off centre), the IQ DC offset and I/Q power ratio of one block, and librtlsdr's own
+/// <c>[R82XX] PLL not locked!</c> on stderr, which reaches journald (<c>journalctl -u radio-api</c>).
+/// Hypothesis 2 (DSP decoder state): the pilot level, the PLL frequency and the RDS sync state.
 /// </para>
 /// </remarks>
 public partial class RadioReceiver
 {
   /// <summary>WFM peak deviation that the discriminator reads as 1.0, in Hz.</summary>
   private const double WfmDeviationHz = 75_000;
+
+  /// <summary>
+  /// The pilot level (<see cref="StereoFmDecoder.PilotStrength"/>) above which a pilot can count as
+  /// locked: three times the stereo detector's 0.01 threshold. A broadcast pilot at 10 % deviation reads
+  /// about 0.06.
+  /// </summary>
+  internal const float LockedPilotLevel = 0.03f;
+
+  /// <summary>How close the PLL must sit to 19 kHz for a pilot to count as locked, in Hz.</summary>
+  internal const float LockedPllToleranceHz = 5f;
 
   /// <summary>The FM acquisition watchdog (AUD-106). Its settings are open to tests.</summary>
   internal FmAcquisitionWatchdog FmWatchdog { get; } = new();
@@ -50,6 +66,28 @@ public partial class RadioReceiver
 
   /// <summary>Raised on the DSP thread for every outcome the watchdog returns (tests count them).</summary>
   internal event Action<FmAcquisitionOutcome>? FmAcquisitionReported;
+
+  /// <summary>
+  /// Whether <paramref name="stereo"/>'s pilot counts as locked: strong (<see cref="LockedPilotLevel"/>)
+  /// and with the PLL within <see cref="LockedPllToleranceHz"/> of 19 kHz. Stronger evidence than
+  /// <see cref="StereoFmDecoder.StereoDetected"/>, which is an energy detector and reads noise as a
+  /// pilot (`AUD-109`). Only this, or RDS sync, records a frequency as locked for the watchdog.
+  /// </summary>
+  internal static bool IsPilotLocked(StereoFmDecoder stereo) =>
+    stereo.PilotStrength >= LockedPilotLevel && Math.Abs(stereo.PllFrequency - 19_000f) <= LockedPllToleranceHz;
+
+  /// <summary>
+  /// Publishes a new WFM chain to the watchdog: called where the chain is built, with the reason the
+  /// caller left in <c>_pendingFmStart</c>. Advances the tune generation, so a block raised before the
+  /// chain existed (still queued) is never judged as this start's first block.
+  /// </summary>
+  private void PublishFmStart()
+  {
+    FmChainStart pending = _pendingFmStart ?? new FmChainStart("band change", ByRecovery: false);
+    _pendingFmStart = null;
+    int generation = Interlocked.Increment(ref _tuneGeneration);
+    _fmStart = pending with { Generation = generation };
+  }
 
   /// <summary>
   /// Feeds one demodulated WFM block to the watchdog. Called on the DSP thread from
@@ -67,13 +105,19 @@ public partial class RadioReceiver
     FmChainStart? start = _fmStart;
     if (start is not null && !ReferenceEquals(start, _watchedFmStart))
     {
+      if (tuneGeneration < start.Generation)
+      {
+        // Raised before this chain was published: neither this start's first block nor a retune.
+        return;
+      }
+
       _watchedFmStart = start;
       FmWatchdog.BeginStart(_currentFrequencyHz, tuneGeneration, start.Reason, start.ByRecovery);
     }
 
     FmAcquisitionOutcome? outcome = FmWatchdog.Observe(
       tuneGeneration, _currentFrequencyHz, samples.Length, stereo.StereoDetected, rds?.IsSynchronized ?? false,
-      _lastSignalStrength);
+      _lastSignalStrength, IsPilotLocked(stereo));
     if (outcome is null)
     {
       return;
@@ -82,10 +126,12 @@ public partial class RadioReceiver
     FmAcquisitionReported?.Invoke(outcome);
 
     string? signalSnapshot = outcome.Missed ? SignalSnapshot(samples, composite, stereo, rds) : null;
+    float pilotLevel = stereo.PilotStrength;
+    float pllHz = stereo.PllFrequency;
     int sdrRate = _sdrSampleRate;
     Task previous = LastWatchdogTask ?? Task.CompletedTask;
     LastWatchdogTask = previous.ContinueWith(
-      _ => HandleFmAcquisitionOutcome(outcome, signalSnapshot, sdrRate),
+      _ => HandleFmAcquisitionOutcome(outcome, tuneGeneration, signalSnapshot, pilotLevel, pllHz, sdrRate),
       CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
   }
 
@@ -117,26 +163,30 @@ public partial class RadioReceiver
 
     return string.Create(CultureInfo.InvariantCulture,
       $"IQ DC I={meanI:F4} Q={meanQ:F4}, I/Q power ratio {iqRatioDb:F2} dB, " +
-      $"composite mean {compMean:F4} (carrier offset ≈ {compMean * WfmDeviationHz:F0} Hz), composite RMS {compRms:F3}, " +
-      $"pilot level {stereo.PilotStrength:F4} (stereo at > 0.01), PLL {stereo.PllFrequency:F1} Hz, " +
+      $"composite mean {compMean:F4} (carrier offset ≈ {compMean * WfmDeviationHz:F0} Hz; wraps beyond ±120 kHz), composite RMS {compRms:F3}, " +
+      $"PLL {stereo.PllFrequency:F1} Hz, " +
       $"RDS {(rds is null ? "none" : rds.IsSynchronized ? "synced" : "not synced")}");
   }
 
-  /// <summary>The device half of the snapshot (thread pool, under <c>_tuneLock</c>).</summary>
+  /// <summary>
+  /// The device half of the snapshot: librtlsdr's recorded state, not register reads (see the class
+  /// remarks). Thread pool, under <c>_tuneLock</c>.
+  /// </summary>
   private string DeviceSnapshot()
   {
     lock (_tuneLock)
     {
-      int? live = _device.IsOpen ? _device.ReadLiveDirectSamplingMode() : null;
+      int? recorded = _device.IsOpen ? _device.ReadDriverDirectSamplingMode() : null;
       return string.Create(CultureInfo.InvariantCulture,
         $"device {_device.DeviceInfo.Product} tuner {_device.DeviceInfo.TunerType}, open {_device.IsOpen}, streaming {_device.IsStreaming}, " +
-        $"direct sampling live {(live?.ToString(CultureInfo.InvariantCulture) ?? "unknown")} / recorded {(_device.IsHfMode ? "HF" : "off")}, " +
+        $"librtlsdr records direct sampling {(recorded?.ToString(CultureInfo.InvariantCulture) ?? "unknown")} (this wrapper: {(_device.IsHfMode ? "HF" : "off")}), " +
         $"centre {(_device.IsOpen ? _device.GetFrequency() : 0)} Hz, rate {(_device.IsOpen ? _device.GetSampleRate() : 0)} S/s, " +
-        $"gain {(_device.IsOpen ? _device.GetGain() : 0f):F1} dB (auto {_autoGain}, manual {_manualGain:F1} dB)");
+        $"tuner gain {(_device.IsOpen ? _device.GetGain() : 0f):F1} dB (auto {_autoGain}, manual {_manualGain:F1} dB)");
     }
   }
 
-  private void HandleFmAcquisitionOutcome(FmAcquisitionOutcome outcome, string? signalSnapshot, int sdrRate)
+  private void HandleFmAcquisitionOutcome(FmAcquisitionOutcome outcome, int generation, string? signalSnapshot,
+    float pilotLevel, float pllHz, int sdrRate)
   {
     try
     {
@@ -150,8 +200,8 @@ public partial class RadioReceiver
       {
         case FmWatchdogAction.ReportOutcome:
           Logger.Information(
-            "FM acquisition ({Reason}) on {Frequency}: pilot {Pilot}, RDS sync {Rds} (window {Window}, mean signal {Signal:F2})",
-            outcome.Reason, frequency, pilot, rds, window, outcome.MeanSignal);
+            "FM acquisition ({Reason}) on {Frequency}: pilot {Pilot}, RDS sync {Rds} (judged over {Window}; pilot level {PilotLevel:F4}, PLL {Pll:F1} Hz, mean signal {Signal:F2})",
+            outcome.Reason, frequency, pilot, rds, window, pilotLevel, pllHz, outcome.MeanSignal);
           if (snapshot is not null)
           {
             Logger.Information("FM acquisition snapshot on {Frequency} (no pilot, no RDS): {Snapshot}", frequency, snapshot);
@@ -162,11 +212,13 @@ public partial class RadioReceiver
         case FmWatchdogAction.ReopenDevice:
           Logger.Warning(
             "FM watchdog: no pilot and no RDS on {Frequency} ({Reason}) within {Window} at mean signal {Signal:F2}, " +
-            "a frequency that had them earlier; step {Step}: {Action}. Snapshot: {Snapshot}",
+            "a frequency locked earlier; step {Step}: {Action}. Snapshot: {Snapshot}",
             frequency, outcome.Reason, window, outcome.MeanSignal, outcome.RecoveryStep,
-            outcome.Action == FmWatchdogAction.RerunBandSetup ? "re-running the band setup" : "closing and reopening the device",
+            outcome.Action == FmWatchdogAction.RerunBandSetup
+              ? "re-running the band setup (HF on and off, sample rate, tune, gain)"
+              : "closing and reopening the device",
             snapshot);
-          RecoverFm(outcome.Action == FmWatchdogAction.ReopenDevice, outcome.RecoveryStep);
+          RecoverFm(outcome.Action == FmWatchdogAction.ReopenDevice, outcome.RecoveryStep, outcome.FrequencyHz, generation);
           break;
 
         case FmWatchdogAction.GiveUp:
@@ -186,20 +238,30 @@ public partial class RadioReceiver
   private static string Millis(long? samples, int sdrRate) =>
     samples is null || sdrRate <= 0
       ? "none"
-      : string.Create(CultureInfo.InvariantCulture, $"after {samples.Value * 1000 / sdrRate} ms");
+      : string.Create(CultureInfo.InvariantCulture, $"{samples.Value * 1000 / sdrRate} ms");
 
   /// <summary>
-  /// A recovery step: re-run the FM band setup (HF mode, signal chain, sample rate, tune, gain) with
-  /// streaming paused, and for step 2 close and reopen the device first. Skipped when the receiver is
-  /// no longer running on FM (the user moved on while the step was queued).
+  /// A recovery step, with streaming paused. Step 1 switches HF direct sampling on and off again (on a
+  /// device that has it: librtlsdr's HF-off path re-initialises the tuner, the path the dossier's
+  /// hypothesis 1 suspects), then rebuilds the signal chain and sets the sample rate, the frequency and
+  /// the gain. Step 2 closes and reopens the device first, then does the same.
   /// </summary>
-  private void RecoverFm(bool reopen, int step)
+  /// <remarks>
+  /// Skipped, with an Information line, when anything moved since the miss was judged: the receiver is
+  /// not running, a sweep or seek is under way, it is no longer on FM, or it has been retuned or
+  /// rebuilt since (<paramref name="generation"/>), for example by a person pressing a preset while the
+  /// step waited for <c>_lock</c>. A skipped step still counts as taken in the episode.
+  /// </remarks>
+  private void RecoverFm(bool reopen, int step, long frequencyHz, int generation)
   {
     lock (_lock)
     {
-      if (_state != ReceiverState.Running || _currentBand.Type != BandType.FM)
+      if (_state != ReceiverState.Running || _currentBand.Type != BandType.FM || IsSweeping
+          || _currentFrequencyHz != frequencyHz || Volatile.Read(ref _tuneGeneration) != generation)
       {
-        Logger.Information("FM watchdog: step {Step} skipped; the receiver is {State} on {Band}", step, _state, _currentBand.Name);
+        Logger.Information(
+          "FM watchdog: step {Step} skipped; the receiver moved on since the miss ({State} on {Band} at {Frequency})",
+          step, _state, _currentBand.Name, RadioBand.FormatFrequency(_currentFrequencyHz));
         return;
       }
 
@@ -219,47 +281,61 @@ public partial class RadioReceiver
 
       if (reopen && !_device.Open())
       {
-        Logger.Error("FM watchdog: step {Step}: the device did not reopen", step);
+        // The same teardown as a failed start (processing thread, queue, subscription), so a later
+        // Startup from Error starts clean instead of subscribing a second time.
+        Logger.Error("FM watchdog: step {Step}: the device did not reopen; the receiver is stopped in Error", step);
+        CloseDeviceAfterFailedStartup();
         SetState(ReceiverState.Error);
         return;
       }
 
-      if (ApplyHfModeFor(_currentBand, _currentFrequencyHz) != TuneResult.Success)
+      try
       {
-        Logger.Warning("FM watchdog: step {Step}: the device refused HF direct sampling off", step);
-      }
+        if (_device.SupportsHfDirectSampling)
+        {
+          lock (_tuneLock)
+          {
+            if (!_device.SetHfMode(true) | !_device.SetHfMode(false))
+            {
+              Logger.Warning("FM watchdog: step {Step}: the HF on/off cycle was refused (HF direct sampling now {Mode})",
+                step, _device.IsHfMode ? "on" : "off");
+            }
+          }
+        }
 
-      _pendingFmStart = new FmChainStart(
-        reopen ? "watchdog step 2: device reopened" : "watchdog step 1: band setup re-run", ByRecovery: true);
-      SetupSignalProcessing();
-      if (!_device.SetSampleRate(_sdrSampleRate))
-      {
-        Logger.Warning("FM watchdog: step {Step}: the device refused the sample rate {SampleRate} Hz", step, _sdrSampleRate);
-      }
+        _pendingFmStart = new FmChainStart(
+          reopen ? "watchdog step 2: device reopened" : "watchdog step 1: band setup re-run", ByRecovery: true);
+        SetupSignalProcessing();
+        if (!_device.SetSampleRate(_sdrSampleRate))
+        {
+          Logger.Warning("FM watchdog: step {Step}: the device refused the sample rate {SampleRate} Hz", step, _sdrSampleRate);
+        }
 
-      bool tuned;
-      lock (_tuneLock)
-      {
-        tuned = _device.SetFrequency(DeviceFrequency(_currentFrequencyHz));
-      }
-      Interlocked.Increment(ref _tuneGeneration);
-      if (!tuned)
-      {
-        Logger.Warning("FM watchdog: step {Step}: the device refused {Frequency}", step, RadioBand.FormatFrequency(_currentFrequencyHz));
-      }
+        bool tuned;
+        lock (_tuneLock)
+        {
+          tuned = _device.SetFrequency(DeviceFrequency(_currentFrequencyHz));
+        }
+        Interlocked.Increment(ref _tuneGeneration);
+        if (!tuned)
+        {
+          Logger.Warning("FM watchdog: step {Step}: the device refused {Frequency}", step, RadioBand.FormatFrequency(_currentFrequencyHz));
+        }
 
-      _device.SetGainMode(_autoGain);
-      if (!_autoGain)
-      {
-        _device.SetGain(_manualGain);
+        _device.SetGainMode(_autoGain);
+        if (!_autoGain)
+        {
+          _device.SetGain(_manualGain);
+        }
       }
-
-      if (!ResumeAfterBandChange(wasStreaming))
+      finally
       {
-        return;
+        // Whatever failed above, streaming is restarted if it was running.
+        if (ResumeAfterBandChange(wasStreaming))
+        {
+          Logger.Information("FM watchdog: step {Step} done on {Frequency}", step, RadioBand.FormatFrequency(_currentFrequencyHz));
+        }
       }
-
-      Logger.Information("FM watchdog: step {Step} done on {Frequency}", step, RadioBand.FormatFrequency(_currentFrequencyHz));
     }
   }
 }

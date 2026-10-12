@@ -76,12 +76,20 @@ internal sealed record FmAcquisitionOutcome(
 /// <para>
 /// <b>The trigger key.</b> Recovery is asked for only when all three hold at the end of a window:
 /// (1) neither the pilot nor RDS was seen; (2) the mean wideband signal was at least
-/// <see cref="MinSignal"/>; and (3) this frequency had a pilot or RDS <i>earlier in this process</i>.
-/// The third is what keeps a genuinely mono station without RDS from ever triggering it: such a
-/// station is never recorded as locked, so a miss on it is only reported. The cost is that a fault on
-/// the first FM acquisition of a frequency after a restart is reported, not recovered. The observed
-/// fault (2026-10-12, 97.745 MHz after AM) was on a station that had been stereo earlier in the
-/// same process, and so were the three FM retunes that did not recover it.
+/// <see cref="MinSignal"/>; and (3) this frequency was <i>locked</i> earlier in this process: RDS block
+/// sync, or a pilot the receiver judged locked (strong, with the PLL settled on 19 kHz; see
+/// <c>RadioReceiver.IsPilotLocked</c>). "Pilot seen" alone is not enough to record a frequency as
+/// locked, because the stereo detector is an energy detector that reads noise as a pilot (measured on
+/// the box, `AUD-109`). Condition (3) is what keeps a genuinely mono station without RDS from ever
+/// triggering a recovery: it is never recorded as locked, so a miss on it is only reported. The cost
+/// is that a fault on the first FM acquisition of a frequency after a restart is reported, not
+/// recovered. The observed fault (2026-10-12, 97.745 MHz after AM) was on a station with RDS that had
+/// been received earlier in the same process.
+/// </para>
+/// <para>
+/// Under the receiver's defaults condition (2) adds little: blocks below the squelch threshold (0.1,
+/// the same value) are never demodulated, so never observed. It matters when the squelch is set
+/// lower than <see cref="MinSignal"/>.
 /// </para>
 /// <para>
 /// <b>Escalation, rate-limited, never looping.</b> A triggering miss opens an <i>episode</i>. Its
@@ -113,6 +121,7 @@ internal sealed class FmAcquisitionWatchdog
   private double _signalSum;
   private long _signalBlocks;
   private bool _knownBefore;
+  private bool _lockEvidence;
 
   private int _episodeStep;
   private bool _episodeGaveUp;
@@ -122,8 +131,7 @@ internal sealed class FmAcquisitionWatchdog
 
   /// <summary>
   /// The mean wideband signal strength (the receiver's <c>SignalStrength</c> scale) a miss needs to
-  /// trigger recovery. 0.1 is the receiver's default squelch threshold: below it there is no station
-  /// to recover.
+  /// trigger recovery. 0.1, the receiver's default squelch threshold (see the remarks).
   /// </summary>
   public float MinSignal { get; set; } = 0.1f;
 
@@ -136,7 +144,7 @@ internal sealed class FmAcquisitionWatchdog
   /// <summary>The current episode's recovery step: 0 for none, 1 after a re-run, 2 after a reopen, 3 after giving up.</summary>
   public int EpisodeStep => _episodeStep;
 
-  /// <summary>Whether <paramref name="frequencyHz"/> has had a pilot or RDS in this process.</summary>
+  /// <summary>Whether <paramref name="frequencyHz"/> has been locked (RDS, or a locked pilot) in this process.</summary>
   public bool IsKnownLocked(long frequencyHz) => _knownLocked.Contains(frequencyHz);
 
   /// <summary>
@@ -171,8 +179,13 @@ internal sealed class FmAcquisitionWatchdog
   /// <param name="pilot">Whether the stereo decoder reports a pilot after this block.</param>
   /// <param name="rdsSynced">Whether the RDS decoder reports block sync after this block.</param>
   /// <param name="signal">The block's wideband signal strength.</param>
+  /// <param name="pilotLocked">
+  /// Whether the receiver judges the pilot locked after this block (stronger evidence than
+  /// <paramref name="pilot"/>; see the remarks). The value on the window's last block counts.
+  /// </param>
   /// <returns>The closed window's outcome, or null when no window closed.</returns>
-  public FmAcquisitionOutcome? Observe(int generation, long frequencyHz, int iqSamples, bool pilot, bool rdsSynced, float signal)
+  public FmAcquisitionOutcome? Observe(int generation, long frequencyHz, int iqSamples, bool pilot, bool rdsSynced, float signal,
+    bool pilotLocked)
   {
     if (generation != _generation || frequencyHz != _frequencyHz)
     {
@@ -196,6 +209,7 @@ internal sealed class FmAcquisitionWatchdog
     {
       _rdsAt = _samples;
     }
+    _lockEvidence = _rdsAt is not null || pilotLocked;
 
     bool both = _pilotAt is not null && _rdsAt is not null;
     if (!both && _samples < WindowSamples)
@@ -213,9 +227,13 @@ internal sealed class FmAcquisitionWatchdog
     bool missed = _pilotAt is null && _rdsAt is null;
 
     FmWatchdogAction action = FmWatchdogAction.None;
-    if (!missed)
+    if (_lockEvidence)
     {
       _knownLocked.Add(_frequencyHz);
+    }
+
+    if (!missed)
+    {
       // A healthy acquisition ends the episode.
       _episodeStep = 0;
       _episodeGaveUp = false;
@@ -292,5 +310,6 @@ internal sealed class FmAcquisitionWatchdog
     _signalSum = 0;
     _signalBlocks = 0;
     _knownBefore = _knownLocked.Contains(frequencyHz);
+    _lockEvidence = false;
   }
 }
