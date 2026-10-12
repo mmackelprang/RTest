@@ -51,12 +51,6 @@ public partial class RadioReceiver
   /// </summary>
   internal const float LockedPilotInPhase = 0.02f;
 
-  /// <summary>
-  /// The share of the pilot band's energy (<see cref="StereoFmDecoder.PilotStrength"/>) that must be in
-  /// phase with the PLL: a clean locked pilot gives about 0.78 (π/4), noise about 0.
-  /// </summary>
-  internal const float LockedPilotCoherence = 0.5f;
-
   /// <summary>The FM acquisition watchdog (AUD-106). Its settings are open to tests.</summary>
   internal FmAcquisitionWatchdog FmWatchdog { get; } = new();
 
@@ -73,15 +67,15 @@ public partial class RadioReceiver
   internal event Action<FmAcquisitionOutcome>? FmAcquisitionReported;
 
   /// <summary>
-  /// Whether <paramref name="stereo"/>'s pilot counts as locked: its in-phase component reaches
-  /// <see cref="LockedPilotInPhase"/> and is at least <see cref="LockedPilotCoherence"/> of the pilot
-  /// band's energy. Stronger evidence than <see cref="StereoFmDecoder.StereoDetected"/>, which is an
+  /// Whether <paramref name="stereo"/>'s pilot counts as locked: its component in phase with the PLL
+  /// reaches <see cref="LockedPilotInPhase"/> (in <c>PilotLockTests</c>, Gaussian noise up to RMS 4 on
+  /// the discriminator's scale stays under it). Stronger evidence than <see cref="StereoFmDecoder.StereoDetected"/>, which is an
   /// energy detector and reads noise as a pilot (`AUD-109`); the PLL's frequency is no help either,
   /// because its integrator moves so little that it reads 19 kHz on noise too (measured in
   /// <c>PilotLockTests</c>). Only this, or RDS sync, records a frequency as locked for the watchdog.
   /// </summary>
   internal static bool IsPilotLocked(StereoFmDecoder stereo) =>
-    stereo.PilotInPhase >= LockedPilotInPhase && stereo.PilotInPhase >= LockedPilotCoherence * stereo.PilotStrength;
+    stereo.PilotInPhase >= LockedPilotInPhase;
 
   /// <summary>
   /// Publishes a new WFM chain to the watchdog: called where the chain is built, with the reason the
