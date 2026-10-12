@@ -168,4 +168,97 @@ public class FiltersTests
 
         Assert.Equal(1.0f, agc.CurrentGain);
     }
+
+    // AUD-101 (review L6): the feed-forward AgcProcessor, driven directly.
+
+    private const int AgcRate = 48_000;
+
+    private static AgcProcessor AmAgc() => new()
+    {
+        TargetLevel = 0.5f,
+        AttackRate = AgcProcessor.CoefficientFor(0.005, AgcRate),
+        DecayRate = AgcProcessor.CoefficientFor(1.0, AgcRate),
+        MaxGain = 30f,
+    };
+
+    private static float[] Constant(int count, float level) => Enumerable.Repeat(level, count).ToArray();
+
+    [Fact]
+    public void AgcProcessor_SeedsTheEnvelope_FromTheFirstBlock()
+    {
+        var agc = AmAgc();
+        // 48 whole cycles of a 1 kHz sine of amplitude 0.1: RMS 0.0707, so the seed (sqrt2 x RMS) is 0.1.
+        var input = new float[AgcRate / 1000 * 48];
+        for (var i = 0; i < input.Length; i++)
+        {
+            input[i] = 0.1f * (float)Math.Sin(2 * Math.PI * 1000 * i / AgcRate);
+        }
+        var output = new float[input.Length];
+
+        agc.Process(input, output);
+
+        // Already at the target in the first cycle: not passed at the maximum gain (30 -> clipped at 1)
+        // while the envelope climbs from zero.
+        var firstCyclePeak = output.Take(AgcRate / 1000).Max(Math.Abs);
+        Assert.InRange(firstCyclePeak, 0.45f, 0.55f);
+        Assert.InRange(agc.Envelope, 0.095f, 0.105f);
+    }
+
+    [Fact]
+    public void AgcProcessor_AttacksWithItsTimeConstant()
+    {
+        var agc = AmAgc();
+        agc.Process(Constant(1, 0.1f), new float[1]);
+        var e0 = agc.Envelope;
+
+        // One attack time constant (5 ms = 240 samples) of a constant 0.5.
+        agc.Process(Constant(240, 0.5f), new float[240]);
+
+        var expected = 0.5 - (0.5 - e0) * Math.Exp(-1);
+        Assert.Equal(expected, agc.Envelope, 2e-3);
+        Assert.Equal(0.5f / agc.Envelope, agc.CurrentGain, 1e-4f);
+    }
+
+    [Fact]
+    public void AgcProcessor_DecaysWithItsTimeConstant()
+    {
+        var agc = AmAgc();
+        // Seeded at sqrt2 x (0.5 / sqrt2) = 0.5.
+        agc.Process(Constant(1, 0.5f / MathF.Sqrt(2f)), new float[1]);
+        var e0 = agc.Envelope;
+        Assert.InRange(e0, 0.499f, 0.501f);
+
+        // One decay time constant (1 s) of a constant 0.05.
+        agc.Process(Constant(AgcRate, 0.05f), new float[AgcRate]);
+
+        var expected = 0.05 + (e0 - 0.05) * Math.Exp(-1);
+        Assert.Equal(expected, agc.Envelope, 2e-3);
+    }
+
+    [Fact]
+    public void AgcProcessor_HoldsAtItsMaximumGain_OnAWeakInput()
+    {
+        var agc = AmAgc();
+        var input = Constant(100, 1e-4f);
+        var output = new float[100];
+
+        agc.Process(input, output);
+
+        // 0.5 / 1e-4 = 5000 is clamped to 30.
+        Assert.Equal(30f, agc.CurrentGain);
+        Assert.All(output, v => Assert.Equal(1e-4f * 30f, v, 1e-9f));
+    }
+
+    [Fact]
+    public void AgcProcessor_Reset_SeedsAgainFromTheNextBlock()
+    {
+        var agc = AmAgc();
+        agc.Process(Constant(2_400, 0.5f), new float[2_400]);
+
+        agc.Reset();
+        // A constant 0.01 seeds sqrt2 x 0.01, not the 0.5 the envelope held before the reset.
+        agc.Process(Constant(1, 0.01f), new float[1]);
+
+        Assert.InRange(agc.Envelope, 0.0141f, 0.0142f);
+    }
 }

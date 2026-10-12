@@ -25,7 +25,19 @@ namespace RTLSDRCore;
       private ReceiverState _state = ReceiverState.Stopped;
 
       private IDemodulator _demodulator;
-      private AgcProcessor _agc;
+      // AUD-101: the AM-modulation chain (AM, Shortwave, Aircraft), or null on every other
+      // modulation. Replaced as a whole by SetupSignalProcessing; the DSP thread reads it once
+      // per block.
+      private volatile AmReceiveChain? _amChain;
+      // Counts the receiver's tunes of the device. Each IQ block is stamped with the value current
+      // when the USB thread raised it (OnSamplesAvailable), and the AM chain re-seeds its DC
+      // blocker and AGC on the second block stamped with a new value (AmReceiveChain.BeginBlock).
+      private int _tuneGeneration;
+
+      // One raised IQ block and the tune generation current when it was raised. Stamping at raise
+      // time, not at dequeue time, keeps "the second block after a tune holds only the new
+      // frequency" true however many blocks are waiting in the processing queue.
+      private readonly record struct IqBlock(IqSample[] Samples, int TuneGeneration);
       private Decimator? _iqDecimator;
       private DeEmphasisFilter? _deEmphasis;
       private DeEmphasisFilter? _deEmphasisRight; // second channel for stereo
@@ -66,7 +78,7 @@ namespace RTLSDRCore;
       // a dedicated processing thread dequeues and runs DSP. This decouples
       // USB timing from DSP processing overhead, preventing sample rate
       // deficit caused by synchronous processing blocking the read loop.
-      private BlockingCollection<IqSample[]>? _processingQueue;
+      private BlockingCollection<IqBlock>? _processingQueue;
       private Thread? _processingThread;
 
       // Live band sweep (AUD-76). See SweepChannels for the rules.
@@ -165,7 +177,6 @@ namespace RTLSDRCore;
           _currentFrequencyHz = _currentBand.CenterFrequencyHz;
           _currentModulation = _currentBand.DefaultModulation;
           _demodulator = DemodulatorFactory.Create(_currentModulation);
-          _agc = new AgcProcessor();
 
           Logger.Information("RadioReceiver created with device: {DeviceName}", device.DeviceInfo.Name);
       }
@@ -257,7 +268,7 @@ namespace RTLSDRCore;
           bool switched;
           lock (_tuneLock)
           {
-              if (!wanted && !_device.SetFrequency(nextFrequencyHz))
+              if (!wanted && !_device.SetFrequency(DeviceFrequencyForBand(nextFrequencyHz, band)))
               {
                   Logger.Debug("Pre-tune to {Frequency} before switching HF direct sampling off was refused",
                       RadioBand.FormatFrequency(nextFrequencyHz));
@@ -275,7 +286,7 @@ namespace RTLSDRCore;
                   // above moved its IF/DDC to nextFrequencyHz. The caller keeps the receiver on
                   // _currentFrequencyHz, so put the device back there too; otherwise it would play a
                   // frequency the receiver does not report.
-                  if (!_device.SetFrequency(_currentFrequencyHz))
+                  if (!_device.SetFrequency(DeviceFrequency(_currentFrequencyHz)))
                   {
                       Logger.Debug("Re-tune to {Frequency} after a refused HF-off switch was refused",
                           RadioBand.FormatFrequency(_currentFrequencyHz));
@@ -305,6 +316,25 @@ namespace RTLSDRCore;
               _device.SetGain(_manualGain);
           }
       }
+
+      /// <summary>
+      /// The frequency the device is tuned to so that the receiver, with the DSP chain it has set up
+      /// now, receives <paramref name="frequencyHz"/> (AUD-101): 60 kHz below it while the AM chain
+      /// demodulates (<see cref="AmReceiveChain.DeviceFrequencyFor"/>), the frequency itself
+      /// otherwise. Every tune the receiver makes for the radio goes through this or
+      /// <see cref="DeviceFrequencyForBand"/>; the live band sweep's own hops do not.
+      /// </summary>
+      private long DeviceFrequency(long frequencyHz) =>
+          AmReceiveChain.DeviceFrequencyFor(frequencyHz, _amChain != null);
+
+      /// <summary>
+      /// As <see cref="DeviceFrequency"/>, for <paramref name="band"/> before its chain is set up:
+      /// offset when <paramref name="band"/>'s modulation and bandwidth select the AM chain
+      /// (<see cref="AmReceiveChain.Applies"/>), the rule <see cref="SetupSignalProcessing"/> uses.
+      /// </summary>
+      private static long DeviceFrequencyForBand(long frequencyHz, RadioBand band) =>
+          AmReceiveChain.DeviceFrequencyFor(
+              frequencyHz, AmReceiveChain.Applies(band.DefaultModulation, band.DefaultBandwidthHz));
 
       /// <summary>
       /// Runs a start-up configuration step, and runs it once more if the device refuses it the
@@ -385,7 +415,7 @@ namespace RTLSDRCore;
                   {
                       lock (_tuneLock)
                       {
-                          return _device.SetFrequency(_currentFrequencyHz);
+                          return _device.SetFrequency(DeviceFrequency(_currentFrequencyHz));
                       }
                   }, "the first tune");
 
@@ -418,8 +448,8 @@ namespace RTLSDRCore;
                   // Start async processing pipeline: USB read thread enqueues
                   // IQ batches, dedicated processing thread runs DSP chain.
                   _processingCts = new CancellationTokenSource();
-                  _processingQueue = new BlockingCollection<IqSample[]>(
-                      new ConcurrentQueue<IqSample[]>(), boundedCapacity: 8);
+                  _processingQueue = new BlockingCollection<IqBlock>(
+                      new ConcurrentQueue<IqBlock>(), boundedCapacity: 8);
                   _processingThread = new Thread(ProcessingLoop)
                   {
                       Name = "RadioReceiver-DSP",
@@ -727,15 +757,20 @@ namespace RTLSDRCore;
           {
               // rtlsdr_set_center_freq is safe to call while streaming —
               // no need to stop/restart the USB pipe for frequency changes.
+              // AUD-101: on AM-modulated bands the device is tuned below the frequency (see
+              // DeviceFrequency); the receiver still records and reports frequencyHz.
+              long deviceHz = DeviceFrequency(frequencyHz);
               lock (_tuneLock)
               {
-                  success = _device.SetFrequency(frequencyHz);
+                  success = _device.SetFrequency(deviceHz);
               }
+              Interlocked.Increment(ref _tuneGeneration);
 
               if (!success)
               {
-                  Logger.Warning("The device refused {Frequency} (band {Band}, HF direct sampling {HfMode})",
-                      RadioBand.FormatFrequency(frequencyHz), _currentBand.Name, _device.IsHfMode ? "on" : "off");
+                  Logger.Warning("The device refused {Frequency} (device centre {DeviceFrequency}, band {Band}, HF direct sampling {HfMode})",
+                      RadioBand.FormatFrequency(frequencyHz), RadioBand.FormatFrequency(deviceHz), _currentBand.Name,
+                      _device.IsHfMode ? "on" : "off");
               }
           }
 
@@ -1150,6 +1185,24 @@ namespace RTLSDRCore;
               if (_state == ReceiverState.Running || _state == ReceiverState.Scanning)
               {
                   SetupSignalProcessing();
+
+                  // AUD-101: the new modulation may start or stop using the AM chain, which
+                  // moves the device centre (DeviceFrequency); tune it again.
+                  if (_device.IsOpen)
+                  {
+                      long deviceHz = DeviceFrequency(_currentFrequencyHz);
+                      bool tuned;
+                      lock (_tuneLock)
+                      {
+                          tuned = _device.SetFrequency(deviceHz);
+                      }
+                      Interlocked.Increment(ref _tuneGeneration);
+                      if (!tuned)
+                      {
+                          Logger.Warning("The device refused {Frequency} after the modulation changed to {Modulation}",
+                              RadioBand.FormatFrequency(deviceHz), modulation);
+                      }
+                  }
               }
               else
               {
@@ -1338,21 +1391,44 @@ namespace RTLSDRCore;
       }
 
       /// <inheritdoc/>
+      /// <remarks>
+      /// The value the squelch, the seek scan's stop test and <see cref="SignalStrengthUpdated"/> use,
+      /// updated once per IQ block. On the HF bands (AM and Shortwave,
+      /// <see cref="HfBands.Requires(BandType)"/>; AUD-101) it is the level of the AM chain's
+      /// filtered channel on a dB scale, <c>(L + 60) / 60</c> with L the mean in-channel power in
+      /// dBFS, never below 0 (<see cref="AmReceiveChain.Strength"/>): 0 is −60 dBFS and each 0.01 is
+      /// 0.6 dB. On every other band, Aircraft included, it is the linear wideband RMS magnitude of
+      /// about 256 raw IQ samples spread over the block (<see cref="WidebandSignalStrength"/>).
+      /// </remarks>
       public float SignalStrength => _lastSignalStrength;
 
       /// <summary>
-      /// Whether the wideband-RMS squelch is applied to the current band: false on an HF band (AM,
-      /// Shortwave; <see cref="HfBands.Requires(BandType)"/>), true on every other band (AUD-99).
+      /// Whether the squelch is applied to the current band: false on an HF band (AM, Shortwave;
+      /// <see cref="HfBands.Requires(BandType)"/>), true on every other band (AUD-99).
       /// </summary>
       /// <remarks>
-      /// The squelch compares the RMS of the raw IQ capture (<see cref="SignalStrength"/>) with
-      /// <see cref="SquelchThreshold"/>. In HF direct-sampling mode the tuner is in standby and there
-      /// is no front-end gain, so that RMS is set by the missing gain rather than by the signal: on
-      /// the box it reads about 2–4 ADC counts of 128 (≈ 0.02), under the 0.1 default on every
-      /// channel, and the squelch closed for good, turning AM and SW into exact digital silence. It
-      /// is therefore not applied in HF mode; mute, the sweep silencing and its tail still are.
-      /// AUD-101 computes the level squelch, the meter and the seek scan use from the filtered
-      /// channel instead of the raw capture, and applies AGC to the AM output.
+      /// <para>
+      /// The squelch compares <see cref="SignalStrength"/> with <see cref="SquelchThreshold"/>. In
+      /// AUD-99 that was the RMS of the raw IQ capture, and in HF direct-sampling mode (the tuner in
+      /// standby, no front-end gain) it read about 0.02 on the box, under the 0.1 default on every
+      /// channel: the squelch closed for good and AM and SW were exact digital silence.
+      /// </para>
+      /// <para>
+      /// Since AUD-101 AM and SW report the AM chain's in-channel level instead, and the squelch is
+      /// still not applied to them: with no station receivable on the box there is no calibrated
+      /// in-channel threshold yet, and the accepted behaviour on AM and SW is low-level noise (held
+      /// down by the AGC's maximum gain) rather than silence. Mute, the sweep silencing and its tail
+      /// still apply.
+      /// </para>
+      /// <para>
+      /// Aircraft (tuner mode) keeps the squelch on main's wideband-RMS formula, although its audio
+      /// goes through the AM chain. The samples differ from main's: Aircraft is offset-tuned, so
+      /// the RMS covers f−180…f+60 kHz rather than f±120 kHz. On the in-channel scale the 0.1
+      /// default would sit at −54 dBFS, and on the box (2026-10-12) empty Aircraft channels read
+      /// −18 to −26 dBFS in the channel with the tuner's AGC holding the noise up. On the wideband
+      /// scale 121.5 MHz read 0.25 and the channels a seek passed 0.22-0.25, also above 0.1: the squelch is open on empty
+      /// channels either way (see docs/queue/AUD-101.md, box UAT).
+      /// </para>
       /// </remarks>
       private bool SquelchApplies => !HfBands.Requires(Volatile.Read(ref _currentBand).Type);
 
@@ -1606,8 +1682,10 @@ namespace RTLSDRCore;
               lock (_tuneLock)
               {
                   // Read the field now: a user tune made during the sweep
-                  // assigned it before cancelling us, so it wins.
-                  _device.SetFrequency(_currentFrequencyHz);
+                  // assigned it before cancelling us, so it wins. The sweep tuned
+                  // its own centres; the radio's tune goes through DeviceFrequency
+                  // (AUD-101: the AM offset).
+                  _device.SetFrequency(DeviceFrequency(_currentFrequencyHz));
                   _device.SetGainMode(_autoGain);
                   if (!_autoGain)
                   {
@@ -1673,7 +1751,7 @@ namespace RTLSDRCore;
 
       private void DrainProcessingQueue()
       {
-          BlockingCollection<IqSample[]>? queue = _processingQueue;
+          BlockingCollection<IqBlock>? queue = _processingQueue;
           if (queue == null)
           {
               return;
@@ -1831,6 +1909,16 @@ namespace RTLSDRCore;
           // Steps 1-2: Calculate paired SDR and demod rates that divide cleanly
           (_sdrSampleRate, _demodSampleRate) = CalculateRates(bandwidth);
 
+          // AUD-101: AM modulation on a channel of up to 20 kHz (the AM, Shortwave and Aircraft
+          // bands) has a chain of its own; see AmReceiveChain for the rates, the filters and why it
+          // is separate. Every other modulation continues below, unchanged.
+          if (AmReceiveChain.Applies(_currentModulation, bandwidth))
+          {
+              SetupAmSignalProcessing(bandwidth);
+              return;
+          }
+          _amChain = null;
+
           // Step 3: IQ decimation (SDR rate → demod rate)
           var iqDecimFactor = _sdrSampleRate / _demodSampleRate;
           if (iqDecimFactor > 1)
@@ -1857,11 +1945,7 @@ namespace RTLSDRCore;
           // SetupSignalProcessing can be called multiple times for the same
           // receiver (modulation/band change), so leftover subscriptions
           // would leak and fire stale events from a discarded decoder.
-          if (_rdsDecoder != null)
-          {
-              _rdsDecoder.StationNameDecoded -= OnRdsDecoderStationNameDecoded;
-              _rdsDecoder.ProgramIdChanged -= OnRdsDecoderProgramIdChanged;
-          }
+          DetachRdsDecoder();
 
           if (_currentModulation == ModulationType.WFM)
           {
@@ -1942,8 +2026,6 @@ namespace RTLSDRCore;
               _decimBufferRightOut = Array.Empty<float>();
           }
 
-          _agc.Reset();
-
           // Pre-calculate expected audio output count for squelch silence delivery.
           // Each USB transfer is 16384 IQ pairs; after all decimation stages,
           // we get this many audio samples. For stereo, multiply by 2 for interleaved L,R.
@@ -1964,6 +2046,58 @@ namespace RTLSDRCore;
               _demodSampleRate > DefaultAudioSampleRate
                   ? _demodSampleRate / DefaultAudioSampleRate : 1,
               DefaultAudioSampleRate, bandwidth, _currentModulation, _audioFormat);
+      }
+
+      /// <summary>
+      /// Sets up the AM-modulation chain (AUD-101) at the SDR rate <see cref="CalculateRates"/> chose
+      /// (240 kHz for every AM-modulated band): offset shift, channel filter and decimation to
+      /// 48 kHz, envelope, audio low-pass, AGC. Mono at 48 kHz, so there is no audio decimator.
+      /// </summary>
+      private void SetupAmSignalProcessing(int bandwidth)
+      {
+          // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
+          const int maxIqChunk = 16384;
+          var chain = new AmReceiveChain(_sdrSampleRate, bandwidth, maxIqChunk);
+
+          _demodSampleRate = AmReceiveChain.DemodSampleRate;
+          _iqDecimator = null;
+          _demodulator = chain.Demodulator;
+
+          DetachRdsDecoder();
+          _stereoDecoder = null;
+          _rdsDecoder = null;
+          _deEmphasis = null;
+          _deEmphasisRight = null;
+          _audioDecimator = null;
+          _audioDecimatorRight = null;
+          _audioFormat = AudioFormat.Default;
+
+          _expectedAudioOutputCount = maxIqChunk / chain.Channelizer.Decimation;
+          _squelchSilenceBuffer = new float[_expectedAudioOutputCount];
+
+          _amChain = chain;
+
+          Logger.Information(
+              "Signal processing (AM): SDR={SdrRate} Hz → shift {Offset} Hz → channel filter {Cutoff} Hz ({ChannelTaps} taps), " +
+              "decim {Decimation}:1 → Demod={DemodRate} Hz → audio low-pass {AudioCutoff} Hz ({AudioTaps} taps) → AGC → " +
+              "{AudioRate} Hz mono, BW={Bandwidth} Hz, Modulation={Modulation}",
+              _sdrSampleRate, chain.Channelizer.OffsetHz, chain.Channelizer.CutoffHz, chain.Channelizer.Taps,
+              chain.Channelizer.Decimation, _demodSampleRate, chain.AudioFilter.CutoffFrequency, chain.AudioFilter.Taps,
+              DefaultAudioSampleRate, bandwidth, _currentModulation);
+      }
+
+      /// <summary>
+      /// Detaches the current RDS decoder's events, if there is one. SetupSignalProcessing can be
+      /// called many times for the same receiver, so a leftover subscription would fire stale
+      /// events from a discarded decoder.
+      /// </summary>
+      private void DetachRdsDecoder()
+      {
+          if (_rdsDecoder != null)
+          {
+              _rdsDecoder.StationNameDecoded -= OnRdsDecoderStationNameDecoded;
+              _rdsDecoder.ProgramIdChanged -= OnRdsDecoderProgramIdChanged;
+          }
       }
 
       /// <summary>
@@ -2046,7 +2180,7 @@ namespace RTLSDRCore;
     // keep up), we drop the batch rather than blocking USB reads.
     try
           {
-              if (!(_processingQueue?.TryAdd(e.Samples) ?? false))
+              if (!(_processingQueue?.TryAdd(new IqBlock(e.Samples, Volatile.Read(ref _tuneGeneration))) ?? false))
               {
                   Logger.Warning("DSP processing queue full — dropping IQ batch ({Samples} samples)",
                       e.Samples.Length);
@@ -2070,12 +2204,12 @@ namespace RTLSDRCore;
           Logger.Information("DSP processing thread started");
           try
           {
-              foreach (var samples in _processingQueue!.GetConsumingEnumerable(
+              foreach (var block in _processingQueue!.GetConsumingEnumerable(
                            _processingCts?.Token ?? CancellationToken.None))
               {
                   try
                   {
-                      ProcessSamples(samples);
+                      ProcessSamples(block.Samples, block.TuneGeneration);
                   }
                   catch (Exception ex)
                   {
@@ -2099,7 +2233,13 @@ namespace RTLSDRCore;
           Logger.Information("DSP processing thread stopped");
       }
 
-      private void ProcessSamples(IqSample[] samples)
+      /// <summary>
+      /// The wideband signal strength: the RMS magnitude of about 256 raw IQ samples spread evenly
+      /// over the block, on a linear scale (full-scale IQ reads 1). The formula <c>main</c> used for
+      /// every band before AUD-101, and still used on every band except AM and Shortwave.
+      /// </summary>
+      /// <param name="samples">One IQ block; must not be empty.</param>
+      private static float WidebandSignalStrength(IqSample[] samples)
       {
           // Calculate signal strength from a subset (avoid LINQ .Average allocation)
           var sumPower = 0f;
@@ -2110,7 +2250,30 @@ namespace RTLSDRCore;
               sumPower += samples[i].MagnitudeSquared;
               count++;
           }
-          _lastSignalStrength = MathF.Sqrt(sumPower / count);
+          return MathF.Sqrt(sumPower / count);
+      }
+
+      private void ProcessSamples(IqSample[] samples, int tuneGeneration)
+      {
+          AmReceiveChain? am = _amChain;
+          // One read of the band per block, so the level's scale and the squelch decision agree.
+          bool hfBand = HfBands.Requires(Volatile.Read(ref _currentBand).Type);
+          if (am != null)
+          {
+              // AUD-101: the chain counts blocks since the last tune (see
+              // AmReceiveChain.BeginBlock) using the generation stamped when the block was raised,
+              // and the channel filter runs on every block, squelched or not, so its history and
+              // the in-channel level are always current.
+              am.BeginBlock(tuneGeneration);
+              am.Channelize(samples);
+          }
+
+          // AUD-101: the in-channel dB scale on the HF bands (AM, Shortwave) only. Aircraft keeps
+          // the wideband RMS even though its audio goes through the AM chain: in tuner mode the
+          // tuner's AGC holds the noise high, and on the box an empty Aircraft channel read
+          // -18 to -26 dBFS in the channel, over the -30 dBFS that the 50 % seek stop means on the
+          // dB scale and far over the -54 dBFS of the 0.1 squelch.
+          _lastSignalStrength = am != null && hfBand ? am.Strength : WidebandSignalStrength(samples);
 
           SignalStrengthUpdated?.Invoke(this, new SignalStrengthEventArgs(_lastSignalStrength));
 
@@ -2123,15 +2286,24 @@ namespace RTLSDRCore;
           // ends the next few blocks that would otherwise play are silenced
           // too (ConsumeSweepMuteTail).
           // AUD-99: on an HF band the squelch is not applied (see SquelchApplies).
-          bool squelchClosed = SquelchApplies && _lastSignalStrength < _squelchThreshold;
+          bool squelchClosed = !hfBand && _lastSignalStrength < _squelchThreshold;
           if (squelchClosed || _isMuted || _sweepMuted || ConsumeSweepMuteTail())
           {
+              // AUD-101: the AM chain's audio state (DC blocker, audio low-pass, AGC) does not
+              // advance while no audio is produced, so it is re-seeded on the next block that is.
+              am?.MarkSilenced();
               if (_expectedAudioOutputCount > 0 && AudioDataAvailable != null)
               {
                   // Silence buffer is pre-allocated and already zeroed
                   AudioDataAvailable.Invoke(this,
                       new AudioDataEventArgs(_squelchSilenceBuffer, _expectedAudioOutputCount, _audioFormat));
               }
+              return;
+          }
+
+          if (am != null)
+          {
+              DeliverAudio(am.Audio, am.ProduceAudio());
               return;
           }
 
@@ -2282,6 +2454,12 @@ namespace RTLSDRCore;
               }
           }
 
+          DeliverAudio(outputSamples, outputCount);
+      }
+
+      /// <summary>Applies the volume and the clamp to the audio and raises <see cref="AudioDataAvailable"/>.</summary>
+      private void DeliverAudio(float[] outputSamples, int outputCount)
+      {
           // 5. Apply volume and clamp
           for (var i = 0; i < outputCount; i++)
           {
@@ -2315,11 +2493,7 @@ namespace RTLSDRCore;
 
           // Detach decoder event so a stale subscription doesn't survive
           // a Shutdown→Startup cycle if the decoder is recreated.
-          if (_rdsDecoder != null)
-          {
-              _rdsDecoder.StationNameDecoded -= OnRdsDecoderStationNameDecoded;
-              _rdsDecoder.ProgramIdChanged -= OnRdsDecoderProgramIdChanged;
-          }
+          DetachRdsDecoder();
 
           _device.Dispose();
           GC.SuppressFinalize(this);
