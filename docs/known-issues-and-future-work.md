@@ -120,10 +120,11 @@ then `AUD-102` (bands/UI) and `AUD-103` (AM/SW sweep plans). Details: [`queue/AU
 **2026-10-12, `AUD-101` (on branch, pending box UAT): the AM DSP chain is done.** AM, SW and AIR now tune the
 dongle 60 kHz below the station and shift it back in software (the DC spike is filtered out), filter IQ to the
 channel and decimate to 48 kHz, apply an AGC (max gain 30), and low-pass the audio at the channel's
-half-bandwidth. `signalStrength` / `rssiDbu` on those bands are the in-channel level (`rssiDbu` ≈ in-channel
-dBFS, 0.6 dB steps). Proved by synthetic tests only (no station is receivable at the box); HF squelch stays
-bypassed. **Not fixed, follow-up:** NFM (Weather, VHF) still has no channel filter. Details:
-[`queue/AUD-101.md`](queue/AUD-101.md).
+half-bandwidth. `signalStrength` / `rssiDbu` on AM and SW are the in-channel level (`rssiDbu` ≈ in-channel
+dBFS, 0.6 dB steps); AIR keeps the wideband linear scale for its level, squelch and seek stop, because on the box
+its tuner AGC holds empty channels at −18 to −26 dBFS in the channel. Proved by synthetic tests (no station is
+receivable at the box); HF squelch stays bypassed. **Not fixed, follow-up:** NFM (Weather, VHF) still has no
+channel filter (`AUD-107`). Details: [`queue/AUD-101.md`](queue/AUD-101.md).
 
 The "~2 days" estimate in the table below predates a code survey that
 found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the

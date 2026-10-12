@@ -192,10 +192,10 @@ namespace RTLSDRCore;
       /// overdriven).
       /// </summary>
       /// <remarks>
-      /// On AM-modulated bands (AM, Shortwave, Aircraft) <c>RadioReceiver</c> reports the level of
-      /// the filtered channel on a dB scale: <c>(L + 60) / 60</c> with L = 10·log10 of the mean
-      /// in-channel power in dBFS, so 0 is −60 dBFS and each 0.01 is 0.6 dB (AUD-101). On every other
-      /// band it is the RMS magnitude of the raw IQ capture.
+      /// On the HF bands (AM and Shortwave) <c>RadioReceiver</c> reports the level of the filtered
+      /// channel on a dB scale: <c>(L + 60) / 60</c> with L = 10·log10 of the mean in-channel power
+      /// in dBFS, so 0 is −60 dBFS and each 0.01 is 0.6 dB (AUD-101). On every other band (FM,
+      /// Weather, VHF and Aircraft) it is the linear RMS magnitude of the raw, wideband IQ capture.
       /// </remarks>
       float SignalStrength { get; }
 

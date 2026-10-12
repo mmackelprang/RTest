@@ -14,6 +14,7 @@ internal sealed class ReceiverHarness : IDisposable
   private readonly SemaphoreSlim _audioEvents = new(0);
   private readonly List<float> _audio = new();
   private readonly List<bool> _silentEvents = new();
+  private readonly List<float[]> _events = new();
 
   public ReceiverHarness(SyntheticRf rf, BandType band, long frequencyHz)
   {
@@ -28,6 +29,7 @@ internal sealed class ReceiverHarness : IDisposable
         float[] block = e.Samples.AsSpan(0, e.SampleCount).ToArray();
         _audio.AddRange(block);
         _silentEvents.Add(Array.TrueForAll(block, s => s == 0f));
+        _events.Add(block);
       }
       _audioEvents.Release();
     };
@@ -50,6 +52,16 @@ internal sealed class ReceiverHarness : IDisposable
     }
   }
 
+  /// <summary>
+  /// Raises one block captured at <paramref name="deviceHz"/> whatever the device is tuned to now
+  /// (a block read before a retune and delivered after it), and waits for its audio event.
+  /// </summary>
+  public void RunCapturedAt(long deviceHz)
+  {
+    Device.RaiseBlockCapturedAt(deviceHz);
+    Assert.True(_audioEvents.Wait(TimeSpan.FromSeconds(10)), "DSP thread produced no audio event");
+  }
+
   /// <summary>Every audio sample delivered so far, in order (interleaved L,R for stereo).</summary>
   public float[] Audio
   {
@@ -58,6 +70,18 @@ internal sealed class ReceiverHarness : IDisposable
       lock (_audio)
       {
         return _audio.ToArray();
+      }
+    }
+  }
+
+  /// <summary>Each audio event's samples so far, in order.</summary>
+  public float[][] Events
+  {
+    get
+    {
+      lock (_audio)
+      {
+        return _events.ToArray();
       }
     }
   }

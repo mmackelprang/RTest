@@ -1,5 +1,6 @@
 using RTLSDRCore.DSP;
 using RTLSDRCore.Enums;
+using RTLSDRCore.Models;
 using RTLSDRCore.Sweep;
 using RTLSDRCore.Tests.Sweep;
 
@@ -400,28 +401,140 @@ public class AmReceiveChainTests
     }
   }
 
-  [Fact]
-  public void Aircraft_NoiseThatOpenedTheOldWidebandSquelch_StillOpensIt()
+  /// <summary>
+  /// <c>main</c>'s signal strength formula before AUD-101, copied here so that a change to the
+  /// receiver's own copy cannot move both sides of the comparison: the RMS magnitude of about 256
+  /// raw IQ samples spread over the block, in float arithmetic.
+  /// </summary>
+  private static float MainWidebandStrength(IqSample[] samples)
   {
-    // Raw RMS 0.12: just over the 0.1 default that the wideband squelch compared it with.
-    SyntheticRf rf = new() { NoiseRms = 0.12f };
+    float sumPower = 0f;
+    int step = Math.Max(1, samples.Length / 256);
+    int count = 0;
+    for (int i = 0; i < samples.Length; i += step)
+    {
+      sumPower += samples[i].MagnitudeSquared;
+      count++;
+    }
+    return MathF.Sqrt(sumPower / count);
+  }
+
+  /// <summary>Makes the harness's device remember the last block it built.</summary>
+  private static Func<IqSample[]?> RecordLastBlock(ReceiverHarness h)
+  {
+    IqSample[]? last = null;
+    h.Device.BlockFactory = (hz, n) => last = h.Rf.Block(hz, n);
+    return () => last;
+  }
+
+  [Theory]
+  // Noise under the 0.1 default: closed on the wideband scale. On the in-channel scale it would
+  // read about -41 dBFS (strength 0.31) and open the squelch.
+  [InlineData(0.05f, 0f, false)]
+  // Noise over the 0.1 default: open.
+  [InlineData(0.15f, 0f, true)]
+  // A station: open.
+  [InlineData(0.05f, 0.3f, true)]
+  public void Aircraft_SignalStrengthAndSquelch_AreMainsWidebandFormula(float noiseRms, float carrier, bool open)
+  {
+    // AUD-101 review M2/M3: on the box an empty Aircraft channel read -18 to -26 dBFS in the
+    // channel, so Aircraft keeps the wideband scale for its level, squelch and seek stop.
+    SyntheticRf rf = carrier > 0 ? AmStation(AirHz, carrier) : new SyntheticRf();
+    rf.NoiseRms = noiseRms;
     using ReceiverHarness h = new(rf, BandType.Aircraft, AirHz);
+    Func<IqSample[]?> last = RecordLastBlock(h);
     h.Run(3);
 
-    Assert.True(h.Receiver.SignalStrength >= h.Receiver.SquelchThreshold,
-      $"strength {h.Receiver.SignalStrength} under the threshold {h.Receiver.SquelchThreshold}");
-    Assert.Contains(h.Audio, s => s != 0f);
+    float expected = MainWidebandStrength(last()!);
+    Assert.Equal(expected, h.Receiver.SignalStrength);
+    Assert.Equal(expected >= h.Receiver.SquelchThreshold, h.Receiver.GetRadioState().SquelchOpen);
+    Assert.Equal(open, h.Receiver.GetRadioState().SquelchOpen);
+    Assert.Equal(!open, h.SilentEvents[^1]);
+  }
+
+  [Theory]
+  [InlineData(BandType.AM, AmHz)]
+  [InlineData(BandType.Shortwave, SwHz)]
+  public void HfBands_ReportTheInChannelScale(BandType band, long frequencyHz)
+  {
+    // An unmodulated carrier of 0.05 (-26.0 dBFS) over the box's direct-sampling noise.
+    SyntheticRf rf = new() { NoiseRms = 0.02f };
+    rf.Transmitters.Add(new Transmitter(frequencyHz, 0.05f));
+    using ReceiverHarness h = new(rf, band, frequencyHz);
+    Func<IqSample[]?> last = RecordLastBlock(h);
+    h.Run(3);
+
+    Assert.InRange(LevelDbfs(h.Receiver.SignalStrength), -26.5, -25.5);
+    // Not the wideband value (about 0.054 here).
+    Assert.True(Math.Abs(h.Receiver.SignalStrength - MainWidebandStrength(last()!)) > 0.4f,
+      $"strength {h.Receiver.SignalStrength}, wideband {MainWidebandStrength(last()!)}");
+  }
+
+  // (i) Re-seeding after a tune and after the squelch reopens (review M1) ----------------------
+
+  /// <summary>Largest |mean| of an audio block allowed after a change: 2 % of full scale (the AGC target is 0.5 peak).</summary>
+  private const double MaxBlockDc = 0.01;
+
+  /// <summary>How far, in dB, each block's RMS may sit from the steady-state RMS after a change.</summary>
+  private const double MaxLevelErrorDb = 1.0;
+
+  /// <summary>
+  /// Asserts that every block in <paramref name="blocks"/> has |mean| under
+  /// <see cref="MaxBlockDc"/> and an RMS within <see cref="MaxLevelErrorDb"/> of the steady state
+  /// (the RMS of the last four blocks).
+  /// </summary>
+  private static void AssertSettledFromTheFirstBlock(float[][] blocks)
+  {
+    double steady = AudioMeasure.Rms(blocks[^4..].SelectMany(b => b).ToArray());
+    double[] means = blocks.Select(b => b.Average(v => (double)v)).ToArray();
+    double[] errorsDb = blocks.Select(b => AudioMeasure.Db(AudioMeasure.Rms(b) / steady)).ToArray();
+    string report = string.Join(", ", means.Zip(errorsDb, (m, e) => $"{m:F4}/{e:F2} dB"));
+
+    Assert.True(means.All(m => Math.Abs(m) <= MaxBlockDc), $"block mean / level from steady state: {report}");
+    Assert.True(errorsDb.All(e => Math.Abs(e) <= MaxLevelErrorDb), $"block mean / level from steady state: {report}");
   }
 
   [Fact]
-  public void Aircraft_AnEmptyChannel_IsStillSquelched()
+  public void Retune_FromAStrongStation_ToAWeakOne_NeitherStepsTheDcNorDucksTheAgc()
   {
-    // -60 dBFS over the capture, about -75 dBFS in the channel: under the threshold (-54 dBFS).
-    SyntheticRf rf = new() { NoiseRms = 0.001f };
-    using ReceiverHarness h = new(rf, BandType.Aircraft, AirHz);
-    h.Run(3);
+    // Two stations 30 kHz apart, 20 dB apart, both 1 kHz at 50 %. The weak one needs an AGC gain
+    // of 20, inside the maximum of 30.
+    SyntheticRf rf = AmStation(AmHz, 0.5f);
+    rf.Transmitters.Add(new Transmitter(AmHz + 30_000, 0.05f, ToneHz: 1_000, AmDepth: 0.5));
+    using ReceiverHarness h = new(rf, BandType.AM, AmHz);
+    h.Run(Blocks);
 
+    Assert.True(h.Receiver.SetFrequency(AmHz + 30_000));
+    // The block in flight across the tune: captured at the old device centre, raised after it.
+    h.RunCapturedAt(AmHz - Offset);
+    int afterOld = h.Events.Length;
+    h.Run(20);
+
+    float[][] after = h.Events[afterOld..];
+    Assert.Equal(20, after.Length);
+    AssertSettledFromTheFirstBlock(after);
+  }
+
+  [Fact]
+  public void Aircraft_SquelchReopening_OnAWeakerStation_NeitherStepsTheDcNorDucksTheAgc()
+  {
+    // A strong station (wideband RMS about 0.32, open), then nothing (closed), then a weaker one
+    // (about 0.13, open again).
+    SyntheticRf rf = AmStation(AirHz, 0.3f);
+    rf.NoiseRms = 0.001f;
+    using ReceiverHarness h = new(rf, BandType.Aircraft, AirHz);
+    h.Run(Blocks);
+    Assert.True(h.Receiver.GetRadioState().SquelchOpen);
+
+    rf.Transmitters.Clear();
+    h.Run(3);
     Assert.False(h.Receiver.GetRadioState().SquelchOpen);
-    Assert.All(h.Audio, s => Assert.Equal(0f, s));
+
+    rf.Transmitters.Add(new Transmitter(AirHz, 0.12f, ToneHz: 1_000, AmDepth: 0.5));
+    int reopened = h.Events.Length;
+    h.Run(20);
+
+    Assert.True(h.Receiver.GetRadioState().SquelchOpen);
+    AssertSettledFromTheFirstBlock(h.Events[reopened..]);
   }
 }

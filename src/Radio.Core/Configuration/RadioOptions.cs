@@ -64,6 +64,11 @@ public class RadioOptions
   /// Gets or sets the signal strength threshold for scan stop (0-100).
   /// When scanning, the scan will stop when signal strength exceeds this threshold.
   /// </summary>
+  /// <remarks>
+  /// The signal strength has two scales (AUD-101). On FM, Weather, VHF and Aircraft it is linear
+  /// wideband RMS, so 50 means half of full scale. On AM and Shortwave it is the in-channel level
+  /// in dB, <c>−60 + 0.6 × threshold</c> dBFS, so 50 means −30 dBFS in the channel.
+  /// </remarks>
   public int ScanStopThreshold { get; set; } = 50;
 
   /// <summary>

@@ -96,6 +96,11 @@ public interface IRadioControl
   /// <summary>
   /// Gets the signal strength threshold (0-100) at which the scan pauses on a signal.
   /// </summary>
+  /// <remarks>
+  /// Compared with <see cref="SignalStrength"/>, so it has that property's two scales: on FM,
+  /// Weather, VHF and Aircraft it is linear wideband RMS (50 = 0.5 of full scale); on AM and
+  /// Shortwave it is the in-channel level in dB, <c>−60 + 0.6 × threshold</c> dBFS (50 = −30 dBFS).
+  /// </remarks>
   int ScanStopThreshold { get; }
 
   #endregion
@@ -251,6 +256,13 @@ public interface IRadioControl
   /// <summary>
   /// Gets the current signal strength as a percentage (0-100).
   /// </summary>
+  /// <remarks>
+  /// The SDR implementation reports 100 × the receiver's signal strength (AUD-101), on one of two
+  /// scales depending on the band. On FM, Weather, VHF and Aircraft it is linear: the RMS magnitude
+  /// of the raw, wideband IQ capture, with full-scale IQ at 100. On AM and Shortwave it is the level
+  /// of the filtered channel in dB: L = −60 + 0.6 × SignalStrength dBFS, so 0 is −60 dBFS (or
+  /// below) and 100 is 0 dBFS. The squelch and the scan stop threshold compare on the same scale.
+  /// </remarks>
   int SignalStrength { get; }
 
   /// <summary>

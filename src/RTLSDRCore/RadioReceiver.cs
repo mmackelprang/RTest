@@ -1387,10 +1387,12 @@ namespace RTLSDRCore;
       /// <inheritdoc/>
       /// <remarks>
       /// The value the squelch, the seek scan's stop test and <see cref="SignalStrengthUpdated"/> use,
-      /// updated once per IQ block. With the AM chain (AM, Shortwave and Aircraft; AUD-101) it is the
-      /// level of the filtered channel on a dB scale, <c>(L + 60) / 60</c> with L the mean in-channel
-      /// power in dBFS, never below 0 (<see cref="AmReceiveChain.Strength"/>). On every other band it
-      /// is the RMS magnitude of about 256 raw IQ samples spread over the block.
+      /// updated once per IQ block. On the HF bands (AM and Shortwave,
+      /// <see cref="HfBands.Requires(BandType)"/>; AUD-101) it is the level of the AM chain's
+      /// filtered channel on a dB scale, <c>(L + 60) / 60</c> with L the mean in-channel power in
+      /// dBFS, never below 0 (<see cref="AmReceiveChain.Strength"/>): 0 is −60 dBFS and each 0.01 is
+      /// 0.6 dB. On every other band, Aircraft included, it is the linear wideband RMS magnitude of
+      /// about 256 raw IQ samples spread over the block (<see cref="WidebandSignalStrength"/>).
       /// </remarks>
       public float SignalStrength => _lastSignalStrength;
 
@@ -1406,14 +1408,18 @@ namespace RTLSDRCore;
       /// channel: the squelch closed for good and AM and SW were exact digital silence.
       /// </para>
       /// <para>
-      /// Since AUD-101 the AM chain's in-channel level is used instead, and the squelch is still not
-      /// applied in HF mode: with no station receivable on the box there is no calibrated in-channel
-      /// threshold yet, and the accepted behaviour on AM and SW is low-level noise (held down by the
-      /// AGC's maximum gain) rather than silence. Mute, the sweep silencing and its tail still apply.
-      /// Aircraft (tuner mode) keeps the squelch, now on the in-channel level; that level's scale
-      /// puts the 0.1 default at −54 dBFS in the channel. White noise that opened the old wideband
-      /// squelch (raw RMS ≥ 0.1, −20 dBFS) is at least −35 dBFS in an 8.3 kHz Aircraft channel
-      /// (about −15 dB of the capture's power), so it still opens it.
+      /// Since AUD-101 AM and SW report the AM chain's in-channel level instead, and the squelch is
+      /// still not applied to them: with no station receivable on the box there is no calibrated
+      /// in-channel threshold yet, and the accepted behaviour on AM and SW is low-level noise (held
+      /// down by the AGC's maximum gain) rather than silence. Mute, the sweep silencing and its tail
+      /// still apply.
+      /// </para>
+      /// <para>
+      /// Aircraft (tuner mode) keeps the squelch on the wideband RMS, exactly as before AUD-101,
+      /// although its audio goes through the AM chain. On the in-channel scale the 0.1 default
+      /// would sit at −54 dBFS, and on the box (2026-10-12) empty Aircraft channels read −18 to
+      /// −26 dBFS in the channel with the tuner's AGC holding the noise up: the squelch would never
+      /// close.
       /// </para>
       /// </remarks>
       private bool SquelchApplies => !HfBands.Requires(Volatile.Read(ref _currentBand).Type);
@@ -2219,30 +2225,46 @@ namespace RTLSDRCore;
           Logger.Information("DSP processing thread stopped");
       }
 
+      /// <summary>
+      /// The wideband signal strength: the RMS magnitude of about 256 raw IQ samples spread evenly
+      /// over the block, on a linear scale (full-scale IQ reads 1). The formula <c>main</c> used for
+      /// every band before AUD-101, and still used on every band except AM and Shortwave.
+      /// </summary>
+      /// <param name="samples">One IQ block; must not be empty.</param>
+      private static float WidebandSignalStrength(IqSample[] samples)
+      {
+          // Calculate signal strength from a subset (avoid LINQ .Average allocation)
+          var sumPower = 0f;
+          var step = Math.Max(1, samples.Length / 256); // sample ~256 points
+          var count = 0;
+          for (var i = 0; i < samples.Length; i += step)
+          {
+              sumPower += samples[i].MagnitudeSquared;
+              count++;
+          }
+          return MathF.Sqrt(sumPower / count);
+      }
+
       private void ProcessSamples(IqSample[] samples)
       {
           AmReceiveChain? am = _amChain;
+          // One read of the band per block, so the level's scale and the squelch decision agree.
+          bool hfBand = HfBands.Requires(Volatile.Read(ref _currentBand).Type);
           if (am != null)
           {
-              // AUD-101: on AM-modulated bands the level is that of the filtered channel (see
-              // AmReceiveChain.Strength), so the channel filter runs before the squelch and mute
-              // check, every block.
+              // AUD-101: the chain counts blocks since the last tune (see
+              // AmReceiveChain.BeginBlock), and the channel filter runs on every block, squelched
+              // or not, so its history and the in-channel level are always current.
+              am.BeginBlock(Volatile.Read(ref _tuneGeneration));
               am.Channelize(samples);
-              _lastSignalStrength = am.Strength;
           }
-          else
-          {
-              // Calculate signal strength from a subset (avoid LINQ .Average allocation)
-              var sumPower = 0f;
-              var step = Math.Max(1, samples.Length / 256); // sample ~256 points
-              var count = 0;
-              for (var i = 0; i < samples.Length; i += step)
-              {
-                  sumPower += samples[i].MagnitudeSquared;
-                  count++;
-              }
-              _lastSignalStrength = MathF.Sqrt(sumPower / count);
-          }
+
+          // AUD-101: the in-channel dB scale on the HF bands (AM, Shortwave) only. Aircraft keeps
+          // the wideband RMS even though its audio goes through the AM chain: in tuner mode the
+          // tuner's AGC holds the noise high, and on the box an empty Aircraft channel read
+          // -18 to -26 dBFS in the channel, over the -30 dBFS that the 50 % seek stop means on the
+          // dB scale and far over the -54 dBFS of the 0.1 squelch.
+          _lastSignalStrength = am != null && hfBand ? am.Strength : WidebandSignalStrength(samples);
 
           SignalStrengthUpdated?.Invoke(this, new SignalStrengthEventArgs(_lastSignalStrength));
 
@@ -2255,9 +2277,12 @@ namespace RTLSDRCore;
           // ends the next few blocks that would otherwise play are silenced
           // too (ConsumeSweepMuteTail).
           // AUD-99: on an HF band the squelch is not applied (see SquelchApplies).
-          bool squelchClosed = SquelchApplies && _lastSignalStrength < _squelchThreshold;
+          bool squelchClosed = !hfBand && _lastSignalStrength < _squelchThreshold;
           if (squelchClosed || _isMuted || _sweepMuted || ConsumeSweepMuteTail())
           {
+              // AUD-101: the AM chain's audio state (DC blocker, audio low-pass, AGC) does not
+              // advance while no audio is produced, so it is re-seeded on the next block that is.
+              am?.MarkSilenced();
               if (_expectedAudioOutputCount > 0 && AudioDataAvailable != null)
               {
                   // Silence buffer is pre-allocated and already zeroed
@@ -2269,13 +2294,6 @@ namespace RTLSDRCore;
 
           if (am != null)
           {
-              int tuneGeneration = Volatile.Read(ref _tuneGeneration);
-              if (tuneGeneration != am.SeenTuneGeneration)
-              {
-                  am.SeenTuneGeneration = tuneGeneration;
-                  am.ResetForRetune();
-              }
-
               DeliverAudio(am.Audio, am.ProduceAudio());
               return;
           }

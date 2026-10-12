@@ -8,7 +8,8 @@ namespace RTLSDRCore.DSP;
 /// AM too. IQ at the SDR rate → offset shift, channel filter and decimation to 48 kHz
 /// (<see cref="AmChannelizer"/>) → envelope detector (<see cref="AmDemodulator"/>) → audio
 /// low-pass → AGC (<see cref="AgcProcessor"/>). It also measures the in-channel level that the
-/// receiver reports as its signal strength on these bands.
+/// receiver reports as its signal strength on the HF bands (AM and Shortwave); on Aircraft the
+/// receiver keeps reporting the wideband RMS (see <c>RadioReceiver.SignalStrength</c>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,9 +18,10 @@ namespace RTLSDRCore.DSP;
 /// spurs land 60 kHz away from the carrier instead of on it. librtlsdr refuses its own offset
 /// tuning in direct-sampling mode, so the shift is done here. 60 kHz is well clear of DC; with
 /// the widest channel this chain takes (AM, ±5 kHz, filter stop band from 7 kHz) the shifted
-/// channel spans 53–67 kHz of the ±120 kHz capture at 240 kS/s, more than 50 kHz inside its edge,
-/// where the RTL2832's own decimation filter is flat. 60 kHz is also exactly a quarter of 240 kS/s,
-/// so the mixer is a 4-entry table (1, −j, −1, +j) with no rounding and no drift.
+/// channel spans 53–67 kHz of the ±120 kHz capture at 240 kS/s, more than 50 kHz inside its edge.
+/// (The RTL2832's own decimation filter response across that span has not been measured.) 60 kHz
+/// is also exactly a quarter of 240 kS/s, so the mixer is a 4-entry table (1, −j, −1, +j) with no
+/// rounding and no drift.
 /// </para>
 /// <para>
 /// <b>Why a chain of its own</b> rather than an AM case in <c>RadioReceiver.CalculateRates</c>:
@@ -128,10 +130,20 @@ internal sealed class AmReceiveChain
   public float[] Audio { get; private set; }
 
   /// <summary>
-  /// The tune generation (<c>RadioReceiver</c>'s count of tunes) this chain last reset for. Read and
-  /// written only on the DSP thread.
+  /// The tune generation (<c>RadioReceiver</c>'s count of tunes) of the last block passed to
+  /// <see cref="BeginBlock"/>. Read and written only on the DSP thread.
   /// </summary>
-  public int SeenTuneGeneration { get; set; }
+  public int SeenTuneGeneration { get; private set; }
+
+  /// <summary>
+  /// Whether <see cref="ProduceAudio"/> re-seeds the audio state (DC blocker, audio low-pass, AGC)
+  /// before its next block. True for a new chain.
+  /// </summary>
+  public bool ReseedPending { get; private set; } = true;
+
+  // Set on the first block after a tune generation change (a block that may still hold the old
+  // frequency); the next block re-seeds. See BeginBlock.
+  private bool _awaitingPostTuneBlock;
 
   /// <summary>
   /// The signal strength of the last channelized block: the in-channel level L =
@@ -182,15 +194,70 @@ internal sealed class AmReceiveChain
   }
 
   /// <summary>
+  /// Called once per IQ block, before <see cref="Channelize"/>, with the receiver's current tune
+  /// generation. Decides when the audio state is re-seeded after a tune (AUD-101 review M1).
+  /// </summary>
+  /// <remarks>
+  /// The first block seen after the generation changes may have been read from the device before
+  /// the tune took effect (it was in flight, or captured and not yet raised), so it can still hold
+  /// the old station; it is processed with the old station's state, which matches it. The block
+  /// after it was read only once that one had been raised, i.e. after the tune, so the audio
+  /// state is re-seeded on it (<see cref="ReseedPending"/>). The same reasoning as the live band
+  /// sweep's <c>LiveSweepTuner._dropNextBlock</c> in <c>RadioReceiver</c>.
+  /// </remarks>
+  /// <param name="tuneGeneration">The receiver's count of tunes, read when the block arrived.</param>
+  public void BeginBlock(int tuneGeneration)
+  {
+    if (tuneGeneration != SeenTuneGeneration)
+    {
+      SeenTuneGeneration = tuneGeneration;
+      _awaitingPostTuneBlock = true;
+      return;
+    }
+
+    if (_awaitingPostTuneBlock)
+    {
+      _awaitingPostTuneBlock = false;
+      ReseedPending = true;
+    }
+  }
+
+  /// <summary>
+  /// Records that the receiver delivered silence for this block instead of calling
+  /// <see cref="ProduceAudio"/> (squelch closed, muted, or a band sweep's silencing). The audio
+  /// state did not follow the signal meanwhile, so the next <see cref="ProduceAudio"/> re-seeds it.
+  /// </summary>
+  public void MarkSilenced() => ReseedPending = true;
+
+  /// <summary>
   /// Demodulates the channel from the last <see cref="Channelize"/> call, applies the audio
   /// low-pass and then the AGC, and leaves the result in <see cref="Audio"/>.
   /// </summary>
+  /// <remarks>
+  /// When <see cref="ReseedPending"/> is set, the DC blocker, the audio low-pass and the AGC are
+  /// reset first, and the first <see cref="SettleSamples"/> channel samples of the block are output
+  /// as silence and kept out of the seeds: they come from the channel filter while its history
+  /// still holds the previous block, which after a tune is the old station (or, for a new chain,
+  /// zeros). The DC blocker is then seeded from the mean envelope and the AGC from the RMS of the
+  /// rest of the block.
+  /// </remarks>
   /// <returns>The number of audio samples in <see cref="Audio"/>.</returns>
   public int ProduceAudio()
   {
-    int count = Demodulator.Demodulate(_channel.AsSpan(0, _channelCount), Audio);
-    Span<float> audio = Audio.AsSpan(0, count);
-    for (int i = 0; i < count; i++)
+    int skip = 0;
+    if (ReseedPending)
+    {
+      ReseedPending = false;
+      Demodulator.Reset();
+      AudioFilter.Reset();
+      Agc.Reset();
+      skip = Math.Min(SettleSamples, _channelCount);
+      Array.Clear(Audio, 0, skip);
+    }
+
+    int count = skip + Demodulator.Demodulate(_channel.AsSpan(skip, _channelCount - skip), Audio.AsSpan(skip));
+    Span<float> audio = Audio.AsSpan(skip, count - skip);
+    for (int i = 0; i < audio.Length; i++)
     {
       audio[i] = AudioFilter.Process(audio[i]);
     }
@@ -200,13 +267,9 @@ internal sealed class AmReceiveChain
   }
 
   /// <summary>
-  /// After a retune: the demodulator's DC blocker and the AGC are seeded again from the next block,
-  /// so the new carrier level neither comes out as a DC step nor waits out the old station's AGC
-  /// decay. The filters keep their history (it is flushed within one block).
+  /// The number of channel samples (at <see cref="DemodSampleRate"/>) the channel filter takes to
+  /// flush its history: its tap count divided by the decimation, rounded up (40 on AM, 67 on
+  /// Shortwave, 48 on Aircraft; 0.8–1.4 ms).
   /// </summary>
-  public void ResetForRetune()
-  {
-    Demodulator.Reset();
-    Agc.Reset();
-  }
+  public int SettleSamples => (Channelizer.Taps + Channelizer.Decimation - 1) / Channelizer.Decimation;
 }
