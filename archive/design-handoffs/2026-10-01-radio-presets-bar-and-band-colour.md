@@ -347,7 +347,7 @@ viewport: 4 cards × 129 + 3 gaps × 6 = 534
 
 > ⛔ **2026-10-02: the owner declined this for now — keep AM/SW as they are; revisit with the all-band hardware** (`AUD-94`). The recommendation below is kept for that revisit.
 
-The R820T gets nothing below about 24 MHz. Tuning AM or SW *succeeds* and plays silence (`docs/queue/AUD-94.md:14-23`).
+The R820T gets nothing below about 24 MHz. Tuning AM or SW *succeeds* and plays silence (`archive/queue/AUD-94.md`, the 2026-10-01 text).
 
 **Recommendation: dim, keep visible, block selection and give the reason.** This is AUD-94 option 1, "shown disabled with the reason".
 - **Pill:** 0.4 opacity, the project's disabled convention. The range sub-label is replaced with `UNAVAILABLE`, which is 11 characters and fits the 102 px pill.
