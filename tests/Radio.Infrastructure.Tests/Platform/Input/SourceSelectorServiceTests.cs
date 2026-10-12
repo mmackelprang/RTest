@@ -339,11 +339,18 @@ public class SourceSelectorServiceTests
     using var h = new Harness();
     var radio = ActiveRadio(h);
     radio.IsScanning = true;
+    radio.CurrentFrequency = Frequency.FromMegahertz(97.745);
+    h.BandMemory.Log = h.Log;
+    h.BandMemory.Remembered[RadioBand.AM] = Frequency.FromKilohertz(1130);
+    int before = h.Log.Entries.Count;
 
     h.HighlightRow("band:AM");
     h.Selector.Press();
 
     Assert.False(radio.IsScanning);
+    Assert.Equal(
+      new[] { "StopScan", "Remember:FM:97745000", "TuneInBand:AM:1130000" },
+      h.Log.Entries.Skip(before).ToArray());
   }
 
   [Fact]

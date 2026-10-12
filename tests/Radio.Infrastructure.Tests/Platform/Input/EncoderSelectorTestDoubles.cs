@@ -306,6 +306,9 @@ internal sealed class FakeBandMemory : IRadioBandMemory
 
   public List<(RadioBand Band, Frequency Frequency)> Writes { get; } = [];
 
+  /// <summary>When set, each write is also logged as <c>Remember:{band}:{hz}</c>, to order it against the radio's calls.</summary>
+  public CallLog? Log { get; set; }
+
   public Task<Frequency?> GetAsync(RadioBand band, CancellationToken cancellationToken = default)
   {
     if (Remembered.TryGetValue(band, out var remembered))
@@ -319,6 +322,7 @@ internal sealed class FakeBandMemory : IRadioBandMemory
   public Task SetAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
   {
     Writes.Add((band, frequency));
+    Log?.Add($"Remember:{band}:{frequency.Hertz}");
     Remembered[band] = frequency;
     return Task.CompletedTask;
   }

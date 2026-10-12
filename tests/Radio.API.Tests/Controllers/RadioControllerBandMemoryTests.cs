@@ -158,6 +158,21 @@ public class RadioControllerBandMemoryTests
   }
 
   [Fact]
+  public async Task ReselectingABand_WhoseStepCameFromAnotherBand_RestoresTheBandsStep()
+  {
+    // AUD-105 re-review: a frequency-only tune from FM to 121.5 MHz lands on AIR with FM's 100 kHz
+    // step (AUD-95). Tapping AIR used to reset the step (SetBandAsync); the in-band tune must too.
+    await Tune(97_745_000);
+    await Tune(121_500_000);
+
+    RadioStateDto state = await Band("AIR");
+
+    Assert.Equal("AIR", state.Band);
+    Assert.Equal(121_500_000, state.Frequency);
+    Assert.Equal(RTLSDRCore.Bands.BandPresets.GetBand(RTLSDRCore.Enums.BandType.Aircraft).DefaultStepHz, state.Step);
+  }
+
+  [Fact]
   public async Task ADefaultOutsideTheBand_FallsBackToTheBandsClamp_InsteadOfFailing()
   {
     // A misconfigured Radio:DefaultFMFrequencyMHz is not range-checked by the memory service.

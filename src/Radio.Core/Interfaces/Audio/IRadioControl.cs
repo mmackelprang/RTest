@@ -143,8 +143,9 @@ public interface IRadioControl
   /// Tunes to <paramref name="frequency"/> inside <paramref name="band"/> in one retune (AUD-91).
   /// Unlike <see cref="SetFrequencyAsync"/>, the band is not inferred from the frequency, so a
   /// frequency where bands overlap (VHF contains FM, AIR and WB) stays in the band asked for.
-  /// Only when the band changes does <see cref="FrequencyStep"/> become that band's default step; a
-  /// tune inside the current band keeps the step. (<see cref="SetBandAsync"/> resets the step on
+  /// When the band changes, or the current step is not one the band allows (AUD-105),
+  /// <see cref="FrequencyStep"/> becomes that band's default step; otherwise a tune inside the
+  /// current band keeps the step. (<see cref="SetBandAsync"/> resets the step on
   /// every call, even to the same band.)
   /// </summary>
   /// <param name="band">The band to tune in.</param>

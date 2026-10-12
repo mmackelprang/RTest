@@ -246,10 +246,10 @@ public sealed class SourceSelectorService : IDisposable
   }
 
   /// <summary>
-  /// Sets the band and restores that band's last-tuned frequency, through the one band change the
-  /// API's <c>POST /api/radio/band</c> also uses (<see cref="RadioBandSwitch"/>, AUD-105): the band
-  /// being left is remembered first, and nothing is restored unless the tuner reports the new band
-  /// afterwards. The row for an unsupported band is normally dimmed by <c>SupportedBands</c>
+  /// Sets the band at that band's last-tuned frequency, through the one band change the API's
+  /// <c>POST /api/radio/band</c> also uses (<see cref="RadioBandSwitch"/>, AUD-105): the band being
+  /// left is remembered first, the band and its frequency are one in-band tune, and the band is read
+  /// back afterwards (a tuner that stays elsewhere makes it return false, which is not used here). The row for an unsupported band is normally dimmed by <c>SupportedBands</c>
   /// composition and never reaches here; the read-back covers a tuner swapped underneath a composed
   /// list, or one that silently declines.
   /// </summary>
