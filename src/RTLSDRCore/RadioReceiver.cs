@@ -12,7 +12,7 @@ namespace RTLSDRCore;
   /// <summary>
   /// Main radio receiver class that coordinates hardware, signal processing, and audio output
   /// </summary>
-  public class RadioReceiver : IRadioControl, IDisposable
+  public partial class RadioReceiver : IRadioControl, IDisposable
   {
       private readonly ILogger Logger;
 
@@ -33,6 +33,14 @@ namespace RTLSDRCore;
       // Replaced as a whole by SetupSignalProcessing; the DSP thread reads it once per block.
       // Never non-null at the same time as _amChain once a setup has finished.
       private volatile NfmReceiveChain? _nfmChain;
+
+      // AUD-106: the FM acquisition watchdog. _fmStart is replaced (as a whole) each time a WFM chain
+      // is built, carrying why; the DSP thread compares it with the last one it saw to open a start
+      // window. _pendingFmStart is the reason the next WFM chain records, set under _lock by the
+      // caller that builds it (null: a band change).
+      private volatile FmChainStart? _fmStart;
+      private FmChainStart? _watchedFmStart;
+      private FmChainStart? _pendingFmStart;
       // Counts the receiver's tunes of the device. Each IQ block is stamped with the value current
       // when the USB thread raised it (OnSamplesAvailable), and the AM chain re-seeds its DC
       // blocker and AGC on the second block stamped with a new value (AmReceiveChain.BeginBlock).
@@ -391,6 +399,7 @@ namespace RTLSDRCore;
 
                   // Setup signal processing chain first (calculates the
                   // appropriate SDR sample rate for the current modulation)
+                  _pendingFmStart = new FmChainStart("start-up", ByRecovery: false);
                   SetupSignalProcessing();
 
                   // AUD-99: the HF mode first (AM/SW on, every other band off),
@@ -1244,6 +1253,7 @@ namespace RTLSDRCore;
               // affects bandwidth, demod rate, and filter configuration.
               if (_state == ReceiverState.Running || _state == ReceiverState.Scanning)
               {
+                  _pendingFmStart = new FmChainStart("modulation change", ByRecovery: false);
                   SetupSignalProcessing();
 
                   // AUD-101: the new modulation may start or stop using the AM chain, which
@@ -2043,11 +2053,15 @@ namespace RTLSDRCore;
               _rdsDecoder = new RdsDecoder(_demodSampleRate);
               _rdsDecoder.StationNameDecoded += OnRdsDecoderStationNameDecoded;
               _rdsDecoder.ProgramIdChanged += OnRdsDecoderProgramIdChanged;
+              // AUD-106: a new WFM chain is an FM start for the acquisition watchdog.
+              _fmStart = _pendingFmStart ?? new FmChainStart("band change", ByRecovery: false);
+              _pendingFmStart = null;
           }
           else
           {
               _stereoDecoder = null;
               _rdsDecoder = null;
+              _pendingFmStart = null;
           }
 
           // Step 6: De-emphasis filter (compensates FM pre-emphasis).
@@ -2148,6 +2162,7 @@ namespace RTLSDRCore;
       /// </summary>
       private void SetupAmSignalProcessing(int bandwidth)
       {
+          _pendingFmStart = null;   // AUD-106: the reason was for an FM chain; this is not one
           // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
           const int maxIqChunk = 16384;
           var chain = new AmReceiveChain(_sdrSampleRate, bandwidth, maxIqChunk);
@@ -2188,6 +2203,7 @@ namespace RTLSDRCore;
       /// </summary>
       private void SetupNfmSignalProcessing(int bandwidth)
       {
+          _pendingFmStart = null;   // AUD-106: the reason was for an FM chain; this is not one
           // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
           const int maxIqChunk = 16384;
           var chain = new NfmReceiveChain(_sdrSampleRate, bandwidth, maxIqChunk);
@@ -2498,6 +2514,9 @@ namespace RTLSDRCore;
               _rdsDecoder?.Process(
                   _demodBuffer.AsSpan(0, demodCount), demodCount,
                   pllPhaseForRds, pllFreqForRds);
+
+              // AUD-106: judge the acquisition (pilot, RDS) while the composite is still intact.
+              ObserveFmAcquisition(samples, tuneGeneration, _demodBuffer.AsSpan(0, demodCount));
 
               // 3b. De-emphasis per channel: de-interleave → process → re-interleave.
               // DeEmphasisFilter.Process works in-place on contiguous spans, so we

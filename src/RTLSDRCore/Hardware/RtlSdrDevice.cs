@@ -63,6 +63,27 @@ namespace RTLSDRCore.Hardware;
       /// <inheritdoc/>
       public bool IsHfMode => _isOpen && _directSamplingMode > 0;
 
+      /// <inheritdoc/>
+      /// <remarks><c>rtlsdr_get_direct_sampling</c>; null when closed or when it returns an error (negative).</remarks>
+      public int? ReadLiveDirectSamplingMode()
+      {
+          if (!_isOpen)
+          {
+              return null;
+          }
+
+          try
+          {
+              int mode = NativeMethods.rtlsdr_get_direct_sampling(_deviceHandle);
+              return mode < 0 ? null : mode;
+          }
+          catch (Exception ex)
+          {
+              Logger.Debug(ex, "rtlsdr_get_direct_sampling failed on RTL-SDR device {Index}", _deviceIndex);
+              return null;
+          }
+      }
+
       private DirectSamplingMode HfInput => _deviceInfo?.HfDirectSampling ?? DirectSamplingMode.Off;
 
       /// <inheritdoc/>

@@ -79,6 +79,14 @@ namespace RTLSDRCore.Hardware;
       bool SetHfMode(bool on);
 
       /// <summary>
+      /// Reads the direct-sampling mode from the driver now (AUD-106's diagnostic snapshot), rather
+      /// than the mode recorded at the last switch that <see cref="IsHfMode"/> reports: 0 off, 1 the
+      /// I branch, 2 the Q branch. Null when the device cannot say (closed, or an implementation
+      /// without a driver to ask). Diagnostic only; nothing decides on it.
+      /// </summary>
+      int? ReadLiveDirectSamplingMode() => null;
+
+      /// <summary>
       /// Gets the current center frequency
       /// </summary>
       /// <returns>Frequency in Hz</returns>

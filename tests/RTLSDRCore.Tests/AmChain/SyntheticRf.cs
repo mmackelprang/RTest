@@ -11,7 +11,12 @@ namespace RTLSDRCore.Tests.AmChain;
 /// <param name="ToneHz">Modulating tone, in Hz; 0 for an unmodulated carrier.</param>
 /// <param name="AmDepth">AM depth (0.5 = 50 %). Ignored when <paramref name="FmDeviationHz"/> is set.</param>
 /// <param name="FmDeviationHz">FM peak deviation, in Hz; 0 for AM.</param>
-internal sealed record Transmitter(long RfHz, float Amplitude, double ToneHz = 0, double AmDepth = 0, double FmDeviationHz = 0);
+/// <param name="PilotDeviationHz">
+/// FM only: the deviation a 19 kHz stereo pilot adds, in Hz (broadcast FM uses about 10 % of 75 kHz,
+/// 7.5 kHz); 0 for a mono station (AUD-106).
+/// </param>
+internal sealed record Transmitter(long RfHz, float Amplitude, double ToneHz = 0, double AmDepth = 0, double FmDeviationHz = 0,
+  double PilotDeviationHz = 0);
 
 /// <summary>
 /// Synthesises the IQ a device tuned to a given centre would capture from a set of transmitters,
@@ -32,6 +37,7 @@ internal sealed class SyntheticRf
     _random = new Random(seed);
   }
 
+  /// <summary>The transmitters on the air. Tests may replace one between blocks (the DSP thread does not read it).</summary>
   public List<Transmitter> Transmitters { get; } = new();
 
   /// <summary>Constant DC offset at the device centre (I component; the spike of a direct-conversion front end).</summary>
@@ -69,6 +75,10 @@ internal sealed class SyntheticRf
         if (tx.FmDeviationHz > 0 && tx.ToneHz > 0)
         {
           phase -= tx.FmDeviationHz / tx.ToneHz * Math.Cos(2.0 * Math.PI * tx.ToneHz * t);
+          if (tx.PilotDeviationHz > 0)
+          {
+            phase -= tx.PilotDeviationHz / 19_000.0 * Math.Cos(2.0 * Math.PI * 19_000.0 * t);
+          }
         }
         else if (tx.ToneHz > 0)
         {
