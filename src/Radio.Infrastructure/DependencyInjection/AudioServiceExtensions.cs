@@ -136,13 +136,20 @@ public static class AudioServiceExtensions
       () => sp.GetRequiredService<IAudioManager>().GetCachedSource(AudioSourceType.Radio) as ILiveBandSweeper,
       () => sp.GetService<ISleepService>(),
       // AUD-99: the idle sweep's device gets the same RTLSDR:HfDirectSampling decision as the radio's.
-      deviceFactory: () => SdrHfConfiguration.CreateFirstRtlSdrOrNull(
-        SdrHfConfiguration.Read(sp.GetService<IConfiguration>() ?? configuration, sp.GetService<ILogger<BandMapService>>())),
+      deviceFactory: SdrHfConfiguration.IdleSweepDeviceFactory(
+        () => sp.GetService<IConfiguration>() ?? configuration, sp.GetService<ILogger<BandMapService>>()),
       timeProvider: sp.GetService<TimeProvider>(),
       currentTuning: () =>
         sp.GetRequiredService<IAudioManager>().GetCachedSource(AudioSourceType.Radio) is Radio.Core.Interfaces.Audio.IRadioControl radio
           ? new BandMapTuning(radio.CurrentBand.ToString(), radio.CurrentFrequency.Hertz)
-          : null));
+          : null,
+      // AUD-103: the device the band list's receivable flag reads decides which bands can be swept.
+      // Resolved per call: RadioFactory takes IScanStationMap, i.e. this service.
+      receivingDevice: () => Radio.Infrastructure.Services.SdrReceivingDevice.Find(sp.GetService<IRadioFactory>()),
+      // AUD-103: off SW, Discover on SW sweeps the broadcast segment nearest the SW band memory.
+      // GetAsync reads the configuration store and catches its own failures.
+      shortwaveMemoryHz: () => sp.GetService<IRadioBandMemory>()?.GetAsync(Radio.Core.Models.Audio.RadioBand.SW)
+        .GetAwaiter().GetResult()?.Hertz));
     services.AddHostedService(sp => sp.GetRequiredService<BandMapService>());
     // AUD-100: Scan Up/Down reads and writes the same maps. RadioFactory's optional
     // IScanStationMap parameter is filled from this registration.

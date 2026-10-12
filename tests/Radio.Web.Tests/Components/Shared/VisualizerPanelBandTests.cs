@@ -1383,6 +1383,65 @@ public class VisualizerPanelBandTests : TestContext
     cut.Find(".band-strip-range").TextContent.Should().Be("161.5–163.5 MHz");
   }
 
+  /// <summary>An SW map of the 31 m segment (AUD-103), with the segment name the API sends, or none.</summary>
+  private static object SwMap(string? segment) => new
+  {
+    band = "SW",
+    mappable = true,
+    segment,
+    displayMinHz = 9_400_000L,
+    displayMaxHz = 9_900_000L,
+    firstChannelHz = 9_400_000L,
+    lastChannelHz = 9_900_000L,
+    channelSpacingHz = 5_000L,
+    scannedAtUtc = DateTimeOffset.UtcNow.AddSeconds(-180),
+    ageSeconds = 180.0,
+    channels = Enumerable.Range(0, 101)
+      .Select(i => (object)new { frequencyHz = 9_400_000L + i * 5_000L, levelDbfs = i == 40 ? -38f : -50f })
+      .ToArray(),
+    sweep = Sweep(),
+  };
+
+  [Fact]
+  public void Strip_Sw_NamesItsSegment_AndShowsTheSegmentsRange_NotTheBand()
+  {
+    // AUD-103: SW's map is one broadcast segment, presented as VHF's window is, named in the band text.
+    BandList(("SW", "1711–30000 kHz"));
+    GetJson("/api/radio/bandmap", SwMap("31 m"));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("SW 31 m"));
+    cut.Find(".band-strip-range").TextContent.Should().Be("9400–9900 kHz");
+    cut.FindAll(".band-strip-window").Should().BeEmpty("the segment's name says what part of the band it is");
+  }
+
+  [Fact]
+  public void Strip_Sw_WithNoSegmentNamed_IsTheBandAsBefore()
+  {
+    BandList(("SW", "1711–30000 kHz"));
+    GetJson("/api/radio/bandmap", SwMap(null));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("SW"));
+    cut.Find(".band-strip-range").TextContent.Should().Be("1711–30000 kHz");
+  }
+
+  [Fact]
+  public void Strip_MappableAm_IsTheWholeBand()
+  {
+    BandList(("AM", "530–1710 kHz"));
+    GetJson("/api/radio/bandmap", BandMap("AM", 530_000, 1_710_000, 530_000, 1_710_000, 10_000,
+      Enumerable.Range(0, 119).Select(i => (object)new { frequencyHz = 530_000L + i * 10_000L, levelDbfs = -50f })));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("AM"));
+    cut.Find(".band-strip-range").TextContent.Should().Be("530–1710 kHz");
+    cut.FindAll(".band-status-unavailable").Should().BeEmpty();
+  }
+
   /// <summary>
   /// The help lines as seen (visually-hidden words removed) and as read (aria-hidden glyphs removed), with
   /// whitespace collapsed.

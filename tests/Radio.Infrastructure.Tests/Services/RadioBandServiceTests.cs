@@ -145,9 +145,9 @@ public class RadioBandServiceTests
       "The Shortwave band (1.711–30 MHz) is mostly below this tuner's 24 MHz lower limit and cannot be received.",
       sw.UnavailableReason);
 
-    // The same sentence the band map shows today, but for its last two words.
+    // The same sentence the band map shows for this device, but for its last two words.
     Assert.Equal(
-      BandSweepPlans.UnavailableReason(BandType.AM)!.Replace("cannot be scanned.", "cannot be received.", StringComparison.Ordinal),
+      BandSweepPlans.UnavailableReason(BandType.AM, RtlSdrDevice.TunerMinFrequencyHz, 1_766_000_000)!.Replace("cannot be scanned.", "cannot be received.", StringComparison.Ordinal),
       am.UnavailableReason);
 
     Assert.All(bands.Where(b => b.Type is not ("AM" or "SW")), b =>

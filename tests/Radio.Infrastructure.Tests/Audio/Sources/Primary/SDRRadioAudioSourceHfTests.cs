@@ -120,6 +120,37 @@ public class SDRRadioAudioSourceHfTests
     Assert.Null(source.LiveSweepRefusal(am));
   }
 
+  [Fact]
+  public async Task LiveSeek_OnAm_StepsPastThe960KhzSpur_AndStopsEverywhereElse()
+  {
+    // AUD-103 review M1: the radio source gives the receiver the band map's spur table, so a live seek
+    // on AM never stops on 960 kHz however strong it reads. Threshold 0: every other step is a stop.
+    RadioReceiver receiver = new(new MockSdrDevice());
+    Assert.True(receiver.SetBand(BandType.AM, 940_000));
+    Assert.True(receiver.Startup());
+    receiver.ScanPauseMs = 0;
+    await using SDRRadioAudioSource source = CreateSource(receiver);
+    List<long> tunes = new();
+    List<long> found = new();
+    receiver.FrequencyChanged += (_, e) => tunes.Add(e.NewFrequency);
+    receiver.SeekStationFound += (_, e) => found.Add(e.FrequencyHz);
+
+    Task scan = Task.Run(() => receiver.ScanFrequencyUp(stepHz: 10_000, signalThreshold: 0f, dwellTimeMs: 0));
+    // A fail-safe, not an assertion: the scan ends by going round.
+    if (await Task.WhenAny(scan, Task.Delay(TimeSpan.FromSeconds(30))) != scan)
+    {
+      receiver.CancelScan();
+      Assert.Fail("The scan did not end within the fail-safe.");
+    }
+    await scan;
+
+    Assert.Contains(960_000, tunes);
+    Assert.DoesNotContain(960_000, found);
+    Assert.Contains(1_030_000, found);
+    Assert.Equal(tunes.Where(hz => hz != 960_000), found);
+    receiver.Shutdown();
+  }
+
   [Theory]
   [InlineData(null, HfDirectSamplingSetting.Auto)]
   [InlineData("Auto", HfDirectSamplingSetting.Auto)]
@@ -152,6 +183,25 @@ public class SDRRadioAudioSourceHfTests
     Assert.Equal(HfDirectSamplingSetting.Auto, SdrHfConfiguration.Read(configuration, logger.Object));
     logger.Verify(l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
       It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+  }
+
+  [Fact]
+  public void IdleSweepDeviceFactory_OpensWithTheConfiguredSetting_ReadOnEveryCall()
+  {
+    // AUD-103 review L5: the idle band sweep's device gets RTLSDR:HfDirectSampling, not Auto, and a
+    // changed value applies to the next open.
+    IConfiguration configuration = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?> { ["RTLSDR:HfDirectSampling"] = "Off" })
+      .Build();
+    List<HfDirectSamplingSetting> opened = new();
+    Func<ISdrDevice?> factory = SdrHfConfiguration.IdleSweepDeviceFactory(
+      () => configuration, NullLogger.Instance, setting => { opened.Add(setting); return _device.Object; });
+
+    Assert.Same(_device.Object, factory());
+    configuration["RTLSDR:HfDirectSampling"] = "Q";
+    factory();
+
+    Assert.Equal(new[] { HfDirectSamplingSetting.Off, HfDirectSamplingSetting.Q }, opened);
   }
 
   [Fact]

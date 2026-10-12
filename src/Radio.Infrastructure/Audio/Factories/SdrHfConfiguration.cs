@@ -38,6 +38,25 @@ public static class SdrHfConfiguration
   }
 
   /// <summary>
+  /// The idle band sweep's device factory (AUD-103 review, L5): each call reads the setting afresh from
+  /// <paramref name="configuration"/> with <see cref="Read"/> and creates the device with it. After a
+  /// change of the setting the idle sweep sees it on its next open, while the radio applies it only at
+  /// its next start and the band map's reason within <c>BandMapService.ReceivingDeviceCacheDuration</c>.
+  /// </summary>
+  /// <param name="configuration">Returns the application configuration; it may return null (read as absent).</param>
+  /// <param name="logger">Receives <see cref="Read"/>'s warning; may be null.</param>
+  /// <param name="create">Creates the device for a setting; <see cref="CreateFirstRtlSdrOrNull"/> when omitted.</param>
+  public static Func<ISdrDevice?> IdleSweepDeviceFactory(
+    Func<IConfiguration?> configuration,
+    ILogger? logger,
+    Func<HfDirectSamplingSetting, ISdrDevice?>? create = null)
+  {
+    ArgumentNullException.ThrowIfNull(configuration);
+    Func<HfDirectSamplingSetting, ISdrDevice?> createDevice = create ?? CreateFirstRtlSdrOrNull;
+    return () => createDevice(Read(configuration(), logger));
+  }
+
+  /// <summary>
   /// Creates the first enumerated RTL-SDR (unopened) with <paramref name="setting"/>, or null when
   /// there is none. Unlike <see cref="SdrDeviceFactory.CreateFirstAvailable()"/> it never falls back to
   /// the mock device.

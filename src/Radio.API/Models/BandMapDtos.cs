@@ -33,6 +33,12 @@ public sealed record BandMapResponseDto
   /// <summary>Channel grid spacing, in Hz (the band's default tuning step when not mappable).</summary>
   public long ChannelSpacingHz { get; init; }
 
+  /// <summary>
+  /// SW only (AUD-103): the broadcast segment the axis shows, e.g. <c>31 m</c>; null on every other
+  /// band, and on SW when the axis is not one segment's edges.
+  /// </summary>
+  public string? Segment { get; init; }
+
   /// <summary>When the stored map was produced, UTC, or null when there is no map.</summary>
   public DateTimeOffset? ScannedAtUtc { get; init; }
 
@@ -77,7 +83,10 @@ public sealed record BandMapChannelDto(long FrequencyHz, float LevelDbfs);
 
 /// <summary>A station a live seek stopped on (AUD-100).</summary>
 /// <param name="FrequencyHz">Where the seek stopped, in Hz.</param>
-/// <param name="SeekStrength">The seek's own wideband signal reading, 0 to about 1.4; not comparable with <see cref="BandMapChannelDto.LevelDbfs"/>.</param>
+/// <param name="SeekStrength">
+/// The seek's own signal reading: on AM and SW the in-channel scale, 0 to 1; elsewhere the wideband
+/// reading, 0 to about 1.4. Not comparable with <see cref="BandMapChannelDto.LevelDbfs"/>.
+/// </param>
 /// <param name="ObservedAtUtc">When, UTC.</param>
 public sealed record BandMapSeekStationDto(long FrequencyHz, float SeekStrength, DateTimeOffset ObservedAtUtc);
 

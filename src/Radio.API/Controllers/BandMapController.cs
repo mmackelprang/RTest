@@ -49,15 +49,18 @@ public class BandMapController : ControllerBase
     }
 
     string code = BandSweepPlans.BandCode(bandType);
-    BandMap? map = _bandMap.GetMap(code);
+    // AUD-103: a band this device cannot sweep is served without channels, even if a map of it is
+    // stored (one swept with another dongle, say): the BAND view shows it as out of range.
+    BandMap? map = _bandMap.UnavailableReason(bandType) == null ? _bandMap.GetMap(code) : null;
     BandMapResponseDto dto = BandMapResponseDto.From(map, _bandMap.GetAge(map), _bandMap.GetStatus(), _bandMap.GetSeekStations(code));
     return Ok(WithAxis(dto with { Band = code }, bandType, map));
   }
 
   /// <summary>
   /// Requests a sweep of a band. While the radio is playing, the receiver silences its output for
-  /// the sweep (about 21 s for the 101 FM channels, about 30 s for AIR, seconds for WB and VHF)
-  /// and then retunes to its current frequency.
+  /// the sweep (about 21 s for the 101 FM channels, about 30 s for AIR, seconds for WB, VHF, AM and
+  /// SW) and then retunes to its current frequency. AM and SW are swept with HF direct sampling, so
+  /// while the radio plays one of them only AM or SW can be swept live, and the reverse (AUD-99).
   /// </summary>
   /// <param name="band">Band code (AM, FM, SW, AIR, WB, VHF); omitted for the radio's current band.</param>
   /// <returns>The sweep status.</returns>
@@ -80,7 +83,7 @@ public class BandMapController : ControllerBase
       return InvalidBand(band);
     }
 
-    string? unavailable = BandSweepPlans.UnavailableReason(bandType);
+    string? unavailable = _bandMap.UnavailableReason(bandType);
     if (unavailable != null)
     {
       return Conflict(new { error = unavailable });
@@ -124,9 +127,10 @@ public class BandMapController : ControllerBase
 
   /// <summary>
   /// Fills the axis fields. A mappable band uses its sweep plan; a stored map that recorded its
-  /// range (VHF's window, which follows the radio) overrides the plan's display range and
-  /// spacing, and VHF's first and last channel are then the window's edges. A band that cannot
-  /// be scanned uses its preset range and default step.
+  /// range (VHF's window or SW's segment, which follow the radio) overrides the plan's display range
+  /// and spacing, and the first and last channel of such a band are then the stored range's edges.
+  /// SW also names the broadcast segment the axis shows (<see cref="BandMapResponseDto.Segment"/>).
+  /// A band that cannot be scanned uses its preset range and default step.
   /// </summary>
   private BandMapResponseDto WithAxis(BandMapResponseDto dto, BandType bandType, BandMap? map)
   {
@@ -138,7 +142,7 @@ public class BandMapController : ControllerBase
       return dto with
       {
         Mappable = false,
-        UnavailableReason = BandSweepPlans.UnavailableReason(bandType),
+        UnavailableReason = _bandMap.UnavailableReason(bandType),
         DisplayMinHz = preset.MinFrequencyHz,
         DisplayMaxHz = preset.MaxFrequencyHz,
         FirstChannelHz = preset.MinFrequencyHz,
@@ -150,17 +154,18 @@ public class BandMapController : ControllerBase
     bool storedRange = map != null && map.RangeMinHz > 0 && map.RangeMaxHz > map.RangeMinHz;
     long displayMin = storedRange ? map!.RangeMinHz : plan.DisplayMinHz;
     long displayMax = storedRange ? map!.RangeMaxHz : plan.DisplayMaxHz;
-    // VHF's display range is its first-to-last channel window (BandSweepPlans.For).
-    bool vhfStored = storedRange && bandType == BandType.VHF;
+    // VHF's and SW's display range is their first-to-last channel window (BandSweepPlans.For).
+    bool windowStored = storedRange && BandSweepPlans.FollowsRadio(bandType);
     return dto with
     {
       Mappable = true,
       UnavailableReason = null,
       DisplayMinHz = displayMin,
       DisplayMaxHz = displayMax,
-      FirstChannelHz = vhfStored ? displayMin : plan.Channels[0],
-      LastChannelHz = vhfStored ? displayMax : plan.Channels[^1],
+      FirstChannelHz = windowStored ? displayMin : plan.Channels[0],
+      LastChannelHz = windowStored ? displayMax : plan.Channels[^1],
       ChannelSpacingHz = map != null && map.ChannelSpacingHz > 0 ? map.ChannelSpacingHz : plan.ChannelSpacingHz,
+      Segment = bandType == BandType.Shortwave ? ShortwaveSegments.WithEdges(displayMin, displayMax)?.Name : null,
     };
   }
 }

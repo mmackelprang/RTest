@@ -888,7 +888,14 @@ namespace RTLSDRCore;
         }
 
         float strength = _lastSignalStrength;
-        if (strength >= signalThreshold)
+        // AUD-103: a frequency the caller marks as never a station (a known device spur) is
+        // stepped past whatever it reads: no pause, no SeekStationFound.
+        if (strength >= signalThreshold && IsSeekSkipped(_currentFrequencyHz))
+        {
+          Logger.Debug("Seek passed {Frequency} (strength {Strength:F3}): not a station (SeekSkips)",
+              RadioBand.FormatFrequency(_currentFrequencyHz), strength);
+        }
+        else if (strength >= signalThreshold)
                   {
                       Logger.Information("Signal found at {Frequency} (strength: {Strength:F3}, threshold: {Threshold:F2}), pausing {PauseMs}ms",
                           RadioBand.FormatFrequency(_currentFrequencyHz), strength, signalThreshold, ScanPauseMs);
@@ -1042,6 +1049,36 @@ namespace RTLSDRCore;
       /// <see cref="ScanStations"/>.
       /// </summary>
       public int ScanPauseMs { get; set; } = 2000;
+
+      /// <summary>
+      /// Frequencies a live seek (<see cref="ScanFrequencyUp"/>, <see cref="ScanFrequencyDown"/>)
+      /// must never stop on, however strong they read (AUD-103): true for a frequency that is not a
+      /// station. The seek steps past such a frequency without pausing and without raising
+      /// <see cref="SeekStationFound"/>. Null, the default, skips nothing. The receiver keeps no list
+      /// of its own; the caller supplies one. A predicate that throws is logged at Warning and the
+      /// frequency is treated as not skipped.
+      /// </summary>
+      public Func<long, bool>? SeekSkips { get; set; }
+
+      private bool IsSeekSkipped(long frequencyHz)
+      {
+          Func<long, bool>? skips = SeekSkips;
+          if (skips == null)
+          {
+              return false;
+          }
+
+          try
+          {
+              return skips(frequencyHz);
+          }
+          catch (Exception ex)
+          {
+              Logger.Warning(ex, "The SeekSkips predicate threw at {Frequency}; treating it as a station candidate",
+                  RadioBand.FormatFrequency(frequencyHz));
+              return false;
+          }
+      }
 
       /// <summary>
       /// Raised by a live seek (<see cref="ScanFrequencyUp"/>,

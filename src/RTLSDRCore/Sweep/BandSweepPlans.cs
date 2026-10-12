@@ -1,6 +1,5 @@
 using RTLSDRCore.Bands;
 using RTLSDRCore.Enums;
-using RTLSDRCore.Hardware;
 using RTLSDRCore.Models;
 
 namespace RTLSDRCore.Sweep;
@@ -14,13 +13,22 @@ namespace RTLSDRCore.Sweep;
 /// either side of the centre.
 /// </para>
 /// <para>
-/// WB, AIR and VHF are narrowband: several channels are measured from one capture. Consecutive
-/// channels are grouped so that every channel's measurement window lies within
+/// WB, AIR, VHF, AM and SW are narrowband: several channels are measured from one capture.
+/// Consecutive channels are grouped so that every channel's measurement window lies within
 /// <see cref="NarrowbandMaxOffsetHz"/> of the tuned centre, and the centre sits at least half a
 /// channel spacing from every channel in the group, so no channel is measured at DC.
 /// </para>
 /// <para>
-/// AM, SW and custom bands have no plan. See <see cref="UnavailableReason"/>.
+/// AM (AUD-103) is the whole band, 530 to 1710 kHz on the 10 kHz grid. SW is one broadcast segment
+/// at a time (<see cref="ShortwaveSegments"/>), at 5 kHz: the one containing, or nearest to, the
+/// radio's frequency. Like VHF's window it follows the radio (<see cref="FollowsRadio"/>). Both are
+/// grouped differently from WB, AIR and VHF: each tune's channels lie on one side of its centre, no
+/// window nearer than <see cref="HfDcClearanceHz"/> to it, because in HF direct sampling the
+/// RTL2832U's DC spike sits on every tune centre (<see cref="HfGroupSize"/>).
+/// </para>
+/// <para>
+/// Custom bands have no plan. Whether a device can sweep a band is a separate question, answered
+/// by <see cref="UnavailableReason"/> from that device's range.
 /// </para>
 /// </remarks>
 public static class BandSweepPlans
@@ -51,6 +59,37 @@ public static class BandSweepPlans
 
   /// <summary>Channel spacing of the VHF plan, in Hz.</summary>
   public const long VhfChannelSpacingHz = 12_500;
+
+  /// <summary>Channel spacing of the AM plan (the US 10 kHz grid), in Hz.</summary>
+  public const long AmChannelSpacingHz = 10_000;
+
+  /// <summary>Channel spacing of the SW plan (the HF broadcast grid), in Hz.</summary>
+  public const long SwChannelSpacingHz = 5_000;
+
+  /// <summary>
+  /// AM and SW only (AUD-103 review, M2): the least distance between a tune centre and the nearest
+  /// edge of any channel's measurement window, in Hz. Each HF channel's carrier is therefore at least
+  /// <see cref="NarrowbandHalfWindowHz"/> + this from the tune centre.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// In HF direct sampling the RTL2832U's DC spike sits on every tune centre. <see cref="CreateNarrowband"/>
+  /// puts the nearest channels half a spacing from the centre, which on the 10 kHz AM grid brings their
+  /// ±4 kHz windows to the edge of the ±1 kHz DC exclusion and on the 5 kHz SW grid into it, so a spike
+  /// that leaks past 1 kHz raises the two channels either side of each centre together, and they read as
+  /// peaks. The radio itself tunes 60 kHz below an AM/SW frequency for the same reason (AUD-101); the
+  /// sweep has no audio filter to protect, only its own ±4 kHz windows, so it needs less.
+  /// </para>
+  /// <para>
+  /// 12 kHz, because it is the largest value from the 10 to 15 kHz the review asked for that costs
+  /// nothing over the smallest: with the windows' far edge at <see cref="NarrowbandMaxOffsetHz"/>, the
+  /// carriers lie 16 to 96 kHz from the centre, which holds 9 AM channels or 17 SW channels per tune,
+  /// the same as 10 kHz would (15 kHz drops that to 8 and 16). At 117 Hz per FFT bin it is about 100
+  /// bins of clearance. The spike's real width in direct sampling has not been measured; the box UAT's
+  /// paired-rise check is that measurement.
+  /// </para>
+  /// </remarks>
+  public const int HfDcClearanceHz = 12_000;
 
   private static readonly (BandType Type, string Code)[] Codes =
   {
@@ -100,44 +139,51 @@ public static class BandSweepPlans
   }
 
   /// <summary>
-  /// The sweep plan for <paramref name="band"/>, or null when <see cref="UnavailableReason"/> is not null.
+  /// The sweep plan for <paramref name="band"/>: one for every preset band, null for
+  /// <see cref="BandType.Custom"/> and undefined values. It does not ask whether a device can sweep
+  /// it; <see cref="UnavailableReason"/> does.
   /// </summary>
   /// <param name="band">The band.</param>
   /// <param name="currentFrequencyHz">
-  /// The radio's frequency. Used only by VHF, whose plan is a ±1 MHz window around it: centred on
-  /// the nearest 12.5 kHz grid point and moved, not shrunk, to stay inside the band. When null or
-  /// outside the band, the window is the band's lowest 2 MHz (30 to 32 MHz).
+  /// The radio's frequency. Used only by the plans that follow the radio (<see cref="FollowsRadio"/>).
+  /// VHF's plan is a ±1 MHz window around it: centred on the nearest 12.5 kHz grid point and moved,
+  /// not shrunk, to stay inside the band; when null or outside the band, the window is the band's
+  /// lowest 2 MHz (30 to 32 MHz). SW's plan is the broadcast segment containing it, or else the
+  /// nearest one (<see cref="ShortwaveSegments.Nearest"/>); when null or outside the band, the
+  /// segment nearest the band's lower edge (120 m).
   /// </param>
-  public static BandSweepPlan? For(BandType band, long? currentFrequencyHz)
+  public static BandSweepPlan? For(BandType band, long? currentFrequencyHz) => band switch
   {
-    if (UnavailableReason(band) != null)
-    {
-      return null;
-    }
-
-    return band switch
-    {
-      BandType.FM => CreateFm(),
-      BandType.Weather => CreateWeather(),
-      BandType.Aircraft => CreateAircraft(),
-      BandType.VHF => CreateVhf(currentFrequencyHz),
-      _ => null,
-    };
-  }
+    BandType.FM => CreateFm(),
+    BandType.Weather => CreateWeather(),
+    BandType.Aircraft => CreateAircraft(),
+    BandType.VHF => CreateVhf(currentFrequencyHz),
+    BandType.AM => CreateAm(),
+    BandType.Shortwave => CreateShortwave(currentFrequencyHz),
+    _ => null,
+  };
 
   /// <summary>
-  /// Why <paramref name="band"/> cannot be swept, as a sentence for the owner, or null when it can.
-  /// A preset band can be swept only when its whole range is within
-  /// <see cref="RtlSdrDevice.TunerMinFrequencyHz"/> to <see cref="RtlSdrDevice.TunerMaxFrequencyHz"/>.
+  /// True for the bands whose plan is a window that follows the radio's frequency rather than the
+  /// whole band: VHF and SW. A stored map of such a band records which window it swept.
+  /// </summary>
+  public static bool FollowsRadio(BandType band) => band is BandType.VHF or BandType.Shortwave;
+
+  /// <summary>
+  /// Why a device whose receivable range is <paramref name="deviceMinHz"/> to
+  /// <paramref name="deviceMaxHz"/> cannot sweep <paramref name="band"/>, as a sentence for the
+  /// owner, or null when it can: when the band's whole range is inside the device's.
   /// </summary>
   /// <remarks>
   /// The sentence comes from <see cref="BandReception.UnavailableReason"/>, the function the band
-  /// list's receivable flag uses (AUD-102), given the tuner's fixed range rather than a device's.
-  /// AUD-103 is to pass the device's range here instead, once AM and SW have sweep plans.
+  /// list's receivable flag uses (AUD-102), ending "cannot be scanned". AUD-103: the caller passes
+  /// the device's range (an RTL-SDR with HF direct sampling reaches 100 kHz, one without it 24 MHz).
   /// </remarks>
-  public static string? UnavailableReason(BandType band) =>
-    BandReception.UnavailableReason(
-      band, RtlSdrDevice.TunerMinFrequencyHz, RtlSdrDevice.TunerMaxFrequencyHz, cannot: "scanned");
+  /// <param name="band">The band. <see cref="BandType.Custom"/> always gets a sentence.</param>
+  /// <param name="deviceMinHz">The device's lowest receivable frequency, in Hz.</param>
+  /// <param name="deviceMaxHz">The device's highest receivable frequency, in Hz.</param>
+  public static string? UnavailableReason(BandType band, long deviceMinHz, long deviceMaxHz) =>
+    BandReception.UnavailableReason(band, deviceMinHz, deviceMaxHz, cannot: "scanned");
 
   /// <summary>
   /// Groups a uniform channel grid into narrowband tunes: groups of up to the largest count whose
@@ -194,6 +240,54 @@ public static class BandSweepPlans
     return n < 2 ? 1 : (int)n;
   }
 
+  /// <summary>
+  /// Channels per HF tune (<see cref="CreateHfNarrowband"/>) for <paramref name="spacingHz"/>: the
+  /// largest n whose carriers fit from <see cref="NarrowbandHalfWindowHz"/> + <see cref="HfDcClearanceHz"/>
+  /// to <see cref="NarrowbandMaxOffsetHz"/> − <see cref="NarrowbandHalfWindowHz"/> on one side of the
+  /// centre, at least 1. 9 at 10 kHz (AM), 17 at 5 kHz (SW).
+  /// </summary>
+  public static int HfGroupSize(long spacingHz)
+  {
+    ArgumentOutOfRangeException.ThrowIfNegativeOrZero(spacingHz);
+    long span = (NarrowbandMaxOffsetHz - NarrowbandHalfWindowHz) - (NarrowbandHalfWindowHz + HfDcClearanceHz);
+    return (int)Math.Max(1, span / spacingHz + 1);
+  }
+
+  /// <summary>
+  /// AM and SW (AUD-103 review, M2): groups a uniform channel grid into tunes of up to
+  /// <see cref="HfGroupSize"/> consecutive channels, each tuned <see cref="NarrowbandHalfWindowHz"/> +
+  /// <see cref="HfDcClearanceHz"/> below its first channel, so the whole group lies on one side of the
+  /// centre and no window comes within <see cref="HfDcClearanceHz"/> of it.
+  /// </summary>
+  /// <remarks>
+  /// One-sided because a plan's channels, concatenated across its tunes, must ascend
+  /// (<see cref="BandSweepPlan"/>): a tune cannot measure channels on both sides of its centre and leave
+  /// a hole around the centre for another tune to fill. The plan keeps the narrowband window and DC
+  /// exclusion; no window reaches the exclusion.
+  /// </remarks>
+  private static BandSweepPlan CreateHfNarrowband(
+    string band, long firstChannelHz, int channelCount, long spacingHz, long displayMinHz, long displayMaxHz)
+  {
+    int groupSize = HfGroupSize(spacingHz);
+    long nearestOffset = NarrowbandHalfWindowHz + HfDcClearanceHz;
+    List<SweepTune> tunes = new();
+    for (int start = 0; start < channelCount; start += groupSize)
+    {
+      int count = Math.Min(groupSize, channelCount - start);
+      long[] channels = new long[count];
+      for (int i = 0; i < count; i++)
+      {
+        channels[i] = firstChannelHz + (start + i) * spacingHz;
+      }
+
+      tunes.Add(new SweepTune(channels[0] - nearestOffset, channels));
+    }
+
+    return new BandSweepPlan(
+      band, tunes, spacingHz, displayMinHz, displayMaxHz,
+      NarrowbandHalfWindowHz, NarrowbandDcExcludeHz, DeviceSweepTuner.SweepSampleRate);
+  }
+
   private static BandSweepPlan CreateFm()
   {
     SweepTune[] tunes = FmChannelPlan.Channels.Select(hz => new SweepTune(hz, new[] { hz })).ToArray();
@@ -237,5 +331,27 @@ public static class BandSweepPlans
     long last = centre + VhfWindowHalfWidthHz;
     int count = (int)((last - first) / VhfChannelSpacingHz) + 1;
     return CreateNarrowband("VHF", first, count, VhfChannelSpacingHz, first, last);
+  }
+
+  // AUD-103: 530 to 1710 kHz at 10 kHz, 119 channels; 9 per tune with the HF DC clearance, so 14
+  // tunes. The axis is the band's own range, as AIR's is.
+  private static BandSweepPlan CreateAm()
+  {
+    RadioBand preset = BandPresets.AmBroadcast;
+    int count = (int)((preset.MaxFrequencyHz - preset.MinFrequencyHz) / AmChannelSpacingHz) + 1;
+    return CreateHfNarrowband("AM", preset.MinFrequencyHz, count, AmChannelSpacingHz,
+      preset.MinFrequencyHz, preset.MaxFrequencyHz);
+  }
+
+  // AUD-103: one broadcast segment at 5 kHz (17 channels per tune with the HF DC clearance), chosen
+  // by the radio's frequency as VHF's window is. The axis is the segment's edges, which are on the
+  // 5 kHz grid, so the first and last channels are the edges themselves.
+  private static BandSweepPlan CreateShortwave(long? currentFrequencyHz)
+  {
+    RadioBand preset = BandPresets.Shortwave;
+    long reference = currentFrequencyHz is long hz && preset.ContainsFrequency(hz) ? hz : preset.MinFrequencyHz;
+    ShortwaveSegment segment = ShortwaveSegments.Nearest(reference);
+    int count = (int)((segment.MaxHz - segment.MinHz) / SwChannelSpacingHz) + 1;
+    return CreateHfNarrowband("SW", segment.MinHz, count, SwChannelSpacingHz, segment.MinHz, segment.MaxHz);
   }
 }

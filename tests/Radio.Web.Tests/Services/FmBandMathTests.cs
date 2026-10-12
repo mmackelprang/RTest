@@ -225,6 +225,50 @@ public class FmBandMathTests
   }
 
   [Fact]
+  public void Tiers_TheAmCrystalSpur_IsDrawnInTheNoiseColour_WhileACarrierBesideItIsNot()
+  {
+    // AUD-103: the box's AM pattern on a -50 floor. 960 kHz is the 28.8 MHz / 30 spur at +16 dB (fair
+    // by level); 970 kHz carries the 968 kHz carrier at +7 dB; 1030 kHz skywave at +8 dB.
+    List<BandMapChannelDto> am = Enumerable.Range(0, 119)
+      .Select(i => 530_000L + i * 10_000L)
+      .Select(hz => new BandMapChannelDto(hz, hz switch { 960_000 => -34f, 970_000 => -43f, 1_030_000 => -42f, _ => -50f }))
+      .ToList();
+
+    BandSignalTier[] tiers = FmBandMath.SignalTiers(am);
+
+    tiers[am.FindIndex(c => c.FrequencyHz == 960_000)].Should().Be(BandSignalTier.Noise);
+    tiers[am.FindIndex(c => c.FrequencyHz == 970_000)].Should().Be(BandSignalTier.Weak);
+    tiers[am.FindIndex(c => c.FrequencyHz == 1_030_000)].Should().Be(BandSignalTier.Weak);
+  }
+
+  [Fact]
+  public void Heights_TheAmCrystalSpur_DoesNotSetTheBarScale()
+  {
+    // AUD-103 review L3: the same AM pattern. Scaled with the spur, the top would be -34 and 1030 kHz
+    // (8 dB up) half height; without it the top is -42, the span is MinDisplaySpanDb (10 dB) and 1030 kHz
+    // is 0.8. The spur's own bar is clamped to full height.
+    List<BandMapChannelDto> am = Enumerable.Range(0, 119)
+      .Select(i => 530_000L + i * 10_000L)
+      .Select(hz => new BandMapChannelDto(hz, hz switch { 960_000 => -34f, 970_000 => -43f, 1_030_000 => -42f, _ => -50f }))
+      .ToList();
+
+    double[] heights = FmBandMath.NormalizeLevels(am);
+
+    heights[am.FindIndex(c => c.FrequencyHz == 1_030_000)].Should().BeApproximately(0.8, 1e-9);
+    heights[am.FindIndex(c => c.FrequencyHz == 970_000)].Should().BeApproximately(0.7, 1e-9);
+    heights[am.FindIndex(c => c.FrequencyHz == 960_000)].Should().Be(1);
+    heights[am.FindIndex(c => c.FrequencyHz == 530_000)].Should().Be(0);
+  }
+
+  [Fact]
+  public void Heights_AMapOfOnlyASpur_IsScaledByItsOwnChannels()
+  {
+    BandMapChannelDto[] channels = [new(960_000, -34f)];
+
+    FmBandMath.NormalizeLevels(channels).Should().Equal(0.0);
+  }
+
+  [Fact]
   public void Tiers_AreInTheOrderGiven()
   {
     // Unsorted input: the tiers line up with the channels as passed, as NormalizeLevels' heights do.

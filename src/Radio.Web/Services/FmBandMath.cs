@@ -120,6 +120,13 @@ public static class FmBandMath
   /// <see cref="DisplayFloorPercentile"/> level maps to 0 and the strongest channel to 1, over a span of
   /// at least <see cref="MinDisplaySpanDb"/>; values outside are clamped.
   /// </summary>
+  /// <remarks>
+  /// AUD-103: known device spurs (<see cref="Radio.Core.Models.BandMapStations.IsKnownSpur"/>) are left
+  /// out of the floor and the maximum, as <see cref="SignalTiers"/> leaves them out of its median, so a
+  /// spur stronger than every station does not shrink the stations' bars. A spur's own bar is still
+  /// drawn, clamped to full height when it is above the strongest station. A map of nothing but spurs is
+  /// scaled by all its channels.
+  /// </remarks>
   public static double[] NormalizeLevels(IReadOnlyList<BandMapChannelDto> channels)
   {
     if (channels.Count == 0)
@@ -128,8 +135,17 @@ public static class FmBandMath
     }
 
     double[] levels = channels.Select(c => (double)c.LevelDbfs).ToArray();
-    double floor = Percentile(levels, DisplayFloorPercentile);
-    double span = Math.Max(levels.Max() - floor, MinDisplaySpanDb);
+    double[] scale = channels
+      .Where(c => !Radio.Core.Models.BandMapStations.IsKnownSpur(c.FrequencyHz))
+      .Select(c => (double)c.LevelDbfs)
+      .ToArray();
+    if (scale.Length == 0)
+    {
+      scale = levels;
+    }
+
+    double floor = Percentile(scale, DisplayFloorPercentile);
+    double span = Math.Max(scale.Max() - floor, MinDisplaySpanDb);
     return levels.Select(l => Math.Clamp((l - floor) / span, 0.0, 1.0)).ToArray();
   }
 
@@ -150,6 +166,9 @@ public static class FmBandMath
   /// <see cref="BandSignalTier.Weak"/> or above, a channel at exactly <see cref="PeakProminenceDb"/>
   /// included. The reverse does not hold: a peak must also be at least as strong as both neighbours, so
   /// a coloured shadow next to a stronger station is not one.
+  /// AUD-103: a known device spur (<see cref="Radio.Core.Models.BandMapStations.IsKnownSpur"/>) is
+  /// <see cref="BandSignalTier.Noise"/> whatever its level, and is left out of the median, as the peak
+  /// rule leaves it out: it is drawn, but not in a station's colour.
   /// </remarks>
   public static BandSignalTier[] SignalTiers(IReadOnlyList<BandMapChannelDto> channels)
   {
@@ -158,8 +177,12 @@ public static class FmBandMath
       return [];
     }
 
-    double median = Median(channels.Select(c => (double)c.LevelDbfs));
-    return channels.Select(c => TierOf(c.LevelDbfs, median)).ToArray();
+    double median = Median(channels
+      .Where(c => !Radio.Core.Models.BandMapStations.IsKnownSpur(c.FrequencyHz))
+      .Select(c => (double)c.LevelDbfs));
+    return channels
+      .Select(c => Radio.Core.Models.BandMapStations.IsKnownSpur(c.FrequencyHz) ? BandSignalTier.Noise : TierOf(c.LevelDbfs, median))
+      .ToArray();
   }
 
   private static BandSignalTier TierOf(double level, double median) =>
