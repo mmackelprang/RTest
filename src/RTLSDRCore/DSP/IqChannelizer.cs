@@ -4,15 +4,21 @@ using RTLSDRCore.Models;
 namespace RTLSDRCore.DSP;
 
 /// <summary>
-/// Software offset tuning and channel selection for AM (AUD-101), in one pass over the IQ: each
-/// input sample is shifted down by <see cref="OffsetHz"/> with a numerically controlled oscillator
-/// (a complex mixer), low-pass filtered to the channel with a Hamming-windowed sinc FIR, and
-/// decimated by <see cref="Decimation"/>. The FIR is evaluated only for the samples that are kept.
-/// The mean power of the filtered channel is reported per call.
+/// Software offset tuning and channel selection, in one pass over the IQ: each input sample is
+/// shifted down by <see cref="OffsetHz"/> with a numerically controlled oscillator (a complex
+/// mixer), low-pass filtered to the channel with a Hamming-windowed sinc FIR, and decimated by
+/// <see cref="Decimation"/>. The FIR is evaluated only for the samples that are kept. The mean
+/// power of the filtered channel is reported per call.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The receiver tunes the device to <c>f − OffsetHz</c>, so the wanted carrier arrives at
+/// Two users: the AM chain (<see cref="AmReceiveChain"/>, AUD-101), with a 60 kHz offset, and the
+/// narrowband FM chain (<see cref="NfmReceiveChain"/>, AUD-107), with no offset (an
+/// <see cref="OffsetHz"/> of 0 makes the oscillator a one-entry table of 1, i.e. no shift). Named
+/// <c>AmChannelizer</c> until AUD-107.
+/// </para>
+/// <para>
+/// With an offset, the receiver tunes the device to <c>f − OffsetHz</c>, so the wanted carrier arrives at
 /// <c>+OffsetHz</c> in the capture and the device's DC offset (and its low-frequency spurs) at
 /// 0 Hz. The mixer moves the carrier to 0 Hz and the DC offset to <c>−OffsetHz</c>, where the
 /// channel filter removes it.
@@ -23,7 +29,7 @@ namespace RTLSDRCore.DSP;
 /// period is the same table.
 /// </para>
 /// </remarks>
-public sealed class AmChannelizer
+public sealed class IqChannelizer
 {
   /// <summary>The longest oscillator table accepted (entries).</summary>
   public const int MaxOscillatorPeriod = 1 << 16;
@@ -48,7 +54,7 @@ public sealed class AmChannelizer
   /// <param name="cutoffHz">The filter's cutoff (its −6 dB point), in Hz: the channel's half-bandwidth.</param>
   /// <param name="transitionHz">The width of the filter's transition band, in Hz; sets the tap count.</param>
   /// <param name="decimation">The decimation factor (1 keeps every sample).</param>
-  public AmChannelizer(int inputSampleRate, int offsetHz, float cutoffHz, float transitionHz, int decimation)
+  public IqChannelizer(int inputSampleRate, int offsetHz, float cutoffHz, float transitionHz, int decimation)
   {
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSampleRate);
     ArgumentOutOfRangeException.ThrowIfNegativeOrZero(decimation);

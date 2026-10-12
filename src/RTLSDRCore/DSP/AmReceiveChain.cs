@@ -6,7 +6,7 @@ namespace RTLSDRCore.DSP;
 /// <summary>
 /// The receive chain for AM modulation (AUD-101): the AM and Shortwave bands, and Aircraft, which is
 /// AM too. IQ at the SDR rate → offset shift, channel filter and decimation to 48 kHz
-/// (<see cref="AmChannelizer"/>) → envelope detector (<see cref="AmDemodulator"/>) → audio
+/// (<see cref="IqChannelizer"/>) → envelope detector (<see cref="AmDemodulator"/>) → audio
 /// low-pass → AGC (<see cref="AgcProcessor"/>). It also measures the in-channel level that the
 /// receiver reports as its signal strength on the HF bands (AM and Shortwave); on Aircraft the
 /// receiver keeps reporting the wideband RMS (see <c>RadioReceiver.SignalStrength</c>).
@@ -25,9 +25,10 @@ namespace RTLSDRCore.DSP;
 /// </para>
 /// <para>
 /// <b>Why a chain of its own</b> rather than an AM case in <c>RadioReceiver.CalculateRates</c>:
-/// <c>CalculateRates</c> also sets the NFM path, which is out of scope here and must not change;
+/// <c>CalculateRates</c> also sets the WFM path (and, until AUD-107 gave NFM a chain of its own,
+/// <see cref="NfmReceiveChain"/>, the NFM path too), which must not change;
 /// the generic <see cref="Decimator"/> evaluates its FIR for every input sample and has no mixer,
-/// whereas <see cref="AmChannelizer"/> mixes, filters and decimates in one pass and evaluates the
+/// whereas <see cref="IqChannelizer"/> mixes, filters and decimates in one pass and evaluates the
 /// FIR only for the one sample in five that is kept.
 /// </para>
 /// </remarks>
@@ -83,7 +84,7 @@ internal sealed class AmReceiveChain
     ChannelBandwidthHz = channelBandwidthHz;
     float halfBandwidth = channelBandwidthHz / 2f;
 
-    Channelizer = new AmChannelizer(
+    Channelizer = new IqChannelizer(
       sdrSampleRate,
       TuningOffsetHz,
       cutoffHz: halfBandwidth,
@@ -104,7 +105,7 @@ internal sealed class AmReceiveChain
     // 4.2 kHz on Aircraft. Shortwave broadcasters sit 5 kHz apart, so its adjacent-carrier whistle
     // is at 5 kHz: inside a 5 kHz low-pass's transition band, but in the stop band of a 3 kHz one.
     AudioFilter = new LowPassFilter(DemodSampleRate, halfBandwidth,
-      AmChannelizer.TapsFor(DemodSampleRate, AudioTransitionHz));
+      IqChannelizer.TapsFor(DemodSampleRate, AudioTransitionHz));
 
     int maxChannel = Channelizer.MaxOutputFor(maxBlockSamples);
     _channel = new IqSample[maxChannel];
@@ -115,7 +116,7 @@ internal sealed class AmReceiveChain
   public int ChannelBandwidthHz { get; }
 
   /// <summary>Gets the offset tuning, channel filter and decimation stage.</summary>
-  public AmChannelizer Channelizer { get; }
+  public IqChannelizer Channelizer { get; }
 
   /// <summary>Gets the envelope detector.</summary>
   public AmDemodulator Demodulator { get; }

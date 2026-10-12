@@ -29,6 +29,10 @@ namespace RTLSDRCore;
       // modulation. Replaced as a whole by SetupSignalProcessing; the DSP thread reads it once
       // per block.
       private volatile AmReceiveChain? _amChain;
+      // AUD-107: the narrowband FM chain (Weather, VHF), or null on every other modulation.
+      // Replaced as a whole by SetupSignalProcessing; the DSP thread reads it once per block.
+      // Never non-null at the same time as _amChain once a setup has finished.
+      private volatile NfmReceiveChain? _nfmChain;
       // Counts the receiver's tunes of the device. Each IQ block is stamped with the value current
       // when the USB thread raised it (OnSamplesAvailable), and the AM chain re-seeds its DC
       // blocker and AGC on the second block stamped with a new value (AmReceiveChain.BeginBlock).
@@ -1483,7 +1487,7 @@ namespace RTLSDRCore;
       /// default would sit at −54 dBFS, and on the box (2026-10-12) empty Aircraft channels read
       /// −18 to −26 dBFS in the channel with the tuner's AGC holding the noise up. On the wideband
       /// scale 121.5 MHz read 0.25 and the channels a seek passed 0.22-0.25, also above 0.1: the squelch is open on empty
-      /// channels either way (see docs/queue/AUD-101.md, box UAT).
+      /// channels either way (see archive/queue/AUD-101.md, box UAT).
       /// </para>
       /// </remarks>
       private bool SquelchApplies => !HfBands.Requires(Volatile.Read(ref _currentBand).Type);
@@ -1973,7 +1977,16 @@ namespace RTLSDRCore;
               SetupAmSignalProcessing(bandwidth);
               return;
           }
+
+          // AUD-107: narrowband FM (Weather, VHF) likewise; see NfmReceiveChain. Only WFM (and
+          // any modulation on a channel too wide for both chains) continues below.
+          if (NfmReceiveChain.Applies(_currentModulation, bandwidth))
+          {
+              SetupNfmSignalProcessing(bandwidth);
+              return;
+          }
           _amChain = null;
+          _nfmChain = null;
 
           // Step 3: IQ decimation (SDR rate → demod rate)
           var iqDecimFactor = _sdrSampleRate / _demodSampleRate;
@@ -2132,6 +2145,7 @@ namespace RTLSDRCore;
           _squelchSilenceBuffer = new float[_expectedAudioOutputCount];
 
           _amChain = chain;
+          _nfmChain = null;
 
           Logger.Information(
               "Signal processing (AM): SDR={SdrRate} Hz → shift {Offset} Hz → channel filter {Cutoff} Hz ({ChannelTaps} taps), " +
@@ -2140,6 +2154,46 @@ namespace RTLSDRCore;
               _sdrSampleRate, chain.Channelizer.OffsetHz, chain.Channelizer.CutoffHz, chain.Channelizer.Taps,
               chain.Channelizer.Decimation, _demodSampleRate, chain.AudioFilter.CutoffFrequency, chain.AudioFilter.Taps,
               DefaultAudioSampleRate, bandwidth, _currentModulation);
+      }
+
+      /// <summary>
+      /// Sets up the narrowband FM chain (AUD-107) at the SDR rate <see cref="CalculateRates"/> chose
+      /// (240 kHz): channel filter and decimation to 48 kHz, then the discriminator. Mono at 48 kHz,
+      /// so there is no audio decimator and no de-emphasis (the generic path had none for NFM either).
+      /// The device is tuned on the frequency, as before (no offset).
+      /// </summary>
+      private void SetupNfmSignalProcessing(int bandwidth)
+      {
+          // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
+          const int maxIqChunk = 16384;
+          var chain = new NfmReceiveChain(_sdrSampleRate, bandwidth, maxIqChunk);
+
+          _demodSampleRate = NfmReceiveChain.DemodSampleRate;
+          _iqDecimator = null;
+          _demodulator = chain.Demodulator;
+
+          DetachRdsDecoder();
+          _stereoDecoder = null;
+          _rdsDecoder = null;
+          _deEmphasis = null;
+          _deEmphasisRight = null;
+          _audioDecimator = null;
+          _audioDecimatorRight = null;
+          _audioFormat = AudioFormat.Default;
+
+          _expectedAudioOutputCount = maxIqChunk / chain.Channelizer.Decimation;
+          _squelchSilenceBuffer = new float[_expectedAudioOutputCount];
+
+          // Published before the AM chain is cleared: ProcessSamples prefers the AM chain, so a
+          // block that sees both still runs one consistent chain.
+          _nfmChain = chain;
+          _amChain = null;
+
+          Logger.Information(
+              "Signal processing (NFM): SDR={SdrRate} Hz → channel filter {Cutoff} Hz ({ChannelTaps} taps), " +
+              "decim {Decimation}:1 → Demod={DemodRate} Hz → {AudioRate} Hz mono, BW={Bandwidth} Hz, Modulation={Modulation}",
+              _sdrSampleRate, chain.Channelizer.CutoffHz, chain.Channelizer.Taps, chain.Channelizer.Decimation,
+              _demodSampleRate, DefaultAudioSampleRate, bandwidth, _currentModulation);
       }
 
       /// <summary>
@@ -2360,6 +2414,15 @@ namespace RTLSDRCore;
           if (am != null)
           {
               DeliverAudio(am.Audio, am.ProduceAudio());
+              return;
+          }
+
+          // AUD-107: narrowband FM is filtered to its channel before the discriminator. Read once
+          // per block, like the AM chain. The level above stays the wideband RMS on these bands.
+          NfmReceiveChain? nfm = _nfmChain;
+          if (nfm != null)
+          {
+              DeliverAudio(nfm.Audio, nfm.Process(samples));
               return;
           }
 
