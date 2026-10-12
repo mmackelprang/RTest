@@ -4,7 +4,8 @@ using RTLSDRCore.Models;
 namespace RTLSDRCore.DSP;
 
 /// <summary>
-/// The receive chain for narrowband FM (AUD-107): the Weather and VHF bands. IQ at the SDR rate →
+/// The receive chain for narrowband FM (AUD-107): the Weather and VHF bands, and any custom band
+/// with NFM on a channel of up to <see cref="MaxChannelBandwidthHz"/>. IQ at the SDR rate →
 /// channel filter and decimation to 48 kHz (<see cref="IqChannelizer"/>, no offset) → FM
 /// discriminator (<see cref="NfmDemodulator"/>) at 48 kHz, mono, no audio decimator.
 /// </summary>
@@ -20,9 +21,10 @@ namespace RTLSDRCore.DSP;
 /// <b>The filter.</b> Cut-off (−6 dB) at <see cref="ChannelCutoffFraction"/> of the band's channel
 /// bandwidth and a transition band of <see cref="ChannelTransitionFraction"/> of it: for the
 /// 12.5 kHz Weather and VHF channels, flat to 6 kHz, −6 dB at 8 kHz and in the stop band from
-/// 10 kHz. That passes a 5 kHz-deviation signal's occupied band (Carson: ±(5 + 3) kHz for 3 kHz
-/// audio) with little loss, and the whole of a station 25 kHz away (NOAA Weather's spacing; from
-/// 17 kHz) falls in the stop band. A station 12.5 kHz away with the same deviation overlaps the
+/// 10 kHz. A 5 kHz-deviation signal's occupied band (Carson: ±(5 + 3) kHz for 3 kHz audio) has
+/// its edge at the −6 dB point: in the tests a 3 kHz tone at 5 kHz deviation reads −0.3 dB, with
+/// about 2.6 % of its power off the tone. The whole of a station 25 kHz away (NOAA Weather's
+/// spacing; from 17 kHz) falls in the stop band (−58 dB or more from 17 kHz). A station 12.5 kHz away with the same deviation overlaps the
 /// channel and is only partly rejected; the tests state both numbers.
 /// </para>
 /// <para>

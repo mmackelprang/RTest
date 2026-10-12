@@ -1985,8 +1985,8 @@ namespace RTLSDRCore;
               SetupNfmSignalProcessing(bandwidth);
               return;
           }
-          _amChain = null;
-          _nfmChain = null;
+          // The AM and NFM chains are cleared at the end of this method, once the generic fields
+          // below are built, so a block the DSP thread takes meanwhile still runs one whole chain.
 
           // Step 3: IQ decimation (SDR rate → demod rate)
           var iqDecimFactor = _sdrSampleRate / _demodSampleRate;
@@ -2105,6 +2105,9 @@ namespace RTLSDRCore;
               ? monoOutputCount * 2
               : monoOutputCount;
           _squelchSilenceBuffer = new float[_expectedAudioOutputCount];
+
+          _amChain = null;
+          _nfmChain = null;
 
           Logger.Information(
               "Signal processing: SDR={SdrRate} Hz → IQ decim {IqFactor}:1 → " +
