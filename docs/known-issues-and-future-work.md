@@ -117,6 +117,14 @@ Which dongles get it is the `RTLSDR:HfDirectSampling` setting (`Auto` | `Q` | `I
 (`AUD-101`: channel filter, AGC, the software carrier offset), so AM/SW audio is not yet expected to be usable;
 then `AUD-102` (bands/UI) and `AUD-103` (AM/SW sweep plans). Details: [`queue/AUD-99.md`](queue/AUD-99.md).
 
+**2026-10-12, `AUD-101` (on branch, pending box UAT): the AM DSP chain is done.** AM, SW and AIR now tune the
+dongle 60 kHz below the station and shift it back in software (the DC spike is filtered out), filter IQ to the
+channel and decimate to 48 kHz, apply an AGC (max gain 30), and low-pass the audio at the channel's
+half-bandwidth. `signalStrength` / `rssiDbu` on those bands are the in-channel level (`rssiDbu` ≈ in-channel
+dBFS, 0.6 dB steps). Proved by synthetic tests only (no station is receivable at the box); HF squelch stays
+bypassed. **Not fixed, follow-up:** NFM (Weather, VHF) still has no channel filter. Details:
+[`queue/AUD-101.md`](queue/AUD-101.md).
+
 The "~2 days" estimate in the table below predates a code survey that
 found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the
 estimate. *History:* **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not
