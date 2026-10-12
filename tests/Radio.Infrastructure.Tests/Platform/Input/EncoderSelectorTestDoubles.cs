@@ -121,7 +121,14 @@ internal sealed class FakeRadioSource : IAudioSource, IRadioControl
   public Task SetEqualizerModeAsync(RadioEqualizerMode mode, CancellationToken cancellationToken = default) => Task.CompletedTask;
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
   public Task TogglePowerStateAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-  public Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default) => Task.CompletedTask;
+  public Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
+  {
+    FrequenciesSet.Add(frequency);
+    _log?.Add($"TuneInBand:{band}:{frequency.Hertz}");
+    CurrentBand = band;
+    CurrentFrequency = frequency;
+    return Task.CompletedTask;
+  }
 
   public Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default)
   {

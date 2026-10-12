@@ -33,7 +33,10 @@ public static class RadioBandSwitch
   /// </para>
   /// <para>
   /// Exceptions from the tuner (for example <c>TunerRefusedException</c> from the band change or
-  /// the restore) propagate to the caller, which maps them; a failed memory write does not
+  /// the restore) propagate to the caller, which maps them, as does an
+  /// <see cref="ArgumentOutOfRangeException"/> from a frequency outside the band (the real memory
+  /// service treats a remembered value outside the band as absent, but does not check a configured
+  /// default such as <c>Radio:DefaultFMFrequencyMHz</c>). A failed memory write does not propagate
   /// (<see cref="IRadioBandMemory.SetAsync"/> logs and swallows it in the real service).
   /// </para>
   /// </remarks>
@@ -63,10 +66,13 @@ public static class RadioBandSwitch
       return false;
     }
 
+    // In the band, not inferred from the frequency: VHF contains FM, AIR and WB, so a remembered
+    // VHF frequency of 101.1 MHz tuned with SetFrequencyAsync would land on the FM band (found in
+    // the AUD-105 box UAT). TuneInBandAsync also keeps the step SetBandAsync just set.
     Frequency? restore = await memory.GetAsync(band, cancellationToken);
     if (restore is { } frequency)
     {
-      await radio.SetFrequencyAsync(frequency, cancellationToken);
+      await radio.TuneInBandAsync(band, frequency, cancellationToken);
     }
 
     return true;

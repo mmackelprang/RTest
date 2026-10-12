@@ -369,7 +369,7 @@ public class SourceSelectorServiceTests
     h.Selector.Press();
 
     Assert.Equal(
-      new[] { "GetOrCreate:Radio", "SetBand:AM", "SetFrequency:1130000" },
+      new[] { "GetOrCreate:Radio", "SetBand:AM", "TuneInBand:AM:1130000" },
       h.Log.Entries.ToArray());
   }
 

@@ -124,6 +124,20 @@ public class RadioControllerBandMemoryTests
     Assert.Equal(97_745_000, (await Band("FM")).Frequency);
   }
 
+  [Fact]
+  public async Task Vhf_WithARememberedFrequencyInsideFm_StaysOnVhf()
+  {
+    // Found in the box UAT: VHF (30-300 MHz) contains FM, AIR and WB. Restoring VHF's remembered
+    // 101.1 MHz by frequency alone inferred the band from it and landed on FM.
+    _memory.Remembered[RadioBand.VHF] = 101_100_000;
+    await Tune(97_745_000);
+
+    RadioStateDto state = await Band("VHF");
+
+    Assert.Equal("VHF", state.Band);
+    Assert.Equal(101_100_000, state.Frequency);
+  }
+
   /// <summary>
   /// <see cref="IRadioBandMemory"/> over two dictionaries: what was remembered, and what the real
   /// service would return from configuration when nothing is (its default rung).
