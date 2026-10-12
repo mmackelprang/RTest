@@ -426,3 +426,39 @@ old one, so the device is now re-tuned to the receiver's frequency (tests:
   `TunerCapabilityException` is ever reused.
 - **L-f:** `RtlSdrDevice.RecoverAfterFailedSwitch` has no unit test. It is native-only, so it was reviewed by
   reading.
+
+## ⚠ Open before merge — one FM failure after AM, not reproduced (2026-10-12, 00:15–00:30 UTC, Builder)
+
+**What happened (build `5cc20e5`).** After about 7 minutes on AM (8 tunes 45 s apart, Debug logging on
+`Radio.Infrastructure.Audio`), a `POST /api/radio/frequency` to 97.745 MHz at 00:15:19 UTC switched the radio
+back to FM. That switch logged `HF direct sampling OFF (mode 0 read back); tuner active` and restarted
+streaming. From then on FM had **no stereo pilot, no RDS (PI null) on 97.745, 94.7 or 92.3 MHz** for more than
+two minutes, across three FM→FM retunes, while signalStrength still changed per station (100, 37, 100), so IQ
+was flowing. A good return logs `RDS: Block sync acquired` about 0.4 s after streaming restarts; this one never
+did. **A service restart (the deploy of `0028577` at about 00:20 UTC) cleared it.**
+
+**Not reproduced on `0028577`, in about 50 transitions:**
+- AM → 8 tunes 5 s apart → FM: RDS in 1 s.
+- An FM live sweep (gain reads 28, see `AUD-90`) → AM → 3 tunes → FM: RDS in 1 s.
+- The full replay, a 6-minute AM dwell with tunes 44 s apart and Debug logging on → FM: RDS in 1 s.
+- 6 rounds of rapid AM ↔ FM ↔ SW switching: RDS in 1 s every round.
+
+**Unknown:** whether this predates `AUD-99`. A log heuristic (an FM switch with no `Block sync acquired` within
+5 s) proved invalid, because the decoder does not log a re-sync every time, so the old logs cannot answer it.
+Candidates not ruled out: R820T/RTL2832 state left by the HF-off path (the `AUD-99` code) on an unlucky timing,
+or an older intermittent receiver fault that band changes happen to expose.
+
+**Not merged because of it.** The merge policy pauses on a risk to the FM path. **Recovery if it recurs:** restart
+`radio-api` (and then start `radio-web`), or reselect the radio source.
+
+## Nighttime skywave check (2026-10-12, 00:08–00:15 UTC) — inconclusive
+
+The owner hears, on a separate AM radio at night: 1690, 1590, 1500, 1290, 1210, 1190, 1090, 1030, 960, 840, 750
+and 710 kHz. Through the API on `5cc20e5`, listed channels (1090, 750, 1190, 710, 1030) and empty ones (1180,
+1400, 1650) read the same `signalStrength` 1–2 and `rssiDbu` −59.4/−58.8: that meter is wideband on this build,
+which is `AUD-101`'s gap. The tap readings were invalid: no capture ran during the sweep (the fingerprint
+schedule had backed off), so every row showed the last FM value. An in-channel re-run of the step 0 probe
+needs `radio-api` stopped, and the session's permission policy refused that. It was not worked around.
+**Do this on `AUD-101`**, where the level comes from the filtered channel and the same API comparison needs no
+outage. The 960 kHz entry is also the dongle's crystal spur (step 0: +18 dB over the median), so it is not
+evidence unless it measures clearly above that.
