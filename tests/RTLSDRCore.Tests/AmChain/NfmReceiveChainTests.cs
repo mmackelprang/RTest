@@ -194,6 +194,41 @@ public class NfmReceiveChainTests
   }
 
   [Fact]
+  public void SetBand_FromAm_ToWeather_ReceivesWithTheNfmChain()
+  {
+    // A band change on a running receiver replaces the AM chain with the NFM one. ProcessSamples
+    // prefers the AM chain, so one left behind would envelope-detect the FM station.
+    SyntheticRf rf = NfmStation(WxHz, 0.3f);
+    rf.Transmitters.Add(new Transmitter(1_000_000, 0.3f, ToneHz: 1_000, AmDepth: 0.5));
+    using ReceiverHarness h = new(rf, BandType.AM, 1_000_000);
+    h.Run(3);
+
+    Assert.True(h.Receiver.SetBand(BandType.Weather, WxHz));
+    h.Run(Blocks);
+
+    float[] tail = AudioMeasure.Tail(h.Audio, Window);
+    Assert.InRange(AudioMeasure.Db(AudioMeasure.ToneAmplitude(tail, 1_000) / 0.6), -0.5, 0.5);
+    Assert.True(ResidualDb(tail, 1_000) <= -40, $"the residual is {ResidualDb(tail, 1_000):F1} dB");
+  }
+
+  [Fact]
+  public void SetBand_FromWeather_ToFm_LeavesTheNfmChain_ForStereoWfm()
+  {
+    SyntheticRf rf = NfmStation(WxHz, 0.3f);
+    rf.Transmitters.Add(new Transmitter(99_500_000, 0.5f, ToneHz: 1_000, FmDeviationHz: 50_000));
+    using ReceiverHarness h = new(rf, BandType.Weather, WxHz);
+    h.Run(2);
+    int before = h.Events.Length;
+
+    Assert.True(h.Receiver.SetBand(BandType.FM, 99_500_000));
+    h.Run(3);
+
+    // WFM delivers interleaved stereo (two samples per 48 kHz frame); the NFM chain delivers
+    // 16384 / 5 = 3276 mono samples per block.
+    Assert.All(h.Events.Skip(before + 1), e => Assert.True(e.Length > 6_000, $"{e.Length} samples: not stereo WFM"));
+  }
+
+  [Fact]
   public void Applies_OnlyToNarrowbandFm()
   {
     Assert.True(NfmReceiveChain.Applies(ModulationType.NFM, 12_500));
