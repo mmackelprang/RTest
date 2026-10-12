@@ -29,6 +29,7 @@ public class FmWatchdogReceiverTests
       Rf.Transmitters.Add(station);
       Harness = new ReceiverHarness(Rf, BandType.FM, FmHz);
       Harness.Receiver.FmWatchdog.WindowSamples = Window;
+      Harness.Receiver.FmWatchdog.LockedBlocksRequired = 2;   // the window is 3 blocks here, not 44
       Harness.Receiver.FmAcquisitionReported += o =>
       {
         lock (Outcomes)

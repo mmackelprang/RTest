@@ -516,7 +516,10 @@ namespace RTLSDRCore;
       /// Stops streaming and closes the device after <see cref="Startup"/>
       /// failed with the device possibly open, so a failed start never
       /// leaves the dongle held (AUD-76: the device gate is released on
-      /// failure and an idle band sweep may then open the device).
+      /// failure and an idle band sweep may then open the device). Also used by the FM watchdog's
+      /// recovery (AUD-106) when the device fails to reopen or to restart streaming, so a later
+      /// <see cref="Startup"/> starts clean; on that path the receiver stays in Error and the
+      /// source's AUD-76 gate is not released here (it is released by the source's shutdown).
       /// </summary>
       private void CloseDeviceAfterFailedStartup()
       {
@@ -648,8 +651,7 @@ namespace RTLSDRCore;
           {
               // Switch to the appropriate band. TrySetBand rebuilds the chain even inside FM, so the
               // watchdog logs this as a frequency tune, not a band change (AUD-106).
-              _pendingFmStart = new FmChainStart("frequency tune", ByRecovery: false);
-              return TrySetBand(band.Type, frequencyHz);
+              return TrySetBandCore(band.Type, frequencyHz, new FmChainStart("frequency tune", ByRecovery: false));
           }
 
           // No matching band found - check if within the range the tuner path receives
@@ -1159,13 +1161,22 @@ namespace RTLSDRCore;
       /// device refused the HF switch, the sample rate or the frequency, streaming could not be
       /// resumed, or the switch threw.
       /// </returns>
-      public TuneResult TrySetBand(BandType bandType, long? specificFrequency = null)
+      public TuneResult TrySetBand(BandType bandType, long? specificFrequency = null) =>
+          TrySetBandCore(bandType, specificFrequency, fmStart: null);
+
+      /// <summary>
+      /// <see cref="TrySetBand(BandType, long?)"/>, recording <paramref name="fmStart"/> as the reason for
+      /// the WFM chain it builds (AUD-106; null: a band change). The reason is set and cleared under
+      /// <c>_lock</c>, so an early return cannot leave it for the next chain.
+      /// </summary>
+      private TuneResult TrySetBandCore(BandType bandType, long? specificFrequency, FmChainStart? fmStart)
       {
           // A band change cancels a live band sweep before streaming is paused.
           CancelSweep();
 
           lock (_lock)
           {
+              _pendingFmStart = fmStart;
               try
               {
                   var band = BandPresets.GetBand(bandType);
@@ -1217,6 +1228,10 @@ namespace RTLSDRCore;
               {
                   Logger.Error(ex, "Error setting band {BandType}", bandType);
                   return TuneResult.Refused;
+              }
+              finally
+              {
+                  _pendingFmStart = null;
               }
           }
       }

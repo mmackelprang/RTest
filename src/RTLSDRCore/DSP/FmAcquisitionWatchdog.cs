@@ -122,6 +122,7 @@ internal sealed class FmAcquisitionWatchdog
   private long _signalBlocks;
   private bool _knownBefore;
   private bool _lockEvidence;
+  private int _lockedRun;
 
   private int _episodeStep;
   private bool _episodeGaveUp;
@@ -134,6 +135,12 @@ internal sealed class FmAcquisitionWatchdog
   /// trigger recovery. 0.1, the receiver's default squelch threshold (see the remarks).
   /// </summary>
   public float MinSignal { get; set; } = 0.1f;
+
+  /// <summary>
+  /// Consecutive blocks with a locked pilot that record a frequency as locked when RDS is not seen:
+  /// 8 (about 0.55 s at 240 kS/s), so that one block's chance agreement on noise cannot.
+  /// </summary>
+  public int LockedBlocksRequired { get; set; } = 8;
 
   /// <summary>The most recovery episodes that may start in any hour.</summary>
   public int MaxEpisodesPerHour { get; set; } = 3;
@@ -181,7 +188,8 @@ internal sealed class FmAcquisitionWatchdog
   /// <param name="signal">The block's wideband signal strength.</param>
   /// <param name="pilotLocked">
   /// Whether the receiver judges the pilot locked after this block (stronger evidence than
-  /// <paramref name="pilot"/>; see the remarks). The value on the window's last block counts.
+  /// <paramref name="pilot"/>; see the remarks). <see cref="LockedBlocksRequired"/> consecutive
+  /// locked blocks within the window count as lock evidence.
   /// </param>
   /// <returns>The closed window's outcome, or null when no window closed.</returns>
   public FmAcquisitionOutcome? Observe(int generation, long frequencyHz, int iqSamples, bool pilot, bool rdsSynced, float signal,
@@ -209,7 +217,8 @@ internal sealed class FmAcquisitionWatchdog
     {
       _rdsAt = _samples;
     }
-    _lockEvidence = _rdsAt is not null || pilotLocked;
+    _lockedRun = pilotLocked ? _lockedRun + 1 : 0;
+    _lockEvidence |= _rdsAt is not null || _lockedRun >= LockedBlocksRequired;
 
     bool both = _pilotAt is not null && _rdsAt is not null;
     if (!both && _samples < WindowSamples)
@@ -311,5 +320,6 @@ internal sealed class FmAcquisitionWatchdog
     _signalBlocks = 0;
     _knownBefore = _knownLocked.Contains(frequencyHz);
     _lockEvidence = false;
+    _lockedRun = 0;
   }
 }

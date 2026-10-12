@@ -19,7 +19,7 @@ public class FmAcquisitionWatchdogTests
   }
 
   private static FmAcquisitionWatchdog NewWatchdog(ManualClock? clock = null) =>
-    new() { WindowSamples = 3 * Block, Clock = clock ?? new ManualClock() };
+    new() { WindowSamples = 3 * Block, LockedBlocksRequired = 2, Clock = clock ?? new ManualClock() };
 
   /// <summary>Feeds blocks until one closes the window; returns its outcome (null when none closed within 10 blocks).</summary>
   private static FmAcquisitionOutcome? Feed(FmAcquisitionWatchdog w, int generation, bool pilot, bool rds = false,
@@ -210,6 +210,19 @@ public class FmAcquisitionWatchdogTests
 
     w.BeginStart(Station, 2, "band change", byRecovery: false);
     Assert.Equal(FmWatchdogAction.ReportOutcome, Feed(w, 2, pilot: false)!.Action);
+  }
+
+  [Fact]
+  public void LockedPilotBlocksThatAreNotConsecutive_DoNotMakeAStationKnown()
+  {
+    // One block's chance agreement on noise must not record a station: locked, unlocked, locked.
+    FmAcquisitionWatchdog w = NewWatchdog();
+    w.BeginStart(Station, 1, "band change", byRecovery: false);
+    Assert.Null(w.Observe(1, Station, Block, pilot: true, rdsSynced: false, signal: 0.5f, pilotLocked: true));
+    Assert.Null(w.Observe(1, Station, Block, pilot: true, rdsSynced: false, signal: 0.5f, pilotLocked: false));
+    Assert.NotNull(w.Observe(1, Station, Block, pilot: true, rdsSynced: false, signal: 0.5f, pilotLocked: true));
+
+    Assert.False(w.IsKnownLocked(Station));
   }
 
   [Fact]

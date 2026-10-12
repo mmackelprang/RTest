@@ -38,9 +38,9 @@ public class StereoFmDecoder
   private float _pilotStrength;
 
   // AUD-106: the pilot's component in phase with the PLL (smoothed pilot · sin(PLL phase)). When the
-  // PLL is locked the pilot is A·sin(phase) and this tends to A/2; for noise in the pilot band it
-  // tends to 0, however strong the noise. Read by RadioReceiver.IsPilotLocked; nothing in the decode
-  // depends on it.
+  // PLL is locked the pilot is A·sin(phase) and this tends to A/2; for noise in the pilot band its
+  // mean is 0, but it fluctuates more the stronger the noise (RadioReceiver.IsPilotLocked accounts
+  // for that). Nothing in the decode depends on it.
   private float _pilotInPhase;
   private const float PilotThreshold = 0.01f; // minimum pilot level for stereo
   private const float PilotSmoothingAlpha = 0.001f; // slow tracking
@@ -57,8 +57,9 @@ public class StereoFmDecoder
 
   /// <summary>
   /// The pilot's component in phase with the PLL, smoothed like <see cref="PilotStrength"/>: about
-  /// half the pilot's amplitude when the PLL is locked to a pilot (0.05 for a 10 % pilot), about 0
-  /// for noise (AUD-106). A lock indicator, unlike <see cref="StereoDetected"/>, which measures energy.
+  /// half the pilot's amplitude when the PLL is locked to a pilot (0.05 for a 10 % pilot); for noise
+  /// it averages 0 but fluctuates in proportion to the noise (AUD-106). A lock indicator, unlike
+  /// <see cref="StereoDetected"/>, which measures energy.
   /// </summary>
   public float PilotInPhase => _pilotInPhase;
 

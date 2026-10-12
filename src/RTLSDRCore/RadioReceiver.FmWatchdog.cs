@@ -51,6 +51,14 @@ public partial class RadioReceiver
   /// </summary>
   internal const float LockedPilotInPhase = 0.02f;
 
+  /// <summary>
+  /// The share of the pilot band's energy (<see cref="StereoFmDecoder.PilotStrength"/>) that must be in
+  /// phase with the PLL: a clean locked pilot gives about 0.78 (π/4). The in-phase average alone
+  /// swings above <see cref="LockedPilotInPhase"/> on strong noise at some block ends; noise energy
+  /// in the band then rises with it, which this ratio rejects.
+  /// </summary>
+  internal const float LockedPilotCoherence = 0.5f;
+
   /// <summary>The FM acquisition watchdog (AUD-106). Its settings are open to tests.</summary>
   internal FmAcquisitionWatchdog FmWatchdog { get; } = new();
 
@@ -67,15 +75,19 @@ public partial class RadioReceiver
   internal event Action<FmAcquisitionOutcome>? FmAcquisitionReported;
 
   /// <summary>
-  /// Whether <paramref name="stereo"/>'s pilot counts as locked: its component in phase with the PLL
-  /// reaches <see cref="LockedPilotInPhase"/> (in <c>PilotLockTests</c>, Gaussian noise up to RMS 4 on
-  /// the discriminator's scale stays under it). Stronger evidence than <see cref="StereoFmDecoder.StereoDetected"/>, which is an
-  /// energy detector and reads noise as a pilot (`AUD-109`); the PLL's frequency is no help either,
-  /// because its integrator moves so little that it reads 19 kHz on noise too (measured in
-  /// <c>PilotLockTests</c>). Only this, or RDS sync, records a frequency as locked for the watchdog.
+  /// Whether <paramref name="stereo"/>'s pilot counts as locked after one block: its component in
+  /// phase with the PLL reaches <see cref="LockedPilotInPhase"/> and is at least
+  /// <see cref="LockedPilotCoherence"/> of the pilot band's energy. The watchdog further requires this
+  /// on several consecutive blocks (<see cref="FmAcquisitionWatchdog.LockedBlocksRequired"/>).
+  /// Stronger evidence than <see cref="StereoFmDecoder.StereoDetected"/>, which is an energy detector
+  /// and reads noise as a pilot (`AUD-109`); the PLL's frequency is no help either, because its
+  /// integrator moves so little that it stays near 19 kHz on noise (asserted in <c>PilotLockTests</c>).
+  /// The failure direction of a PLL that cannot hold a pilot (its hold-in range is a few hertz) is
+  /// safe: the station reads "not locked" and is not recorded. Only this, or RDS sync, records a
+  /// frequency as locked for the watchdog.
   /// </summary>
   internal static bool IsPilotLocked(StereoFmDecoder stereo) =>
-    stereo.PilotInPhase >= LockedPilotInPhase;
+    stereo.PilotInPhase >= LockedPilotInPhase && stereo.PilotInPhase >= LockedPilotCoherence * stereo.PilotStrength;
 
   /// <summary>
   /// Publishes a new WFM chain to the watchdog: called where the chain is built, with the reason the
@@ -217,7 +229,9 @@ public partial class RadioReceiver
             "a frequency locked earlier; step {Step}: {Action}. Snapshot: {Snapshot}",
             frequency, outcome.Reason, window, outcome.MeanSignal, outcome.RecoveryStep,
             outcome.Action == FmWatchdogAction.RerunBandSetup
-              ? "re-running the band setup (HF on and off, sample rate, tune, gain)"
+              ? (_device.SupportsHfDirectSampling
+                ? "re-running the band setup (HF on and off, sample rate, tune, gain)"
+                : "re-running the band setup (sample rate, tune, gain)")
               : "closing and reopening the device",
             snapshot);
           RecoverFm(outcome.Action == FmWatchdogAction.ReopenDevice, outcome.RecoveryStep, outcome.FrequencyHz, generation);
@@ -245,8 +259,9 @@ public partial class RadioReceiver
   /// <summary>
   /// A recovery step, with streaming paused. Step 1 switches HF direct sampling on and off again (on a
   /// device that has it: librtlsdr's HF-off path re-initialises the tuner, the path the dossier's
-  /// hypothesis 1 suspects), then rebuilds the signal chain and sets the sample rate, the frequency and
-  /// the gain. Step 2 closes and reopens the device first, then does the same.
+  /// hypothesis 1 suspects; if it ends with HF still on, the device is closed and reopened at once),
+  /// then rebuilds the signal chain and sets the sample rate, the frequency and the gain. Step 2 closes
+  /// and reopens the device first (which initialises the tuner), then rebuilds and sets the same.
   /// </summary>
   /// <remarks>
   /// Skipped, with an Information line, when anything moved since the miss was judged: the receiver is
@@ -267,7 +282,7 @@ public partial class RadioReceiver
         return;
       }
 
-      bool wasStreaming = _device.IsStreaming;
+      bool wasStreaming = _device.IsStreaming;   // reassigned when a failed reopen leaves nothing to resume
       lock (_tuneLock)
       {
         if (wasStreaming)
@@ -291,16 +306,35 @@ public partial class RadioReceiver
         return;
       }
 
+      bool done = false;
       try
       {
-        if (_device.SupportsHfDirectSampling)
+        // Step 1 only: rtlsdr_open has just initialised the tuner on step 2.
+        if (!reopen && _device.SupportsHfDirectSampling)
         {
           lock (_tuneLock)
           {
-            if (!_device.SetHfMode(true) | !_device.SetHfMode(false))
+            _device.SetHfMode(true);
+            _device.SetHfMode(false);
+          }
+
+          if (_device.IsHfMode)
+          {
+            // HF-off failed and librtlsdr's "restore the previous mode" put HF back on, which on FM
+            // leaves the tuner in standby. Retrying SetHfMode(false) would restore HF again, so
+            // close and reopen instead (Open reads the mode back as off).
+            Logger.Warning("FM watchdog: step {Step}: HF direct sampling did not switch off again; reopening the device", step);
+            lock (_tuneLock)
             {
-              Logger.Warning("FM watchdog: step {Step}: the HF on/off cycle was refused (HF direct sampling now {Mode})",
-                step, _device.IsHfMode ? "on" : "off");
+              _device.Close();
+            }
+            if (!_device.Open())
+            {
+              Logger.Error("FM watchdog: step {Step}: the device did not reopen; the receiver is stopped in Error", step);
+              CloseDeviceAfterFailedStartup();
+              SetState(ReceiverState.Error);
+              wasStreaming = false;   // nothing to resume
+              return;
             }
           }
         }
@@ -329,11 +363,19 @@ public partial class RadioReceiver
         {
           _device.SetGain(_manualGain);
         }
+        done = true;
       }
       finally
       {
-        // Whatever failed above, streaming is restarted if it was running.
-        if (ResumeAfterBandChange(wasStreaming))
+        _pendingFmStart = null;
+
+        // Whatever failed above, streaming is restarted if it was running. If it cannot be, tear
+        // down like a failed start so a later Startup does not subscribe a second time.
+        if (!ResumeAfterBandChange(wasStreaming))
+        {
+          CloseDeviceAfterFailedStartup();
+        }
+        else if (done)
         {
           Logger.Information("FM watchdog: step {Step} done on {Frequency}", step, RadioBand.FormatFrequency(_currentFrequencyHz));
         }
