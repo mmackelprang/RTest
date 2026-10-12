@@ -46,14 +46,16 @@ public partial class RadioReceiver
   private const double WfmDeviationHz = 75_000;
 
   /// <summary>
-  /// The pilot level (<see cref="StereoFmDecoder.PilotStrength"/>) above which a pilot can count as
-  /// locked: three times the stereo detector's 0.01 threshold. A broadcast pilot at 10 % deviation reads
-  /// about 0.06.
+  /// The in-phase pilot (<see cref="StereoFmDecoder.PilotInPhase"/>) a locked pilot must reach: 0.02,
+  /// i.e. a pilot of at least 4 % deviation (broadcast pilots are 8–10 %, reading 0.04–0.05).
   /// </summary>
-  internal const float LockedPilotLevel = 0.03f;
+  internal const float LockedPilotInPhase = 0.02f;
 
-  /// <summary>How close the PLL must sit to 19 kHz for a pilot to count as locked, in Hz.</summary>
-  internal const float LockedPllToleranceHz = 5f;
+  /// <summary>
+  /// The share of the pilot band's energy (<see cref="StereoFmDecoder.PilotStrength"/>) that must be in
+  /// phase with the PLL: a clean locked pilot gives about 0.78 (π/4), noise about 0.
+  /// </summary>
+  internal const float LockedPilotCoherence = 0.5f;
 
   /// <summary>The FM acquisition watchdog (AUD-106). Its settings are open to tests.</summary>
   internal FmAcquisitionWatchdog FmWatchdog { get; } = new();
@@ -64,17 +66,22 @@ public partial class RadioReceiver
   /// </summary>
   internal Task? LastWatchdogTask { get; private set; }
 
+  /// <summary>The current tune generation (tests compare a recovery step's guard against it).</summary>
+  internal int TuneGeneration => Volatile.Read(ref _tuneGeneration);
+
   /// <summary>Raised on the DSP thread for every outcome the watchdog returns (tests count them).</summary>
   internal event Action<FmAcquisitionOutcome>? FmAcquisitionReported;
 
   /// <summary>
-  /// Whether <paramref name="stereo"/>'s pilot counts as locked: strong (<see cref="LockedPilotLevel"/>)
-  /// and with the PLL within <see cref="LockedPllToleranceHz"/> of 19 kHz. Stronger evidence than
-  /// <see cref="StereoFmDecoder.StereoDetected"/>, which is an energy detector and reads noise as a
-  /// pilot (`AUD-109`). Only this, or RDS sync, records a frequency as locked for the watchdog.
+  /// Whether <paramref name="stereo"/>'s pilot counts as locked: its in-phase component reaches
+  /// <see cref="LockedPilotInPhase"/> and is at least <see cref="LockedPilotCoherence"/> of the pilot
+  /// band's energy. Stronger evidence than <see cref="StereoFmDecoder.StereoDetected"/>, which is an
+  /// energy detector and reads noise as a pilot (`AUD-109`); the PLL's frequency is no help either,
+  /// because its integrator moves so little that it reads 19 kHz on noise too (measured in
+  /// <c>PilotLockTests</c>). Only this, or RDS sync, records a frequency as locked for the watchdog.
   /// </summary>
   internal static bool IsPilotLocked(StereoFmDecoder stereo) =>
-    stereo.PilotStrength >= LockedPilotLevel && Math.Abs(stereo.PllFrequency - 19_000f) <= LockedPllToleranceHz;
+    stereo.PilotInPhase >= LockedPilotInPhase && stereo.PilotInPhase >= LockedPilotCoherence * stereo.PilotStrength;
 
   /// <summary>
   /// Publishes a new WFM chain to the watchdog: called where the chain is built, with the reason the
@@ -127,11 +134,12 @@ public partial class RadioReceiver
 
     string? signalSnapshot = outcome.Missed ? SignalSnapshot(samples, composite, stereo, rds) : null;
     float pilotLevel = stereo.PilotStrength;
+    float pilotInPhase = stereo.PilotInPhase;
     float pllHz = stereo.PllFrequency;
     int sdrRate = _sdrSampleRate;
     Task previous = LastWatchdogTask ?? Task.CompletedTask;
     LastWatchdogTask = previous.ContinueWith(
-      _ => HandleFmAcquisitionOutcome(outcome, tuneGeneration, signalSnapshot, pilotLevel, pllHz, sdrRate),
+      _ => HandleFmAcquisitionOutcome(outcome, tuneGeneration, signalSnapshot, pilotLevel, pilotInPhase, pllHz, sdrRate),
       CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
   }
 
@@ -164,7 +172,7 @@ public partial class RadioReceiver
     return string.Create(CultureInfo.InvariantCulture,
       $"IQ DC I={meanI:F4} Q={meanQ:F4}, I/Q power ratio {iqRatioDb:F2} dB, " +
       $"composite mean {compMean:F4} (carrier offset ≈ {compMean * WfmDeviationHz:F0} Hz; wraps beyond ±120 kHz), composite RMS {compRms:F3}, " +
-      $"PLL {stereo.PllFrequency:F1} Hz, " +
+      $"pilot in phase {stereo.PilotInPhase:F4}, PLL {stereo.PllFrequency:F1} Hz, " +
       $"RDS {(rds is null ? "none" : rds.IsSynchronized ? "synced" : "not synced")}");
   }
 
@@ -186,7 +194,7 @@ public partial class RadioReceiver
   }
 
   private void HandleFmAcquisitionOutcome(FmAcquisitionOutcome outcome, int generation, string? signalSnapshot,
-    float pilotLevel, float pllHz, int sdrRate)
+    float pilotLevel, float pilotInPhase, float pllHz, int sdrRate)
   {
     try
     {
@@ -200,8 +208,8 @@ public partial class RadioReceiver
       {
         case FmWatchdogAction.ReportOutcome:
           Logger.Information(
-            "FM acquisition ({Reason}) on {Frequency}: pilot {Pilot}, RDS sync {Rds} (judged over {Window}; pilot level {PilotLevel:F4}, PLL {Pll:F1} Hz, mean signal {Signal:F2})",
-            outcome.Reason, frequency, pilot, rds, window, pilotLevel, pllHz, outcome.MeanSignal);
+            "FM acquisition ({Reason}) on {Frequency}: pilot {Pilot}, RDS sync {Rds} (judged over {Window}; pilot level {PilotLevel:F4}, in phase {InPhase:F4}, PLL {Pll:F1} Hz, mean signal {Signal:F2})",
+            outcome.Reason, frequency, pilot, rds, window, pilotLevel, pilotInPhase, pllHz, outcome.MeanSignal);
           if (snapshot is not null)
           {
             Logger.Information("FM acquisition snapshot on {Frequency} (no pilot, no RDS): {Snapshot}", frequency, snapshot);
@@ -252,7 +260,7 @@ public partial class RadioReceiver
   /// rebuilt since (<paramref name="generation"/>), for example by a person pressing a preset while the
   /// step waited for <c>_lock</c>. A skipped step still counts as taken in the episode.
   /// </remarks>
-  private void RecoverFm(bool reopen, int step, long frequencyHz, int generation)
+  internal void RecoverFm(bool reopen, int step, long frequencyHz, int generation)
   {
     lock (_lock)
     {

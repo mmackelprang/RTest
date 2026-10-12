@@ -77,7 +77,7 @@ internal sealed record FmAcquisitionOutcome(
 /// <b>The trigger key.</b> Recovery is asked for only when all three hold at the end of a window:
 /// (1) neither the pilot nor RDS was seen; (2) the mean wideband signal was at least
 /// <see cref="MinSignal"/>; and (3) this frequency was <i>locked</i> earlier in this process: RDS block
-/// sync, or a pilot the receiver judged locked (strong, with the PLL settled on 19 kHz; see
+/// sync, or a pilot the receiver judged locked (in phase with the PLL, not just energy; see
 /// <c>RadioReceiver.IsPilotLocked</c>). "Pilot seen" alone is not enough to record a frequency as
 /// locked, because the stereo detector is an energy detector that reads noise as a pilot (measured on
 /// the box, `AUD-109`). Condition (3) is what keeps a genuinely mono station without RDS from ever
