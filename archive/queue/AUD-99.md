@@ -1,6 +1,6 @@
 # `AUD-99` — HF on the NESDR SMArt v5: on-box direct-sampling probe, then the device layer (direct sampling, tuner type, real range, tune failures)
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **UNBLOCKED 2026-10-11 by owner ruling: the step 0 outcome is an environment limit, not a fault.** Owner, relayed
 by the coordinator on 2026-10-11: the AM antenna *"is the one that comes with the SDR dongle. It's unpowered and
@@ -42,7 +42,7 @@ the system"* now that the hardware `AUD-94` was waiting for is installed. The co
 
 - **Dongle:** Nooelec **NESDR SMArt v5** on `radio`. `lsusb`: `0bda:2838`, iManufacturer `Nooelec`, iProduct
   `NESDR SMArt v5`, serial `56001418`. This is option C in
-  [`known-issues-and-future-work.md` § All-band reception](../known-issues-and-future-work.md). FM plays on it
+  [`known-issues-and-future-work.md` § All-band reception](../../docs/known-issues-and-future-work.md). FM plays on it
   today: `radio-api` opened it at 16:23 on 2026-10-11, logged as `Generic RTL2832U OEM`. That is librtlsdr's
   VID/PID name table (`rtlsdr_get_device_name`), not the EEPROM product string.
 - **Antennas (owner, 2026-10-11):** the dongle is fed from an **HF/VHF diplexer**, with an **AM-type antenna on
@@ -430,7 +430,7 @@ old one, so the device is now re-tuned to the receiver's frequency (tests:
 ## ⚠ Open before merge — one FM failure after AM, not reproduced (2026-10-12, 00:15–00:30 UTC, Builder)
 
 ✅ **OWNER RULING 2026-10-12: *"Merge + watchdog row."*** The fault is accepted as intermittent and possibly
-pre-existing. #800 is merged. The watchdog and instrumentation are filed as [`AUD-106`](AUD-106.md), which carries the
+pre-existing. #800 is merged. The watchdog and instrumentation are filed as [`AUD-106`](../../docs/queue/AUD-106.md), which carries the
 evidence below and the reproduction attempts.
 
 **What happened (build `5cc20e5`).** After about 7 minutes on AM (8 tunes 45 s apart, Debug logging on

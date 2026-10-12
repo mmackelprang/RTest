@@ -229,10 +229,10 @@ so the BAND view, signal colours, preset bar and knob behave the same on all of 
 
 **Status**: ✅ **2026-10-11: hardware installed (option C), software queued.** The NESDR SMArt v5 (serial
 `56001418`) is on `radio`, behind an HF/VHF diplexer with an AM antenna and an FM antenna. Queued as
-[`AUD-99`](../../docs/queue/AUD-99.md) (probe and device layer) → [`AUD-101`](../../docs/queue/AUD-101.md) (AM DSP) →
-[`AUD-102`](../../docs/queue/AUD-102.md) (bands/API/UI) → [`AUD-103`](../../docs/queue/AUD-103.md) (band map), plus
-[`AUD-104`](../../docs/queue/AUD-104.md) (fingerprinting on AM/SW, owner decision). Parent:
-[`AUD-94`](../../docs/queue/AUD-94.md). *History:* owner decided 2026-10-01 not to change hardware now (*"There are not many AM stations
+[`AUD-99`](../queue/AUD-99.md) (probe and device layer) → [`AUD-101`](../queue/AUD-101.md) (AM DSP) →
+[`AUD-102`](../queue/AUD-102.md) (bands/API/UI) → [`AUD-103`](../queue/AUD-103.md) (band map), plus
+[`AUD-104`](../queue/AUD-104.md) (fingerprinting on AM/SW, owner decision). Parent:
+[`AUD-94`](../queue/AUD-94.md). *History:* owner decided 2026-10-01 not to change hardware now (*"There are not many AM stations
 nearby"*). Picks up when the owner buys hardware. 2026-10-02: owner chose to keep AM/SW selectable as they
 are until then (*"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."*) and
 asked for the NESDR SMArt v5 to be added (*"Yes - add this to the roadmap."*) — now option C.
