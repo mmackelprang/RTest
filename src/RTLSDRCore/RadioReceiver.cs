@@ -1421,11 +1421,13 @@ namespace RTLSDRCore;
       /// still apply.
       /// </para>
       /// <para>
-      /// Aircraft (tuner mode) keeps the squelch on the wideband RMS, exactly as before AUD-101,
-      /// although its audio goes through the AM chain. On the in-channel scale the 0.1 default
-      /// would sit at −54 dBFS, and on the box (2026-10-12) empty Aircraft channels read −18 to
-      /// −26 dBFS in the channel with the tuner's AGC holding the noise up: the squelch would never
-      /// close.
+      /// Aircraft (tuner mode) keeps the squelch on main's wideband-RMS formula, although its audio
+      /// goes through the AM chain. The samples differ from main's: Aircraft is offset-tuned, so
+      /// the RMS covers f−180…f+60 kHz rather than f±120 kHz. On the in-channel scale the 0.1
+      /// default would sit at −54 dBFS, and on the box (2026-10-12) empty Aircraft channels read
+      /// −18 to −26 dBFS in the channel with the tuner's AGC holding the noise up. On the wideband
+      /// scale 121.5 MHz read 0.25 and the channels a seek passed 0.22-0.25, also above 0.1: the squelch is open on empty
+      /// channels either way (see docs/queue/AUD-101.md, box UAT).
       /// </para>
       /// </remarks>
       private bool SquelchApplies => !HfBands.Requires(Volatile.Read(ref _currentBand).Type);
