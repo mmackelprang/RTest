@@ -33,16 +33,21 @@ public class PilotLockTests
     Assert.True(RadioReceiver.IsPilotLocked(d), $"pilot {d.PilotStrength:F4}, in phase {d.PilotInPhase:F4}, PLL {d.PllFrequency:F1} Hz");
   }
 
-  [Fact]
-  public void DiscriminatorNoise_IsNotLocked()
+  [Theory]
+  [InlineData(0.5, 4242)]
+  [InlineData(0.92, 4242)]   // an empty channel: phase steps uniform over ±π read ±1.6 on the WFM scale, RMS 0.92
+  [InlineData(2.0, 4242)]
+  [InlineData(2.0, 7)]
+  [InlineData(4.0, 99)]
+  public void DiscriminatorNoise_IsNotLocked(double rms, int seed)
   {
-    // Gaussian noise at RMS 0.5 on the discriminator's scale, as an empty channel gives.
-    Random random = new(4242);
+    // Gaussian noise on the discriminator's scale.
+    Random random = new(seed);
     StereoFmDecoder d = Decode(_ =>
     {
       double u1 = 1.0 - random.NextDouble();
       double u2 = random.NextDouble();
-      return (float)(0.5 * Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2));
+      return (float)(rms * Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2));
     });
 
     Assert.False(RadioReceiver.IsPilotLocked(d), $"pilot {d.PilotStrength:F4}, in phase {d.PilotInPhase:F4}, PLL {d.PllFrequency:F1} Hz");
