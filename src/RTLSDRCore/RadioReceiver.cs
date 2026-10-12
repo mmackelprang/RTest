@@ -1985,9 +1985,30 @@ namespace RTLSDRCore;
               SetupNfmSignalProcessing(bandwidth);
               return;
           }
-          // The AM and NFM chains are cleared at the end of this method, once the generic fields
-          // below are built, so a block the DSP thread takes meanwhile still runs one whole chain.
+          // The AM and NFM chains are cleared at the end of SetupGenericSignalProcessing, once the
+          // generic fields are built, so a block the DSP thread takes meanwhile still runs the old chain's
+          // DSP (its output may take the new _audioFormat: at most one block mistagged). If the
+          // build below throws, the chains are cleared anyway (catch), so a stale AM offset cannot
+          // outlive the band.
+          try
+          {
+              SetupGenericSignalProcessing(bandwidth);
+          }
+          catch
+          {
+              _amChain = null;
+              _nfmChain = null;
+              throw;
+          }
+      }
 
+      /// <summary>
+      /// The generic path (WFM, and any modulation on a channel too wide for the AM and NFM chains):
+      /// IQ decimation, demodulator, stereo/RDS for WFM, de-emphasis, audio decimation. Clears the AM
+      /// and NFM chains last.
+      /// </summary>
+      private void SetupGenericSignalProcessing(int bandwidth)
+      {
           // Step 3: IQ decimation (SDR rate → demod rate)
           var iqDecimFactor = _sdrSampleRate / _demodSampleRate;
           if (iqDecimFactor > 1)

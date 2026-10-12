@@ -22,9 +22,10 @@ namespace RTLSDRCore.DSP;
 /// bandwidth and a transition band of <see cref="ChannelTransitionFraction"/> of it: for the
 /// 12.5 kHz Weather and VHF channels, flat to 6 kHz, −6 dB at 8 kHz and in the stop band from
 /// 10 kHz. A 5 kHz-deviation signal's occupied band (Carson: ±(5 + 3) kHz for 3 kHz audio) has
-/// its edge at the −6 dB point: in the tests a 3 kHz tone at 5 kHz deviation reads −0.3 dB, with
-/// about 2.6 % of its power off the tone. The whole of a station 25 kHz away (NOAA Weather's
-/// spacing; from 17 kHz) falls in the stop band (−58 dB or more from 17 kHz). A station 12.5 kHz away with the same deviation overlaps the
+/// its edge at the −6 dB point. Measured 2026-10-12 in the tests (printed, not asserted): a 3 kHz
+/// tone at 5 kHz deviation reads −0.3 dB, with about 2.6 % of its power off the tone. The whole of
+/// a station 25 kHz away (NOAA Weather's spacing; from 17 kHz) falls in the stop band (computed
+/// from the design, not asserted: −58 dB or more from 17 kHz). A station 12.5 kHz away with the same deviation overlaps the
 /// channel and is only partly rejected; the tests state both numbers.
 /// </para>
 /// <para>
