@@ -53,8 +53,10 @@ public static class BandMapStations
   /// </summary>
   /// <remarks>
   /// <para>
-  /// The table is frequency-only: it does not name a dongle and applies to every device, which holds
-  /// because every RTL2832U board clocks from a 28.8 MHz reference. A board whose spur measures
+  /// The table is frequency-only: it does not name a dongle and applies to every device, on the
+  /// assumption that every RTL2832U board clocks from a 28.8 MHz reference. The cost: a real station at
+  /// 960 kHz (common in US markets) is never a peak, a Scan stop or a live-seek stop; it can still be
+  /// tuned directly or from a preset. A board whose spur measures
   /// elsewhere, or not at all, would need the table keyed by device; only the NESDR SMArt v5 has been
   /// measured.
   /// </para>

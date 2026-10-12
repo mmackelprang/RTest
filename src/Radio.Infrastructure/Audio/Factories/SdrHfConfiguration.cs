@@ -39,8 +39,9 @@ public static class SdrHfConfiguration
 
   /// <summary>
   /// The idle band sweep's device factory (AUD-103 review, L5): each call reads the setting afresh from
-  /// <paramref name="configuration"/> with <see cref="Read"/> and creates the device with it, so the idle
-  /// sweep opens the dongle with the same HF decision the radio and the band map's reason use.
+  /// <paramref name="configuration"/> with <see cref="Read"/> and creates the device with it. After a
+  /// change of the setting the idle sweep sees it on its next open, while the radio applies it only at
+  /// its next start and the band map's reason within <c>BandMapService.ReceivingDeviceCacheDuration</c>.
   /// </summary>
   /// <param name="configuration">Returns the application configuration; it may return null (read as absent).</param>
   /// <param name="logger">Receives <see cref="Read"/>'s warning; may be null.</param>

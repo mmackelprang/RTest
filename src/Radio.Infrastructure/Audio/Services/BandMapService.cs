@@ -1130,8 +1130,11 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
   /// A read of the device is reused for <see cref="ReceivingDeviceCacheDuration"/> (AUD-103 review,
   /// L2): every band-map read asks this, and DI's <c>receivingDevice</c> may re-enumerate the dongle
   /// (each time logged at Information) once <c>RadioFactory</c>'s 30 s device cache has expired. So a
-  /// newly plugged dongle or a changed <c>RTLSDR:HfDirectSampling</c> reaches this answer within that
-  /// time. A read that throws is not cached; one that returns null (no device) is.
+  /// changed <c>RTLSDR:HfDirectSampling</c> reaches this answer within that time, and a newly plugged
+  /// dongle within it plus <c>RadioFactory</c>'s 30 s enumeration cache. A read that throws is not
+  /// cached; one that returns null (no device) is. In DI the read is <c>SdrReceivingDevice.Find</c>,
+  /// which catches its own exceptions and returns null, so there a failed enumeration is cached as "no
+  /// device" (no device limit) for the full duration.
   /// </remarks>
   /// <param name="band">The band.</param>
   public string? UnavailableReason(BandType band)

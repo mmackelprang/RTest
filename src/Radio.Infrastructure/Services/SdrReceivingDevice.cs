@@ -6,7 +6,10 @@ namespace Radio.Infrastructure.Services;
 /// <summary>
 /// The SDR device whose range decides what the console can receive and sweep: one choice shared by
 /// the band list's receivable flag (<see cref="RadioBandService"/>, AUD-102) and the band map's
-/// reason (<c>BandMapService</c>, AUD-103), so the two cannot disagree about which device they mean.
+/// reason (<c>BandMapService</c>, AUD-103): the same rule picks the device for both. The band map reuses
+/// a read for <c>BandMapService.ReceivingDeviceCacheDuration</c> (5 minutes) and the band list does not,
+/// so for up to that long after a dongle swap or an <c>RTLSDR:HfDirectSampling</c> change the two can
+/// answer from different reads.
 /// </summary>
 public static class SdrReceivingDevice
 {

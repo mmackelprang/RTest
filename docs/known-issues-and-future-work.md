@@ -141,7 +141,7 @@ tunes keep every channel's window at least 12 kHz from the tune centre, where th
 filter, direct sampling at 28.8 MHz folds `28.8 MHz − f` onto `f`, so a map of an upper SW segment can show
 images of lower ones (31 m appears across 15 m, 41 m at the bottom of 13 m); a low-pass filter at the antenna is
 the fix. Not changed: the `UI-22` colour thresholds (on the box's passive antenna every real AM/SW signal measured
-so far would draw as *weak*). Details: [`queue/AUD-103.md`](queue/AUD-103.md).
+so far would draw as *weak*). Details: [`queue/AUD-103.md`](queue/AUD-103.md). The cost: a real 960 kHz station would also never be a peak or a Scan/seek stop (it can still be tuned directly or from a preset).
 
 The "~2 days" estimate in the table below predates a code survey that
 found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the
