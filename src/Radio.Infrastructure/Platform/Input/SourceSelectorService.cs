@@ -4,6 +4,7 @@ using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.Infrastructure.Platform.Input;
 
@@ -245,33 +246,15 @@ public sealed class SourceSelectorService : IDisposable
   }
 
   /// <summary>
-  /// Sets the band and restores that band's last-tuned frequency.
-  ///
-  /// <para>
-  /// The read-back is deliberate. <see cref="IRadioControl.SetBandAsync"/> does not promise that the
-  /// band changed: a tuner may complete the call without switching (the RF320 USB radio, removed by
-  /// AUD-16, did exactly that), so a commit that trusted the absence of an exception could report a
-  /// band change that never happened. The row for an unsupported band is normally dimmed by
-  /// <c>SupportedBands</c> composition and never reaches here; this covers a tuner swapped underneath
-  /// a composed list, or one that silently declines.
-  /// </para>
+  /// Sets the band and restores that band's last-tuned frequency, through the one band change the
+  /// API's <c>POST /api/radio/band</c> also uses (<see cref="RadioBandSwitch"/>, AUD-105): the band
+  /// being left is remembered first, and nothing is restored unless the tuner reports the new band
+  /// afterwards. The row for an unsupported band is normally dimmed by <c>SupportedBands</c>
+  /// composition and never reaches here; the read-back covers a tuner swapped underneath a composed
+  /// list, or one that silently declines.
   /// </summary>
-  private async Task ApplyBandAsync(IRadioControl radio, RadioBand band)
-  {
-    await radio.SetBandAsync(band);
-
-    if (radio.CurrentBand != band)
-    {
-      _logger.LogWarning("Tuner did not change to {Band}; it reports {Actual}", band, radio.CurrentBand);
-      return;
-    }
-
-    var restore = await _bandMemoryFactory().GetAsync(band);
-    if (restore is { } freq)
-    {
-      await radio.SetFrequencyAsync(freq);
-    }
-  }
+  private Task ApplyBandAsync(IRadioControl radio, RadioBand band) =>
+    RadioBandSwitch.SwitchAsync(radio, _bandMemoryFactory(), band, _logger);
 
   // --- Composition ----------------------------------------------------------------------------
 

@@ -317,6 +317,23 @@ public class SourceSelectorServiceTests
   }
 
   [Fact]
+  public void CommitBand_RemembersTheOutgoingBandsFrequency_BeforeChangingBand()
+  {
+    // AUD-105: the preferences loop records the dial only every 30 s, so a station tuned just
+    // before a band change would otherwise be lost on the way back. The band change records it.
+    using var h = new Harness();
+    var radio = ActiveRadio(h);
+    radio.CurrentFrequency = Frequency.FromMegahertz(97.745);
+    h.BandMemory.Remembered[RadioBand.AM] = Frequency.FromKilohertz(1130);
+
+    h.HighlightRow("band:AM");
+    h.Selector.Press();
+
+    Assert.Equal(new[] { (RadioBand.FM, 97_745_000L) }, h.BandMemory.Writes.Select(w => (w.Band, w.Frequency.Hertz)).ToArray());
+    Assert.Equal(new[] { 1_130_000L }, radio.FrequenciesSet.Select(f => f.Hertz).ToArray());
+  }
+
+  [Fact]
   public void CommitBand_FallsBackToTheBandDefault_WhenNothingIsRemembered()
   {
     using var h = new Harness();

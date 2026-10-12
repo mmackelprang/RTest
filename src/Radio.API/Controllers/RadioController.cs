@@ -5,6 +5,7 @@ using Radio.API.Models;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.API.Controllers;
@@ -21,6 +22,7 @@ public class RadioController : ControllerBase
   private readonly IAudioEngine _audioEngine;
   private readonly IRadioPresetService _presetService;
   private readonly IRadioFactory _radioFactory;
+  private readonly IRadioBandMemory _bandMemory;
 
   /// <summary>
   /// Initializes a new instance of the RadioController.
@@ -29,12 +31,14 @@ public class RadioController : ControllerBase
     ILogger<RadioController> logger,
     IAudioEngine audioEngine,
     IRadioPresetService presetService,
-    IRadioFactory radioFactory)
+    IRadioFactory radioFactory,
+    IRadioBandMemory bandMemory)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _presetService = presetService;
     _radioFactory = radioFactory;
+    _bandMemory = bandMemory;
   }
 
   /// <summary>
@@ -190,14 +194,16 @@ public class RadioController : ControllerBase
   }
 
   /// <summary>
-  /// Sets the radio band (AM, FM, etc.).
+  /// Sets the radio band (AM, FM, etc.) and tunes the band's remembered frequency, or the band's
+  /// default when nothing is remembered (AUD-105). The frequency on the band being left is
+  /// remembered first, so a return trip comes back to it.
   /// </summary>
   /// <param name="request">The band to set.</param>
   /// <returns>The updated radio state.</returns>
   /// <response code="200">Returns the updated radio state.</response>
   /// <response code="400">If the radio is not active or the band is invalid.</response>
   /// <response code="409">If the band is AM or SW and the SDR device has no HF direct sampling (AUD-99).</response>
-  /// <response code="503">If the tuner refused the band change or the HF switch the band needs (AUD-99).</response>
+  /// <response code="503">If the tuner refused the band change, the HF switch the band needs (AUD-99), or the remembered frequency (AUD-105; the band has then changed).</response>
   [HttpPost("band")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -219,7 +225,9 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      await radioSource.SetBandAsync(band);
+      // AUD-105: the band's remembered frequency (or its default), the same band change the
+      // encoder's SOURCE selector makes, not wherever the receiver clamped the old frequency to.
+      await RadioBandSwitch.SwitchAsync(radioSource, _bandMemory, band, _logger);
       return Ok(radioSource.MapToRadioStateDto());
     }
     catch (TunerRefusedException ex)

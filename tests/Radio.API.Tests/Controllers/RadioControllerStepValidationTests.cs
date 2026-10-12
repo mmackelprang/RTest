@@ -34,7 +34,7 @@ public sealed class RadioControllerStepValidationTests : IDisposable
     Mock<IAudioEngine> engine = new();
     engine.Setup(e => e.GetMasterMixer()).Returns(mixer.Object);
     _controller = new RadioController(
-      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>());
+      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>(), Mock.Of<IRadioBandMemory>());
   }
 
   public void Dispose() => _receiver.Dispose();
