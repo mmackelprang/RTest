@@ -32,7 +32,8 @@ public class BandPresetsTests
     {
         var band = BandPresets.Shortwave;
 
-        Assert.Equal(1_600_000, band.MinFrequencyHz);
+        // AUD-102: 1 kHz above AM's top channel, so AM and Shortwave no longer overlap.
+        Assert.Equal(1_711_000, band.MinFrequencyHz);
         Assert.Equal(30_000_000, band.MaxFrequencyHz);
         Assert.Equal(ModulationType.AM, band.DefaultModulation);
     }
@@ -177,6 +178,52 @@ public class BandPresetsTests
             Assert.True(band.AllowedStepSizes[i] > band.AllowedStepSizes[i - 1],
                 $"AllowedStepSizes for {bandType} not sorted: {band.AllowedStepSizes[i - 1]} >= {band.AllowedStepSizes[i]}");
         }
+    }
+
+    /// <summary>
+    /// AUD-102: every edge where <see cref="BandPresets.FindBandForFrequency"/>'s answer depends on
+    /// band order or on the AM/SW split, pinned so a reordering or a range edit has to change this
+    /// test rather than move a frequency to another band silently.
+    /// </summary>
+    [Theory]
+    [InlineData(1_600_000, BandType.AM)]        // expanded AM; was in the AM/SW overlap until AUD-102
+    [InlineData(1_700_000, BandType.AM)]        // expanded AM
+    [InlineData(1_710_000, BandType.AM)]        // AM's top channel, the band's top edge
+    [InlineData(1_711_000, BandType.Shortwave)] // Shortwave's bottom edge
+    [InlineData(1_715_000, BandType.Shortwave)] // first 5 kHz channel of Shortwave
+    [InlineData(29_999_999, BandType.Shortwave)]
+    [InlineData(30_000_000, BandType.Shortwave)] // SW max == VHF min: Shortwave by order
+    [InlineData(30_000_001, BandType.VHF)]
+    [InlineData(87_500_000, BandType.FM)]        // inside VHF: FM by order
+    [InlineData(108_000_000, BandType.FM)]       // FM max == AIR min: FM by order
+    [InlineData(108_000_001, BandType.Aircraft)] // inside VHF: Aircraft by order
+    [InlineData(137_000_000, BandType.Aircraft)]
+    [InlineData(137_000_001, BandType.VHF)]
+    [InlineData(162_400_000, BandType.Weather)]  // inside VHF: Weather by order
+    [InlineData(162_550_000, BandType.Weather)]
+    [InlineData(162_550_001, BandType.VHF)]
+    [InlineData(300_000_000, BandType.VHF)]
+    public void FindBandForFrequency_AtTheBandEdges(long frequencyHz, BandType expectedBand)
+    {
+        var band = BandPresets.FindBandForFrequency(frequencyHz);
+
+        Assert.NotNull(band);
+        Assert.Equal(expectedBand, band.Type);
+    }
+
+    [Theory]
+    [InlineData(529_999)]    // below AM
+    [InlineData(1_710_500)]  // strictly between AM's top (1710 kHz) and Shortwave's bottom (1711 kHz)
+    [InlineData(300_000_001)] // above VHF
+    public void FindBandForFrequency_OutsideEveryBand_ReturnsNull(long frequencyHz)
+    {
+        Assert.Null(BandPresets.FindBandForFrequency(frequencyHz));
+    }
+
+    [Fact]
+    public void AmAndShortwave_DoNotOverlap()
+    {
+        Assert.True(BandPresets.Shortwave.MinFrequencyHz > BandPresets.AmBroadcast.MaxFrequencyHz);
     }
 
     [Fact]

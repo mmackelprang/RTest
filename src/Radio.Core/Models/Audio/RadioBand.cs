@@ -6,7 +6,7 @@ namespace Radio.Core.Models.Audio;
 public enum RadioBand
 {
   /// <summary>
-  /// Amplitude Modulation band (typically 520-1710 kHz).
+  /// Amplitude Modulation band (530-1710 kHz on the RTL-SDR presets).
   /// </summary>
   AM,
 
@@ -26,7 +26,7 @@ public enum RadioBand
   VHF,
 
   /// <summary>
-  /// Shortwave band (typically 1.6-30 MHz).
+  /// Shortwave band (1.711-30 MHz on the RTL-SDR presets).
   /// </summary>
   SW,
 

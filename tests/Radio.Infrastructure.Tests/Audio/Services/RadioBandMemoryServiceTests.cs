@@ -149,8 +149,39 @@ public class RadioBandMemoryServiceTests
     var frequency = await service.GetAsync(RadioBand.SW);
 
     // The bottom edge is a real tunable frequency and where a mechanical dial rests, not a
-    // placeholder - so it is read from BandPresets rather than restated here.
-    Assert.Equal(BandPresets.GetBand(BandType.Shortwave).MinFrequencyHz, frequency!.Value.Hertz);
+    // placeholder - so it is read from BandPresets rather than restated here. AUD-102: rounded up
+    // to the band's default-step grid, which moves SW's 1711 kHz edge to 1715 kHz.
+    var sw = BandPresets.GetBand(BandType.Shortwave);
+    Assert.Equal(1_715_000, frequency!.Value.Hertz);
+    Assert.True(frequency.Value.Hertz >= sw.MinFrequencyHz);
+    Assert.Equal(0, frequency.Value.Hertz % sw.DefaultStepHz);
+  }
+
+  [Theory]
+  [InlineData(RadioBand.WB, BandType.Weather)]
+  [InlineData(RadioBand.AIR, BandType.Aircraft)]
+  [InlineData(RadioBand.VHF, BandType.VHF)]
+  public async Task Get_FallsBackToTheExactBottomEdge_WhereItIsOnTheStepGrid(RadioBand band, BandType type)
+  {
+    // AUD-102's rounding moves only SW: these edges are already on their default-step grid.
+    var service = CreateService();
+
+    var frequency = await service.GetAsync(band);
+
+    Assert.Equal(BandPresets.GetBand(type).MinFrequencyHz, frequency!.Value.Hertz);
+  }
+
+  [Theory]
+  [InlineData("1650000")]   // an SW memory saved before AUD-102 moved SW's edge to 1.711 MHz: AM's now
+  [InlineData("40000000")]  // above the band
+  public async Task Get_IgnoresARememberedValueOutsideTheBand_AndFallsBack(string storedHz)
+  {
+    _store.Entries["RadioBandMemory:LastFrequencyHzByBand:SW"] = storedHz;
+    var service = CreateService();
+
+    var frequency = await service.GetAsync(RadioBand.SW);
+
+    Assert.Equal(1_715_000, frequency!.Value.Hertz);
   }
 
   [Fact]

@@ -155,7 +155,7 @@ public class BandSweepPlansTests
     Assert.Null(BandSweepPlans.For(BandType.Shortwave, 27_000_000));
 
     string reason = BandSweepPlans.UnavailableReason(BandType.Shortwave)!;
-    Assert.Contains("1.6–30 MHz", reason);
+    Assert.Contains("1.711–30 MHz", reason); // AUD-102: SW starts above AM's 1710 kHz
     Assert.Contains("mostly below this tuner's 24 MHz lower limit", reason);
   }
 

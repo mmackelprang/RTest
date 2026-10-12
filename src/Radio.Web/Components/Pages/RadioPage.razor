@@ -99,8 +99,8 @@
       </div>
 
       <!-- Step size selector -->
-      <RadzenDropDown TValue="string" Value="@_radioState.Step.ToString("0")" Change="@HandleStepDropDownChangeAsync"
-                      Data="@_stepSizeOptions" TextProperty="Label" ValueProperty="Value"
+      <RadzenDropDown TValue="string" Value="@_radioState.Step.ToString("0", System.Globalization.CultureInfo.InvariantCulture)" Change="@HandleStepDropDownChangeAsync"
+                      Data="@StepSizeOptions" TextProperty="Label" ValueProperty="Value"
                       Placeholder="Step Size"
                       Style="min-width: 160px; max-width: 180px;" />
 
@@ -170,7 +170,7 @@
     <div class="kiosk-entry-card" @onclick:stopPropagation="true">
       <h6>Set Frequency</h6>
       <RadzenNumeric TValue="double" @bind-Value="_newFrequency"
-                     Placeholder="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
+                     Placeholder="@FrequencyFormatter.DialogPlaceholder(_radioState?.Band)"
                      Min="@((decimal)GetMinFrequency())"
                      Max="@((decimal)GetMaxFrequency())"
                      Step="@GetDialogStep().ToString()"
@@ -224,17 +224,20 @@
   private bool _isSavePresetDialogOpen = false;
   private string _presetName = "";
 
-  // Step size options for RadzenDropDown
-  private List<StepSizeOption> _stepSizeOptions = new()
-  {
-    new("1 kHz", "1000"),
-    new("9 kHz", "9000"),
-    new("10 kHz", "10000"),
-    new("25 kHz", "25000"),
-    new("100 kHz", "100000"),
-    new("200 kHz", "200000"),
-    new("1 MHz", "1000000"),
-  };
+  /// <summary>
+  /// The step dropdown's options: the current band's allowed steps from the band list, as the control
+  /// panel's step chip cycles them (AUD-102). Empty until the band list has loaded, or when it has no
+  /// entry for the band. A step the band does not list (one kept across a frequency-only band change,
+  /// AUD-95) matches no option, so the dropdown shows its placeholder while the "Step:" line above it
+  /// still shows the step in use.
+  /// </summary>
+  private IReadOnlyList<StepSizeOption> StepSizeOptions =>
+    _radioState == null
+      ? Array.Empty<StepSizeOption>()
+      : (_availableBands.FirstOrDefault(b => b.Type == _radioState.Band)?.AllowedStepSizes ?? Array.Empty<long>())
+        .Select(hz => new StepSizeOption(
+          FrequencyFormatter.FormatStep(hz), hz.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+        .ToArray();
 
   private record StepSizeOption(string Label, string Value);
 
@@ -377,10 +380,8 @@
   {
     if (_radioState != null)
     {
-      // Convert Hz to display units for the dialog
-      _newFrequency = _radioState.Band == "AM"
-        ? _radioState.Frequency / 1_000.0       // Hz → kHz
-        : _radioState.Frequency / 1_000_000.0;  // Hz → MHz
+      // Convert Hz to display units for the dialog: kHz on AM and SW, MHz otherwise (AUD-102).
+      _newFrequency = FrequencyFormatter.ToDisplayUnits(_radioState.Frequency, _radioState.Band);
     }
     _isFrequencyDialogOpen = true;
   }
@@ -395,9 +396,7 @@
     try
     {
       // Convert display units back to Hz for API
-      var frequencyHz = _radioState?.Band == "AM"
-        ? _newFrequency * 1_000.0       // kHz → Hz
-        : _newFrequency * 1_000_000.0;  // MHz → Hz
+      var frequencyHz = FrequencyFormatter.FromDisplayUnits(_newFrequency, _radioState?.Band);
       var success = await RadioApi.SetFrequencyAsync(frequencyHz);
       _isFrequencyDialogOpen = false;
       if (success)
@@ -457,7 +456,7 @@
     try
     {
       Logger.LogDebug("Calling HandleStepChangeAsync with step Hz: {Step}", newStep);
-      if (double.TryParse(newStep, out var stepHz))
+      if (double.TryParse(newStep, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var stepHz))
       {
         // Optimistic update (value is Hz)
         if (_radioState != null)
@@ -465,9 +464,13 @@
             _radioState = _radioState with { Step = stepHz };
         }
 
-        // API expects Hz
+        // API expects Hz. A step the band does not allow is refused with a 400 (AUD-102); the
+        // options come from the band, so that is only reachable when the band changed under the
+        // dropdown. Reload either way, so the page never keeps an optimistic step the API refused.
         var success = await RadioApi.SetStepAsync(stepHz);
         Logger.LogDebug("SetStepAsync result: {Success}", success);
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
       }
       else
       {

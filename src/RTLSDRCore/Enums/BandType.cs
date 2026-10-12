@@ -16,7 +16,7 @@ namespace RTLSDRCore.Enums;
       FM,
 
       /// <summary>
-      /// Shortwave band (1.6 MHz - 30 MHz)
+      /// Shortwave band (1.711 MHz - 30 MHz)
       /// </summary>
       Shortwave,
 

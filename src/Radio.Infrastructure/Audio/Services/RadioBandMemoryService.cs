@@ -56,7 +56,14 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
     var memory = await LoadAsync(cancellationToken);
     if (memory.TryGetValue(band.ToString(), out long hz) && hz > 0)
     {
-      return new Frequency(hz);
+      if (IsInBand(band, hz))
+      {
+        return new Frequency(hz);
+      }
+
+      // A value saved before a band edge moved (AUD-102: SW now starts at 1.711 MHz, so an old SW
+      // memory of 1.60-1.71 MHz is AM's) would otherwise tune another band. Treated as absent.
+      _logger.LogDebug("Ignoring remembered {Band} frequency {Hz} Hz: outside the band", band, hz);
     }
 
     return DefaultFor(band);
@@ -170,7 +177,8 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
   ///
   /// <para>
   /// FM and AM have configured defaults; the other four do not, so they land on the bottom edge of
-  /// the band from <c>BandPresets</c>. The bottom edge is a real, tunable frequency and it is where
+  /// the band from <c>BandPresets</c>, rounded up to the band's default-step grid (AUD-102; this only
+  /// moves SW, from 1711 to 1715 kHz). The bottom edge is a real, tunable frequency and it is where
   /// a mechanical dial would sit at rest — it is not a placeholder.
   /// </para>
   /// </summary>
@@ -183,6 +191,35 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
       RadioBand.AM => Frequency.FromKilohertz(opts.DefaultAMFrequencyKHz),
       _ => BottomEdge(band),
     };
+  }
+
+  private static bool IsInBand(RadioBand band, long hz)
+  {
+    BandType? mapped = band switch
+    {
+      RadioBand.AM => BandType.AM,
+      RadioBand.FM => BandType.FM,
+      RadioBand.SW => BandType.Shortwave,
+      RadioBand.WB => BandType.Weather,
+      RadioBand.VHF => BandType.VHF,
+      RadioBand.AIR => BandType.Aircraft,
+      _ => null,
+    };
+
+    if (mapped is null)
+    {
+      return true;
+    }
+
+    try
+    {
+      return BandPresets.GetBand(mapped.Value).ContainsFrequency(hz);
+    }
+    catch (ArgumentException)
+    {
+      // As in BottomEdge: BandPresets throws for a type it does not define; keep the memory.
+      return true;
+    }
   }
 
   private Frequency? BottomEdge(RadioBand band)
@@ -205,7 +242,15 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
 
     try
     {
-      return new Frequency(BandPresets.GetBand(mapped.Value).MinFrequencyHz);
+      // The first frequency at or above the bottom edge on the band's default-step grid. On WB, AIR
+      // and VHF that is the edge itself. On SW (AUD-102: 1711 kHz, one above AM's top channel) it is
+      // 1715 kHz, so 5 kHz steps from there land on the 5 kHz broadcast grid rather than 1716, 1721...
+      RTLSDRCore.Models.RadioBand preset = BandPresets.GetBand(mapped.Value);
+      long step = preset.DefaultStepHz;
+      long hz = step > 0
+        ? (preset.MinFrequencyHz + step - 1) / step * step
+        : preset.MinFrequencyHz;
+      return new Frequency(Math.Min(hz, preset.MaxFrequencyHz));
     }
     catch (ArgumentException ex)
     {

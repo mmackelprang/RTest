@@ -97,7 +97,7 @@ public sealed class SDRRadioAudioSourceScanTests : IAsyncDisposable
     MapReturns(null, BandMapService.ScanReasonStale);
     _radioOptions.ScanStopThreshold = 0;   // every step is a stop
     SDRRadioAudioSource source = CreateSource(_map.Object);
-    await source.SetFrequencyStepAsync(new Frequency(5_000_000));
+    await source.SetFrequencyStepAsync(new Frequency(200_000)); // FM's widest allowed step (AUD-102)
 
     await source.StartScanAsync(ScanDirection.Up);
     await _scanEnded.Task.WaitAsync(FailSafe);
@@ -116,7 +116,7 @@ public sealed class SDRRadioAudioSourceScanTests : IAsyncDisposable
   {
     _radioOptions.ScanStopThreshold = 0;
     SDRRadioAudioSource source = CreateSource(null);
-    await source.SetFrequencyStepAsync(new Frequency(5_000_000));
+    await source.SetFrequencyStepAsync(new Frequency(200_000)); // FM's widest allowed step (AUD-102)
 
     await source.StartScanAsync(ScanDirection.Up);
     await _scanEnded.Task.WaitAsync(FailSafe);
@@ -131,7 +131,7 @@ public sealed class SDRRadioAudioSourceScanTests : IAsyncDisposable
       .Throws(new InvalidOperationException("boom"));
     _radioOptions.ScanStopThreshold = 100;
     SDRRadioAudioSource source = CreateSource(_map.Object);
-    await source.SetFrequencyStepAsync(new Frequency(5_000_000));
+    await source.SetFrequencyStepAsync(new Frequency(200_000)); // FM's widest allowed step (AUD-102)
 
     await source.StartScanAsync(ScanDirection.Up);
     await _scanEnded.Task.WaitAsync(FailSafe);

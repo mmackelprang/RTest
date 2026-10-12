@@ -509,21 +509,36 @@ public class PresetSelectorServiceTests
   [Fact]
   public void Save_FallsBackToTheDefaultName_WhenThereIsNoRdsName()
   {
-    // "Default" here means THIS service's fallback, matching RadioControlPanel's save dialog:
-    // "{Band} {formatted frequency}". It deliberately does not reach
-    // RadioPreset.GetDefaultName, which formats the frequency as display units while
-    // RadioPreset.Frequency holds hertz — that path would name this preset "FM - 101500000.0".
+    // "Default" here is RadioPreset.GetDefaultName, which since AUD-102 takes hertz and names in the
+    // band's unit. Before that it took display units and would have named this "FM - 101500000.0",
+    // so the service spelled out "FM 101.5 MHz" itself.
     using var h = new Harness();
     h.ActiveRadio(RadioBand.FM, 101_500_000);
 
     h.Selector.LongPress();
 
     var saved = Assert.Single(h.Bank.Presets);
-    Assert.Equal("FM 101.5 MHz", saved.Name);
+    Assert.Equal("FM - 101.5", saved.Name);
     Assert.DoesNotContain("101500000", saved.Name, StringComparison.Ordinal);
     // An explicit non-blank name is always passed, which is what keeps the service's own default
     // out of reach.
     Assert.False(string.IsNullOrWhiteSpace(Assert.Single(h.Bank.AddCalls).Name));
+  }
+
+  [Theory]
+  [InlineData(RadioBand.SW, 5_905_000L, "SW - 5905", "5905 kHz SW")]
+  [InlineData(RadioBand.AM, 1_010_000L, "AM - 1010", "1010 kHz AM")]
+  public void Save_WithoutAnRdsName_NamesAmAndSwInKilohertz(RadioBand band, long hz, string name, string noticeTail)
+  {
+    // AUD-102. The old fallback printed SW 5.905 MHz as "SW 5.9 MHz" (5.900 and 5.910 the same) and
+    // AM 1010 kHz as "AM 1.0 MHz".
+    using var h = new Harness();
+    h.ActiveRadio(band, hz);
+
+    h.Selector.LongPress();
+
+    Assert.Equal(name, Assert.Single(h.Bank.Presets).Name);
+    Assert.EndsWith(noticeTail, h.LastNotice.SecondaryText, StringComparison.Ordinal);
   }
 
   [Fact]

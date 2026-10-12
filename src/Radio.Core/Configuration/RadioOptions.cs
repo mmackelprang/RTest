@@ -35,12 +35,6 @@ public class RadioOptions
   public double DefaultFMStepMHz { get; set; } = 0.1;
 
   /// <summary>
-  /// Gets or sets the default AM frequency step in kHz.
-  /// Typical values: 9 or 10 kHz
-  /// </summary>
-  public double DefaultAMStepKHz { get; set; } = 10.0;
-
-  /// <summary>
   /// Gets or sets the minimum FM frequency in MHz.
   /// </summary>
   public double MinFMFrequencyMHz { get; set; } = 87.5;
@@ -49,16 +43,6 @@ public class RadioOptions
   /// Gets or sets the maximum FM frequency in MHz.
   /// </summary>
   public double MaxFMFrequencyMHz { get; set; } = 108.0;
-
-  /// <summary>
-  /// Gets or sets the minimum AM frequency in kHz.
-  /// </summary>
-  public double MinAMFrequencyKHz { get; set; } = 520.0;
-
-  /// <summary>
-  /// Gets or sets the maximum AM frequency in kHz.
-  /// </summary>
-  public double MaxAMFrequencyKHz { get; set; } = 1710.0;
 
   /// <summary>
   /// Gets or sets the signal strength threshold for scan stop (0-100).

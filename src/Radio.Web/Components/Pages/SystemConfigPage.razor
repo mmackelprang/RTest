@@ -460,28 +460,20 @@
                 <small>Startup FM frequency</small>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
-                <RadzenNumeric TValue="double" @bind-Value="_radioConfig.DefaultAMFrequencyKHz" Min="520" Max="1710" Step="(decimal)10.0" Placeholder="Default AM Frequency (kHz)" Style="width:100%" />
+                <RadzenNumeric TValue="double" @bind-Value="_radioConfig.DefaultAMFrequencyKHz" Min="530" Max="1710" Step="(decimal)10.0" Placeholder="Default AM Frequency (kHz)" Style="width:100%" />
                 <small>Startup AM frequency</small>
               </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="3">
+              @* AUD-102: AM step, min and max were deleted here; no server code read them. The AM
+                 band's range and steps come from RTLSDRCore's BandPresets. *@
+              <RadzenColumn Size="12" SizeMD="4">
                 <RadzenNumeric TValue="double" @bind-Value="_radioConfig.DefaultFMStepMHz" Min="(decimal)0.05" Max="(decimal)1.0" Step="(decimal)0.05" Placeholder="FM Step (MHz)" Style="width:100%" />
                 <small>FM tuning step size</small>
               </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="3">
-                <RadzenNumeric TValue="double" @bind-Value="_radioConfig.DefaultAMStepKHz" Min="1" Max="50" Step="(decimal)1.0" Placeholder="AM Step (kHz)" Style="width:100%" />
-                <small>AM tuning step size</small>
-              </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="3">
+              <RadzenColumn Size="12" SizeMD="4">
                 <RadzenNumeric TValue="double" @bind-Value="_radioConfig.MinFMFrequencyMHz" Min="50" Max="200" Step="(decimal)0.5" Placeholder="Min FM (MHz)" Style="width:100%" />
               </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="3">
+              <RadzenColumn Size="12" SizeMD="4">
                 <RadzenNumeric TValue="double" @bind-Value="_radioConfig.MaxFMFrequencyMHz" Min="50" Max="200" Step="(decimal)0.5" Placeholder="Max FM (MHz)" Style="width:100%" />
-              </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="3">
-                <RadzenNumeric TValue="double" @bind-Value="_radioConfig.MinAMFrequencyKHz" Min="100" Max="2000" Step="(decimal)10.0" Placeholder="Min AM (kHz)" Style="width:100%" />
-              </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="3">
-                <RadzenNumeric TValue="double" @bind-Value="_radioConfig.MaxAMFrequencyKHz" Min="100" Max="2000" Step="(decimal)10.0" Placeholder="Max AM (kHz)" Style="width:100%" />
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="3">
                 <RadzenNumeric TValue="int" @bind-Value="_radioConfig.ScanStopThreshold" Min="0" Max="100" Placeholder="Scan Stop Threshold" Style="width:100%" />

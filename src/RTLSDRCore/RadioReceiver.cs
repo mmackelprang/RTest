@@ -707,6 +707,25 @@ namespace RTLSDRCore;
           return SetFrequencyInternal(frequencyHz);
       }
 
+      /// <summary>
+      /// The frequency a scan wraps to at a band edge. On the HF bands (AM, Shortwave) the edge is
+      /// moved onto the step's grid, inward: Shortwave starts at 1711 kHz (AUD-102), one above AM's
+      /// top channel, and wrapping to it would put every later 5 kHz step off the broadcast grid
+      /// (1716, 1721, ...). On every other band the edge itself is returned, as before: FM's grid is
+      /// not anchored at zero (US channels are on odd tenths), so rounding there would be wrong.
+      /// </summary>
+      internal static long ScanWrapTarget(RadioBand band, long edgeHz, long stepHz, bool roundUp)
+      {
+          if (stepHz <= 0 || !HfBands.Requires(band.Type))
+          {
+              return edgeHz;
+          }
+
+          long down = edgeHz / stepHz * stepHz;
+          long target = roundUp && down < edgeHz ? down + stepHz : down;
+          return band.ContainsFrequency(target) ? target : edgeHz;
+      }
+
       /// <inheritdoc/>
       public bool TuneFrequencyUp(long stepHz = 100_000)
       {
@@ -837,12 +856,12 @@ namespace RTLSDRCore;
 
                   if (ascending && nextFreq > _currentBand.MaxFrequencyHz)
                   {
-                      nextFreq = _currentBand.MinFrequencyHz;
+                      nextFreq = ScanWrapTarget(_currentBand, _currentBand.MinFrequencyHz, stepHz, roundUp: true);
                       Logger.Debug("Scan wrapped from upper to lower band edge");
                   }
                   else if (!ascending && nextFreq < _currentBand.MinFrequencyHz)
                   {
-                      nextFreq = _currentBand.MaxFrequencyHz;
+                      nextFreq = ScanWrapTarget(_currentBand, _currentBand.MaxFrequencyHz, stepHz, roundUp: false);
                       Logger.Debug("Scan wrapped from lower to upper band edge");
                   }
 

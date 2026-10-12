@@ -41,13 +41,19 @@ namespace RTLSDRCore.Bands;
       };
 
       /// <summary>
-      /// Shortwave band (1.6 MHz - 30 MHz)
+      /// Shortwave band (1.711 MHz - 30 MHz)
       /// </summary>
+      /// <remarks>
+      /// The band starts 1 kHz above <see cref="AmBroadcast"/>'s top channel (1710 kHz), so the two do
+      /// not overlap and no whole-kHz frequency between AM and 30 MHz is outside a preset band
+      /// (AUD-102). Until AUD-102 it started at 1.6 MHz, and the 1600–1710 kHz overlap went to AM by
+      /// list order alone.
+      /// </remarks>
       public static RadioBand Shortwave => new()
       {
           Type = BandType.Shortwave,
           Name = "Shortwave",
-          MinFrequencyHz = 1_600_000,
+          MinFrequencyHz = 1_711_000,
           MaxFrequencyHz = 30_000_000,
           DefaultStepHz = 5_000,
           AllowedStepSizes = new[] { 1_000L, 2_500L, 5_000L },
@@ -168,6 +174,14 @@ namespace RTLSDRCore.Bands;
       /// <summary>
       /// Finds the band that contains a specific frequency
       /// </summary>
+      /// <remarks>
+      /// The first band in <see cref="AllBands"/> order that contains the frequency (both edges
+      /// included). Where bands share frequencies the order decides, and these edges depend on it:
+      /// 30 MHz is Shortwave, not VHF; 87.5–108 MHz is FM, not VHF, and 108 MHz is FM, not Aircraft;
+      /// 108–137 MHz is Aircraft and 162.4–162.55 MHz is Weather, both inside VHF. AM and Shortwave
+      /// do not overlap (AM ends at 1710 kHz, Shortwave starts at 1711 kHz), so the frequencies
+      /// strictly between those two, e.g. 1710.5 kHz, are in no band.
+      /// </remarks>
       /// <param name="frequencyHz">Frequency in Hz</param>
       /// <returns>The band containing the frequency, or null if none found</returns>
       public static RadioBand? FindBandForFrequency(long frequencyHz)

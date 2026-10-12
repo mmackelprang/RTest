@@ -74,12 +74,12 @@ public class RadioPageTests : TestContext
   }
 
   [Theory]
-  [InlineData("AM", 520, 1710)]      // AM: 520-1710 kHz
+  [InlineData("AM", 530, 1710)]      // AM: 530-1710 kHz
   [InlineData("FM", 87.5, 108.0)]    // FM: 87.5-108.0 MHz
   [InlineData("AIR", 108.0, 137.0)]  // Aircraft: 108.0-137.0 MHz
-  [InlineData("SW", 1.8, 30.0)]      // Shortwave: 1.8-30.0 MHz
+  [InlineData("SW", 1711, 30000)]    // Shortwave: 1711-30000 kHz (AUD-102: kHz, from 1.711 MHz)
   [InlineData("WB", 162.400, 162.550)] // Weather: 162.400-162.550 MHz
-  [InlineData("VHF", 136.0, 174.0)]  // VHF: 136.0-174.0 MHz
+  [InlineData("VHF", 30.0, 300.0)]   // VHF: 30-300 MHz
   public void RadioPage_SupportsFrequencyRangeForBand(string band, double minFreq, double maxFreq)
   {
     // Assert - Verify frequency ranges are valid (min < max)

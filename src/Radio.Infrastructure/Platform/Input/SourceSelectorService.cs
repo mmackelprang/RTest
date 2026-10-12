@@ -327,7 +327,7 @@ public sealed class SourceSelectorService : IDisposable
         Id = $"{BandIdPrefix}{band}",
         Primary = band.ToString(),
         // The current band's live frequency, so the marked row reads like the frequency well.
-        Secondary = available && activeBand == band ? radio!.CurrentFrequency.ToDisplayString() : null,
+        Secondary = available && activeBand == band ? BandUnits.Format(band, radio!.CurrentFrequency) : null,
         Icon = "radio",
         AccentVar = "--source-radio",
         // D7 requirement 3: the marker tracks the active BAND, not "Radio". On AM, row 2 is marked.
@@ -508,7 +508,7 @@ public sealed class SourceSelectorService : IDisposable
     var mgr = _audioManagerFactory();
     return mgr.ActiveSource switch
     {
-      IRadioControl radio => $"{radio.CurrentBand} {radio.CurrentFrequency.ToDisplayString()}",
+      IRadioControl radio => $"{radio.CurrentBand} {BandUnits.Format(radio.CurrentBand, radio.CurrentFrequency)}",
       { } source => source.Name,
       _ => "nothing",
     };

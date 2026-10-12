@@ -69,6 +69,10 @@ public class BandMapTextTests
   [InlineData(162_412_500, "VHF", "162.4125")] // a 12.5 kHz channel needs a fourth decimal
   [InlineData(118_100_000, "AIR", "118.100")]
   [InlineData(1_010_000, "AM", "1010")]
+  [InlineData(5_905_000, "SW", "5905")]   // AUD-102: SW in kHz like AM
+  [InlineData(5_900_000, "SW", "5900")]
+  [InlineData(5_910_000, "SW", "5910")]
+  [InlineData(5_907_500, "SW", "5907.5")] // a 2.5 kHz step keeps its half
   public void FormatFrequency_PerBand(double hz, string band, string expected) =>
     BandMapText.FormatFrequency(hz, band).Should().Be(expected);
 
@@ -78,6 +82,7 @@ public class BandMapTextTests
   [InlineData(118_100_000, "AIR", "118.100 MHz AIR")]
   [InlineData(162_412_500, "VHF", "162.4125 MHz VHF")]
   [InlineData(1_010_000, "AM", "1010 kHz AM")]
+  [InlineData(5_905_000, "SW", "5905 kHz SW")]
   public void FormatStation_FmAsAud76_OtherBandsExactWithTheUnit(double hz, string band, string expected) =>
     BandMapText.FormatStation(hz, band).Should().Be(expected);
 
@@ -87,6 +92,16 @@ public class BandMapTextTests
   [InlineData(161_500_000L, 163_500_000L, "VHF", "161.5–163.5 MHz")]
   [InlineData(530_000L, 1_710_000L, "AM", "530–1710 kHz")]
   [InlineData(108_000_000L, 137_000_000L, "AIR", "108–137 MHz")]
+  [InlineData(1_711_000L, 30_000_000L, "SW", "1711–30000 kHz")]
   public void FormatRange_EnDashAndUnit(long min, long max, string band, string expected) =>
     BandMapText.FormatRange(min, max, band).Should().Be(expected);
+
+  [Fact]
+  public void FormatFrequency_SwChannelsFiveKilohertzApart_AreDistinct()
+  {
+    // The AUD-102 collision: as MHz with two decimals 5.900, 5.905 and 5.910 printed 5.90/5.91/5.91.
+    new[] { 5_900_000d, 5_905_000d, 5_910_000d }
+      .Select(hz => BandMapText.FormatFrequency(hz, "SW"))
+      .Should().OnlyHaveUniqueItems().And.Equal("5900", "5905", "5910");
+  }
 }
