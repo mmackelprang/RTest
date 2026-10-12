@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Configuration;
+using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
@@ -228,6 +229,13 @@ public sealed class SourceSelectorService : IDisposable
       }
 
       PublishPreview();
+    }
+    catch (TunerRefusedException ex)
+    {
+      // AUD-99: the hardware refused the band (the HF switch, the sample rate or the frequency).
+      // The receiver has logged it at Warning; this adds the selection at Information.
+      _logger.LogInformation("Source selection {Id} refused by the tuner: {Reason}", row.Id, ex.Message);
+      PublishFailed(row, $"{row.Primary}: the tuner refused");
     }
     catch (Exception ex)
     {

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
+using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Sources.Primary;
@@ -72,9 +73,13 @@ public class RadioController : ControllerBase
   /// <returns>The updated radio state.</returns>
   /// <response code="200">Returns the updated radio state.</response>
   /// <response code="400">If the radio is not active, the band is not a band code, or the frequency is invalid (or outside the band).</response>
+  /// <response code="409">If the frequency is in AM or SW and the SDR device has no HF direct sampling (AUD-99).</response>
+  /// <response code="503">If the tuner refused the tune, the band change or the HF switch the band needs (AUD-99).</response>
   [HttpPost("frequency")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+  [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
   public async Task<ActionResult<RadioStateDto>> SetFrequency([FromBody] SetFrequencyRequest request)
   {
     try
@@ -109,6 +114,10 @@ public class RadioController : ControllerBase
         await radioSource.TuneInBandAsync(band, new Frequency(request.Frequency));
       }
       return Ok(radioSource.MapToRadioStateDto());
+    }
+    catch (TunerRefusedException ex)
+    {
+      return TunerRefused(ex);
     }
     catch (ArgumentOutOfRangeException ex)
     {
@@ -187,9 +196,13 @@ public class RadioController : ControllerBase
   /// <returns>The updated radio state.</returns>
   /// <response code="200">Returns the updated radio state.</response>
   /// <response code="400">If the radio is not active or the band is invalid.</response>
+  /// <response code="409">If the band is AM or SW and the SDR device has no HF direct sampling (AUD-99).</response>
+  /// <response code="503">If the tuner refused the band change or the HF switch the band needs (AUD-99).</response>
   [HttpPost("band")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+  [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
   public async Task<ActionResult<RadioStateDto>> SetBand([FromBody] SetBandRequest request)
   {
     try
@@ -208,6 +221,10 @@ public class RadioController : ControllerBase
 
       await radioSource.SetBandAsync(band);
       return Ok(radioSource.MapToRadioStateDto());
+    }
+    catch (TunerRefusedException ex)
+    {
+      return TunerRefused(ex);
     }
     catch (Exception ex)
     {
@@ -771,10 +788,14 @@ public class RadioController : ControllerBase
   /// <response code="200">Returns the updated radio state after tuning.</response>
   /// <response code="400">If the radio is not the active source.</response>
   /// <response code="404">If the preset was not found.</response>
+  /// <response code="409">If the preset is in AM or SW and the SDR device has no HF direct sampling (AUD-99).</response>
+  /// <response code="503">If the tuner refused the preset's band or frequency (AUD-99).</response>
   [HttpPost("presets/{id}/load")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status404NotFound)]
+  [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+  [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
   public async Task<ActionResult<RadioStateDto>> LoadPreset(string id)
   {
     try
@@ -803,6 +824,10 @@ public class RadioController : ControllerBase
       await radioSource.SetFrequencyAsync(new Frequency((long)preset.Frequency));
 
       return Ok(radioSource.MapToRadioStateDto());
+    }
+    catch (TunerRefusedException ex)
+    {
+      return TunerRefused(ex);
     }
     catch (Exception ex)
     {
@@ -834,10 +859,31 @@ public class RadioController : ControllerBase
 
       _logger.LogInformation("Retrieved {Count} available radio devices", deviceList.Count);
 
+      // AUD-99: the dongles themselves — product, real tuner, HF direct sampling.
+      var hardware = (_radioFactory.GetSdrHardware() ?? Array.Empty<SdrHardwareInfo>())
+        .Select(h => new SdrHardwareDto
+        {
+          Index = h.Index,
+          Name = h.Name,
+          Manufacturer = h.Manufacturer,
+          Product = h.Product,
+          Serial = h.Serial,
+          TunerType = h.TunerType,
+          HfDirectSampling = h.HfDirectSampling,
+          HfEnabled = !string.Equals(h.HfDirectSampling, "Off", StringComparison.OrdinalIgnoreCase),
+          HfSetting = h.HfSetting,
+          IsHfMode = h.IsHfMode,
+          IsInUse = h.IsInUse,
+          MinFrequencyHz = h.MinFrequencyHz,
+          MaxFrequencyHz = h.MaxFrequencyHz,
+        })
+        .ToList();
+
       return Ok(new RadioDeviceListDto
       {
         Devices = deviceList,
-        Count = deviceList.Count
+        Count = deviceList.Count,
+        Hardware = hardware
       });
     }
     catch (Exception ex)
@@ -991,6 +1037,32 @@ public class RadioController : ControllerBase
   #endregion
 
   #region Helper Methods
+
+  /// <summary>
+  /// AUD-99: the hardware refused a tune, a band change or the HF switch a band needs. A server
+  /// fault, not the caller's mistake, so 503 with a problem body that says so — never the 400 an
+  /// out-of-range frequency gets. A <see cref="TunerCapabilityException"/> (an AM or SW request on a
+  /// device without HF direct sampling) is a permanent gap rather than a transient fault: 409, with
+  /// a problem body saying the device has no HF direct sampling. Logged at Information: the
+  /// receiver has already logged the refusal at Warning.
+  /// </summary>
+  private ObjectResult TunerRefused(TunerRefusedException ex)
+  {
+    if (ex is TunerCapabilityException)
+    {
+      _logger.LogInformation("Tune request needs a capability the SDR device lacks: {Reason}", ex.Message);
+      return Problem(
+        title: "The SDR device has no HF direct sampling",
+        detail: ex.Message,
+        statusCode: StatusCodes.Status409Conflict);
+    }
+
+    _logger.LogInformation("Tune request refused by the tuner: {Reason}", ex.Message);
+    return Problem(
+      title: "The tuner refused the request",
+      detail: ex.Message,
+      statusCode: StatusCodes.Status503ServiceUnavailable);
+  }
 
   /// <summary>
   /// Gets the capabilities for a specific radio device type.

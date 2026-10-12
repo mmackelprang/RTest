@@ -8,7 +8,7 @@
 
     <!-- NuGet package metadata (Authors, License, Repository, Symbols inherited from Directory.Build.props) -->
     <PackageId>RTLSDRCore</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Description>Modern C# library for RTL-SDR radio receivers with support for AM, FM, SW, AIR, WB, and VHF bands. Includes DSP demodulators (AM, FM, SSB), stereo FM decoder, RDS, band presets, and a hardware abstraction layer.</Description>
     <PackageTags>sdr;rtl-sdr;radio;am;fm;shortwave;aircraft;weather;vhf;dsp;demodulator;rds</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>

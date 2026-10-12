@@ -64,12 +64,13 @@ public class SDRRadioAudioSourceTuneInBandTests
   }
 
   [Fact]
-  public async Task ReceiverFailsToRestartStreaming_ThrowsInvalidOperation_NotArgumentOutOfRange()
+  public async Task ReceiverFailsToRestartStreaming_ThrowsTunerRefused_NotArgumentOutOfRange()
   {
     _device.Setup(d => d.IsStreaming).Returns(true);
     _device.Setup(d => d.StartStreaming()).Returns(false);
 
-    InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+    // AUD-99: a receiver fault is a TunerRefusedException, which is still an InvalidOperationException.
+    Radio.Core.Exceptions.TunerRefusedException ex = await Assert.ThrowsAsync<Radio.Core.Exceptions.TunerRefusedException>(() =>
       _source.TuneInBandAsync(RadioBand.VHF, new Frequency(146_520_000)));
 
     Assert.Contains("VHF", ex.Message);

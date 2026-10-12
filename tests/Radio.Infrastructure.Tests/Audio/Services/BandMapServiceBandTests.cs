@@ -373,12 +373,57 @@ public sealed class BandMapServiceBandTests : IDisposable
     Assert.Equal(FmChannelPlan.Channels.Count, service.GetMap("FM")!.Channels.Count);
   }
 
+  [Fact]
+  public async Task Request_WhenTheLiveSweeperRefusesTheBandsHfMode_IsRadioOtherMode_AndStartsNothing()
+  {
+    // AUD-99: the radio plays AM (HF direct sampling on); an FM sweep would need the tuner.
+    Tuning = new BandMapTuning("AM", 1_000_000);
+    await _gate.ClaimForRadioAsync();
+    _live.CanSweepLive = true;
+    _live.Refusal = "needs the tuner";
+    BandMapService service = CreateService();
+
+    BandSweepRequestResult result = service.RequestSweep("FM");
+
+    Assert.Equal(BandSweepRequestOutcome.Unavailable, result.Outcome);
+    Assert.Equal(BandMapService.ReasonRadioOtherMode, result.Reason);
+    Assert.False(result.Status.IsSweeping);
+    Assert.Equal(0, _live.Calls);
+    Assert.Empty(_devices);
+    Assert.Equal(BandMapService.ReasonRadioOtherMode, service.GetStatus().Last!.Reason);
+  }
+
+  [Fact]
+  public async Task SleepTimer_WhenTheLiveSweeperRefusesTheBandsHfMode_SkipsWithRadioOtherMode()
+  {
+    Tuning = new BandMapTuning("FM", 101_100_000);
+    await _gate.ClaimForRadioAsync();
+    _sleep.Setup(s => s.IsSleeping).Returns(true);
+    _live.CanSweepLive = true;
+    _live.Refusal = "needs HF";
+    BandMapService service = CreateService();
+    await service.StartAsync(CancellationToken.None);
+
+    _time.Advance(TimeSpan.FromSeconds(_options.InitialDelaySeconds));
+    await Settle(service);
+
+    BandSweepOutcome last = service.GetStatus().Last!;
+    Assert.Equal(BandSweepResults.Skipped, last.Result);
+    Assert.Equal(BandMapService.ReasonRadioOtherMode, last.Reason);
+    Assert.Equal(0, _live.Calls);
+  }
+
   /// <summary>Overrides the plan overload; reports progress per tune like the receiver does.</summary>
   private sealed class PlanLiveSweeper : ILiveBandSweeper
   {
     private int _calls;
 
     public bool CanSweepLive { get; set; } = true;
+
+    /// <summary>AUD-99: returned by <see cref="LiveSweepRefusal"/> for every plan.</summary>
+    public string? Refusal { get; set; }
+
+    public string? LiveSweepRefusal(BandSweepPlan plan) => Refusal;
 
     public int Calls => Volatile.Read(ref _calls);
 
@@ -451,6 +496,13 @@ public sealed class BandMapServiceBandTests : IDisposable
     public bool IsOpen { get; private set; }
 
     public bool IsStreaming => false;
+
+    // AUD-99: no HF; every plan these tests sweep is a tuner-path band.
+    public bool SupportsHfDirectSampling => false;
+
+    public bool IsHfMode => false;
+
+    public bool SetHfMode(bool on) => !on;
 
     public event EventHandler<IqSamplesEventArgs>? SamplesAvailable
     {

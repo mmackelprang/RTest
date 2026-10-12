@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Exceptions;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
@@ -328,6 +329,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public bool CanSweepLive => _radioReceiver.IsRunning && !_radioReceiver.IsScanning;
 
   /// <inheritdoc/>
+  public string? LiveSweepRefusal(RTLSDRCore.Sweep.BandSweepPlan plan) => _radioReceiver.LiveSweepModeConflict(plan);
+
+  /// <inheritdoc/>
   public Task<IReadOnlyList<RTLSDRCore.Sweep.ChannelLevel>> SweepLiveAsync(
     IReadOnlyList<long> channels,
     float gainDb,
@@ -367,15 +371,36 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public Frequency CurrentFrequency => new(_radioReceiver.CurrentFrequency);
 
   /// <inheritdoc/>
+  /// <exception cref="ArgumentOutOfRangeException">No band contains <paramref name="frequency"/> and the device cannot receive it.</exception>
+  /// <exception cref="TunerCapabilityException">
+  /// The frequency is in AM or Shortwave and the open device has no HF direct sampling (AUD-99).
+  /// </exception>
+  /// <exception cref="TunerRefusedException">
+  /// The device refused the HF switch, the sample rate or the frequency (AUD-99): a hardware fault,
+  /// not a bad argument.
+  /// </exception>
   public async Task SetFrequencyAsync(Frequency frequency, CancellationToken cancellationToken = default)
   {
-    var success = await Task.Run(() => _radioReceiver.SetFrequency(frequency.Hertz), cancellationToken);
-    if (!success)
+    TuneResult result = await Task.Run(() => _radioReceiver.TrySetFrequency(frequency.Hertz), cancellationToken);
+    switch (result)
     {
-      throw new ArgumentOutOfRangeException(nameof(frequency), 
-        $"Failed to set frequency to {frequency.ToDisplayString()}");
+      case TuneResult.OutOfRange:
+        throw new ArgumentOutOfRangeException(nameof(frequency),
+          $"Failed to set frequency to {frequency.ToDisplayString()}");
+      case TuneResult.Unsupported:
+        throw NoHfDirectSampling(frequency.ToDisplayString());
+      case TuneResult.Refused:
+        throw new TunerRefusedException(
+          $"The tuner refused {frequency.ToDisplayString()} ({_radioReceiver.CurrentBand.Name})");
     }
   }
+
+  /// <summary>
+  /// The exception for a band the device can never receive: it has no HF direct sampling (AUD-99).
+  /// </summary>
+  private TunerCapabilityException NoHfDirectSampling(string what) =>
+    new($"{what} needs HF direct sampling, which this SDR device does not have " +
+      $"(product '{_radioReceiver.DeviceInfo.Product}'; see RTLSDR:HfDirectSampling)");
 
   /// <inheritdoc/>
   public async Task StepFrequencyUpAsync(CancellationToken cancellationToken = default)
@@ -527,13 +552,23 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     [RadioBand.FM, RadioBand.AM, RadioBand.SW, RadioBand.WB, RadioBand.VHF, RadioBand.AIR];
 
   /// <inheritdoc/>
+  /// <exception cref="ArgumentException"><paramref name="band"/> is not a band this source supports.</exception>
+  /// <exception cref="TunerCapabilityException">The band is AM or SW and the open device has no HF direct sampling (AUD-99).</exception>
+  /// <exception cref="TunerRefusedException">
+  /// The receiver could not switch: the device refused the HF switch, the sample rate or the
+  /// frequency, or streaming could not resume (AUD-99).
+  /// </exception>
   public async Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default)
   {
     var rtlBandType = MapBandTypeToRTLSDR(band);
-    var success = await Task.Run(() => _radioReceiver.SetBand(rtlBandType), cancellationToken);
-    if (!success)
+    TuneResult result = await Task.Run(() => _radioReceiver.TrySetBand(rtlBandType), cancellationToken);
+    if (result == TuneResult.Unsupported)
     {
-      throw new ArgumentException($"Failed to set band to {band}", nameof(band));
+      throw NoHfDirectSampling($"The {band} band");
+    }
+    if (result != TuneResult.Success)
+    {
+      throw new TunerRefusedException($"The tuner refused the switch to the {band} band");
     }
 
     _frequencyStep = new Frequency(_radioReceiver.CurrentBand.DefaultStepHz); // Update step size to band default
@@ -547,12 +582,16 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
   /// <inheritdoc/>
   /// <remarks>
-  /// One <c>RadioReceiver.SetBand(type, hz)</c> call. The range check comes first because
-  /// <c>SetBand</c> clamps an out-of-range frequency into the band without reporting it.
-  /// <c>SetBand</c> returns false only when switching throws or streaming cannot be restarted
-  /// afterwards; it does not report a tuner that refused the frequency (that is logged as a
-  /// warning by the receiver), so neither does this method.
+  /// One <c>RadioReceiver.TrySetBand(type, hz)</c> call. The range check comes first because
+  /// <c>TrySetBand</c> clamps an out-of-range frequency into the band without reporting it.
+  /// Since AUD-99 <c>TrySetBand</c> reports a band the device has no HF direct sampling for
+  /// (<see cref="TunerCapabilityException"/> here), and a refused HF switch, sample rate or
+  /// frequency, a throw while switching, or streaming that cannot be restarted
+  /// (<see cref="TunerRefusedException"/> here).
   /// </remarks>
+  /// <exception cref="ArgumentOutOfRangeException"><paramref name="frequency"/> is outside <paramref name="band"/>.</exception>
+  /// <exception cref="TunerCapabilityException">The band is AM or SW and the open device has no HF direct sampling (AUD-99).</exception>
+  /// <exception cref="TunerRefusedException">The receiver or the device refused the tune.</exception>
   public async Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
   {
     RTLSDRCore.Enums.BandType rtlBandType = MapBandTypeToRTLSDR(band);
@@ -564,11 +603,15 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     }
 
     bool bandChanged = _radioReceiver.CurrentBand.Type != rtlBandType;
-    bool success = await Task.Run(() => _radioReceiver.SetBand(rtlBandType, frequency.Hertz), cancellationToken);
-    if (!success)
+    TuneResult result = await Task.Run(() => _radioReceiver.TrySetBand(rtlBandType, frequency.Hertz), cancellationToken);
+    if (result == TuneResult.Unsupported)
+    {
+      throw NoHfDirectSampling($"The {band} band");
+    }
+    if (result != TuneResult.Success)
     {
       // A receiver fault, not a bad argument: callers map ArgumentOutOfRangeException to a 400.
-      throw new InvalidOperationException(
+      throw new TunerRefusedException(
         $"The receiver failed to switch to the {band} band at {frequency.ToDisplayString()}");
     }
 

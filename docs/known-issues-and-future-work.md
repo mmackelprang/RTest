@@ -107,7 +107,17 @@ the kiosk page) picks it up. The same POST with `false` switches it off. Pinned 
 SMArt v5** (option C below; serial `56001418`), fed from an HF/VHF diplexer with an AM antenna on the HF leg and
 an FM antenna on the VHF leg. FM works on it. The work is queued as `AUD-99` (Q-mode probe and device layer),
 `AUD-101` (AM DSP), `AUD-102` (bands/API/UI), `AUD-103` (band map) and `AUD-104` (fingerprinting on AM/SW, owner
-decision). See [`queue/AUD-94.md`](queue/AUD-94.md). The "~2 days" estimate in the table below predates a code survey that
+decision). See [`queue/AUD-94.md`](queue/AUD-94.md).
+
+**2026-10-11, `AUD-99` (on branch, pending box UAT): direct sampling is implemented.** AM and SW switch the dongle to
+Q-branch direct sampling, every other band switches it off, on the radio, the live sweep and the idle sweep.
+Which dongles get it is the `RTLSDR:HfDirectSampling` setting (`Auto` | `Q` | `I` | `Off`, default `Auto` = Q for a
+`NESDR SMArt v5`, Off otherwise). Tune failures now propagate (503 from the API, not 400), and
+`/api/radio/devices` shows the product, the real tuner and the HF state. **Still pending:** the AM DSP chain
+(`AUD-101`: channel filter, AGC, the software carrier offset), so AM/SW audio is not yet expected to be usable;
+then `AUD-102` (bands/UI) and `AUD-103` (AM/SW sweep plans). Details: [`queue/AUD-99.md`](queue/AUD-99.md).
+
+The "~2 days" estimate in the table below predates a code survey that
 found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the
 estimate. *History:* **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not
 many AM stations nearby."* then *"Spec out what HW I would need to make all the bands work, and add that to

@@ -54,6 +54,10 @@ public class SDRRadioAudioSourceDeviceGateTests
       open = false;
     });
     _device.Setup(d => d.StartStreaming()).Returns(() => _startStreamingResult);
+    // AUD-99: Startup now fails when the device refuses the sample rate or the frequency, so the
+    // fake accepts both, as a working dongle does.
+    _device.Setup(d => d.SetSampleRate(It.IsAny<int>())).Returns(true);
+    _device.Setup(d => d.SetFrequency(It.IsAny<long>())).Returns(true);
   }
 
   private SDRRadioAudioSource CreateSource()

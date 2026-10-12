@@ -30,8 +30,9 @@ public enum BandSweepRequestOutcome
 /// <param name="Reason">
 /// For <see cref="BandSweepRequestOutcome.Unavailable"/>: one of <see cref="BandMapService.ReasonDisabled"/>,
 /// <see cref="BandMapService.ReasonBandNotReceivable"/>, <see cref="BandMapService.ReasonNoSdrDevice"/>,
-/// <see cref="BandMapService.ReasonRadioBusy"/>, <see cref="BandMapService.ReasonDeviceBusy"/> or
-/// <see cref="BandMapService.ReasonOtherBandSweeping"/>. Null otherwise.
+/// <see cref="BandMapService.ReasonRadioBusy"/>, <see cref="BandMapService.ReasonRadioOtherMode"/>,
+/// <see cref="BandMapService.ReasonDeviceBusy"/> or <see cref="BandMapService.ReasonOtherBandSweeping"/>.
+/// Null otherwise.
 /// </param>
 /// <param name="Status">Sweep status after the request.</param>
 public sealed record BandSweepRequestResult(BandSweepRequestOutcome Outcome, string? Reason, BandSweepStatus Status);
@@ -66,7 +67,9 @@ public sealed record BandMapTuning(string Band, long FrequencyHz);
 /// the device, releases the lease, and the previous map is kept.</item>
 /// <item>Radio holds the gate: a timer evaluation sweeps through the live path only while
 /// <see cref="ISleepService.IsSleeping"/> is true and the source reports
-/// <see cref="ILiveBandSweeper.CanSweepLive"/>; otherwise it records a skip.
+/// <see cref="ILiveBandSweeper.CanSweepLive"/>; otherwise it records a skip. Either trigger is
+/// refused (<see cref="ReasonRadioOtherMode"/>) when the band needs the other HF direct-sampling
+/// mode from the one the radio is playing in (AUD-99): the live path never switches it.
 /// <see cref="ISleepService.IsSleepScreenVisible"/> is not consulted. Such a sleep-triggered
 /// sweep is cancelled after the first progress report (each FM channel, each tune of a grouped
 /// plan) at which <see cref="ISleepService.IsSleeping"/> reads false.</item>
@@ -115,6 +118,12 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
 
   /// <summary>Unavailable reason: another sweep lease is live.</summary>
   public const string ReasonDeviceBusy = "device-busy";
+
+  /// <summary>
+  /// Unavailable reason, and skip reason for a timer evaluation: the radio source holds the dongle
+  /// in the other HF mode from the one the band needs (AUD-99; see <see cref="ILiveBandSweeper.LiveSweepRefusal"/>).
+  /// </summary>
+  public const string ReasonRadioOtherMode = "radio-other-hf-mode";
 
   /// <summary>Skip reason for a timer evaluation while the radio source holds the dongle and the console is awake.</summary>
   public const string ReasonRadioPlaying = "radio-playing";
@@ -174,7 +183,8 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
   /// </param>
   /// <param name="deviceFactory">
   /// Creates an unopened device for an idle sweep, or null when none exists. Defaults to the
-  /// first enumerated RTL-SDR; unlike <see cref="SdrDeviceFactory.CreateFirstAvailable"/> it
+  /// first enumerated RTL-SDR, with the <c>Auto</c> HF setting (DI supplies one that reads
+  /// <c>RTLSDR:HfDirectSampling</c>); unlike <see cref="SdrDeviceFactory.CreateFirstAvailable()"/> it
   /// does not fall back to the mock device.
   /// </param>
   /// <param name="timeProvider">Clock; <see cref="TimeProvider.System"/> when omitted.</param>
@@ -690,6 +700,15 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
       return ReasonRadioBusy;
     }
 
+    // AUD-99: the live path never switches HF direct sampling under the playing radio, so a band
+    // that needs the other mode (FM requested while the radio plays AM, say) is refused here.
+    string? modeConflict = live.LiveSweepRefusal(plan);
+    if (modeConflict != null)
+    {
+      _logger.LogInformation("{Band} live sweep refused: {Why}", plan.Band, modeConflict);
+      return ReasonRadioOtherMode;
+    }
+
     SweepRun liveRun = BeginRunLocked(isRequest ? BandSweepTriggers.Request : BandSweepTriggers.Sleep, BandSweepPaths.Live, plan);
     _sweepTask = Task.Run(() => RunLiveAsync(liveRun, live, options, samplesPerMeasurement));
     return null;
@@ -745,7 +764,8 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
         {
           // Declared inside the try so the device is closed and disposed before
           // the lease is released below.
-          using DeviceSweepTuner tuner = new(device, options.SweepGainDb);
+          // AUD-99: an AM or SW plan sweeps with HF direct sampling on; every other plan with the tuner.
+          using DeviceSweepTuner tuner = new(device, options.SweepGainDb, RTLSDRCore.Bands.HfBands.Requires(run.Plan));
           // A radio claim may already have cancelled the lease: do not open the device then.
           linked.Token.ThrowIfCancellationRequested();
           tuner.Open();
@@ -1075,12 +1095,8 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
     BandSweepPlans.BandCodes.Where(code =>
       BandSweepPlans.TryParseBandCode(code, out BandType band) && BandSweepPlans.UnavailableReason(band) == null);
 
-  private static ISdrDevice? CreateFirstRtlSdrOrNull()
-  {
-    DeviceInfo? info = SdrDeviceFactory.EnumerateDevices()
-      .FirstOrDefault(d => d.Type == DeviceType.RTLSDR && d.IsAvailable);
-    return info == null ? null : SdrDeviceFactory.CreateDevice(info);
-  }
+  private static ISdrDevice? CreateFirstRtlSdrOrNull() =>
+    Factories.SdrHfConfiguration.CreateFirstRtlSdrOrNull(HfDirectSamplingSetting.Auto);
 
   /// <summary>State of the running sweep; also its progress sink.</summary>
   private sealed class SweepRun : IProgress<BandSweepProgress>

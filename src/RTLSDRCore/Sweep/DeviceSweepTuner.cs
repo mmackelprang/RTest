@@ -23,24 +23,31 @@ public sealed class DeviceSweepTuner : ISweepTuner, IDisposable
 
   private readonly ISdrDevice _device;
   private readonly float _gainDb;
+  private readonly bool _hfMode;
   private bool _disposed;
 
   /// <summary>Creates a tuner that takes ownership of <paramref name="device"/>.</summary>
   /// <param name="device">The device. Closed and disposed by <see cref="Dispose"/>.</param>
   /// <param name="gainDb">Manual tuner gain for the sweep, in dB.</param>
-  public DeviceSweepTuner(ISdrDevice device, float gainDb)
+  /// <param name="hfMode">
+  /// True to sweep with HF direct sampling on (an AM or SW plan; see
+  /// <see cref="Bands.HfBands.Requires(BandSweepPlan)"/>), false to sweep with the tuner (AUD-99).
+  /// </param>
+  public DeviceSweepTuner(ISdrDevice device, float gainDb, bool hfMode = false)
   {
     _device = device ?? throw new ArgumentNullException(nameof(device));
     _gainDb = gainDb;
+    _hfMode = hfMode;
   }
 
   /// <inheritdoc/>
   public int SampleRate => SweepSampleRate;
 
   /// <summary>
-  /// Opens the device and configures sample rate and manual gain.
+  /// Opens the device, puts it in the HF mode given to the constructor (before anything is
+  /// tuned), and configures sample rate and manual gain.
   /// </summary>
-  /// <exception cref="InvalidOperationException">The device could not be opened or configured.</exception>
+  /// <exception cref="InvalidOperationException">The device could not be opened, switched to the HF mode, or configured.</exception>
   public void Open()
   {
     ObjectDisposedException.ThrowIf(_disposed, this);
@@ -48,6 +55,16 @@ public sealed class DeviceSweepTuner : ISweepTuner, IDisposable
     if (!_device.IsOpen && !_device.Open())
     {
       throw new InvalidOperationException("SDR device could not be opened for a band sweep");
+    }
+
+    // No call when the device already reports the mode wanted. RtlSdrDevice reads the mode back
+    // at open: librtlsdr opens with direct sampling off, except that it switches to mode 1 itself
+    // when it finds no supported tuner.
+    if (_device.IsHfMode != _hfMode && !_device.SetHfMode(_hfMode))
+    {
+      throw new InvalidOperationException(_hfMode
+        ? "SDR device could not switch HF direct sampling on for a band sweep"
+        : "SDR device could not switch HF direct sampling off for a band sweep");
     }
 
     if (!_device.SetSampleRate(SweepSampleRate))

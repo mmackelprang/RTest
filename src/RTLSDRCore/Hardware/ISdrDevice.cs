@@ -41,6 +41,44 @@ namespace RTLSDRCore.Hardware;
       bool SetFrequency(long frequencyHz);
 
       /// <summary>
+      /// Gets whether this device receives the HF bands by direct sampling (AUD-99): true when
+      /// <see cref="DeviceInfo.HfDirectSampling"/> is not <see cref="DirectSamplingMode.Off"/>.
+      /// </summary>
+      bool SupportsHfDirectSampling { get; }
+
+      /// <summary>
+      /// Gets whether HF direct sampling is switched on. False whenever the device is closed.
+      /// </summary>
+      bool IsHfMode { get; }
+
+      /// <summary>
+      /// Switches HF direct sampling on (the device's <see cref="DeviceInfo.HfDirectSampling"/>
+      /// input) or off (the tuner). Call with streaming stopped and before setting the centre
+      /// frequency for the new mode. Idempotent: asking for the mode the device is already in
+      /// succeeds without touching the hardware.
+      /// </summary>
+      /// <remarks>
+      /// <para>
+      /// On a device without HF support (<see cref="SupportsHfDirectSampling"/> false),
+      /// <c>SetHfMode(true)</c> returns false and <c>SetHfMode(false)</c> returns true.
+      /// While HF direct sampling is on the tuner chip is in standby, so the tuner gain calls
+      /// (<see cref="SetGainMode"/>, <see cref="SetGain"/>) do nothing and return true.
+      /// </para>
+      /// <para>
+      /// After a false result, <see cref="IsHfMode"/> reports the mode the implementation knows the
+      /// device to be in, which is not necessarily the mode it was in before the call:
+      /// <see cref="RtlSdrDevice"/> reads back librtlsdr's recorded mode (<c>rtlsdr_get_direct_sampling</c>,
+      /// which librtlsdr sets even when a register write failed) and tries once to restore the previous
+      /// mode, because librtlsdr can leave a failed switch half done.
+      /// Switching off with librtlsdr re-initialises the tuner, which resets its gain settings and
+      /// retunes it to the last centre frequency set; callers re-apply gain afterwards.
+      /// </para>
+      /// </remarks>
+      /// <param name="on">True for HF direct sampling, false for the tuner.</param>
+      /// <returns>True when the device is now in the mode asked for.</returns>
+      bool SetHfMode(bool on);
+
+      /// <summary>
       /// Gets the current center frequency
       /// </summary>
       /// <returns>Frequency in Hz</returns>

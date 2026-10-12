@@ -2,9 +2,36 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🚫 **BLOCKED 2026-10-11: the step 0 probe received nothing usable** (only an internal 960 kHz spur; see
-§ *Step 0 results* below).
-Unblocking is the owner's call (antenna and wiring first). No code was written.
+✅ **UNBLOCKED 2026-10-11 by owner ruling: the step 0 outcome is an environment limit, not a fault.** Owner, relayed
+by the coordinator on 2026-10-11: the AM antenna *"is the one that comes with the SDR dongle. It's unpowered and
+passive"*. He hears no AM stations on a separate AM radio and no SW on other hardware either, so *"you probably
+won't find a real station. Don't make tuning to a real station a requirement for developing. This same thing
+goes for SW band"*. On the bias-tee: *"the antenna is **not** powered, so switching on the antenna supply won't
+have any effect"*. **Do not enable it.**
+
+**Step 0 outcome, as ruled:** the dongle side of the direct-sampling path is **confirmed**. Mode read back as 2,
+tuner type 5 (R820T), USB product `NESDR SMArt v5`, and the Q input is live, about 30 dB above the I branch. **No
+station is receivable locally**, which is an environment limit, not a fault. The 960 kHz carrier (28.8 MHz ÷ 30)
+is a **known crystal-harmonic artifact**. Do not chase it.
+
+**Acceptance replaces "a real station heard" for this row and for `AUD-101`–`AUD-103`:**
+- **(a) Deterministic tests.** Mock-device tests show that direct sampling switches **on for AM/SW and off for
+  every other band**, in both the radio path and the band-map sweep paths. `AUD-101` adds a synthetic AM
+  carrier + tone, an off-channel interferer and a DC offset at the tuned centre through the full
+  `RadioReceiver` chain, asserting tone recovery, adjacent-channel rejection and AGC level.
+- **(b) On-box checks that need no station,** on the deployed SHA:
+  - selecting AM and SW engages Q mode (log line or readback);
+  - tunes return success;
+  - audio is low-level noise rather than silence, an error or a crash;
+  - no `PLL not locked` appears;
+  - switching back to FM restores FM stereo with RDS;
+  - BAND view AM/SW sweeps complete and render.
+
+  Keep `journalctl` reads bounded. ⚠ Stopping `radio-api` also stops `radio-web`, so check both after every
+  deploy.
+
+_(Was, briefly on 2026-10-11:)_ 🚫 BLOCKED: the step 0 probe received nothing usable (see § *Step 0 results*
+below).
 
 🟡 **P2, first of the all-band rows** (`AUD-99` → `AUD-101` → `AUD-102` → `AUD-103`, with `AUD-104` after
 `AUD-99`). Filed 2026-10-11 by the Planner from the owner's instruction to *"get AM and SW working throughout
@@ -202,8 +229,10 @@ AM audio quality (`AUD-101`), band ranges and UI (`AUD-102`), sweep plans (`AUD-
 Deploy with `./deploy/Deploy-ToLinux.ps1` and check that `/api/health/version` on both services matches
 `origin/main` (or the branch head) **before** anyone listens. Then:
 
-- Tune the reference AM station from Step 0. The radio is in Q mode and **something** of that station is
-  audible. It may sound rough until `AUD-101` lands: this row proves the RF path, not audio quality.
+- ⚠ **Replaced by owner ruling 2026-10-11** (see the top of this dossier): no real station is required. Selecting
+  AM and SW engages Q mode (log line or readback), tunes return success, and the audio is low-level noise rather
+  than silence, an error or a crash. _(Was: "Tune the reference AM station from Step 0 ... something of that
+  station is audible.")_
 - FM is unchanged: the owner's usual station, stereo and RDS behave as before, and nothing new appears in
   `journalctl -u radio-api --since '-10min'` at Warning or above.
 - AM → FM → AM switching works repeatedly with no `PLL not locked!` on AM.
@@ -218,3 +247,222 @@ Nothing. ⛔ external: the hardware is installed. `AUD-94` is the parent row.
 `AUD-94` (parent), `AUD-101`, `AUD-102`, `AUD-103`, `AUD-104`. `AUD-95` (a band-crossing frequency tune keeps
 the old step) sits on the same `SetFrequency` → `SetBand` path. Keep its fix in mind; it is not part of this
 row.
+
+## Implementation notes (Builder, 2026-10-11)
+
+Built on `feat/aud-99-hf-direct-sampling`. Box checks (§ *On-box UAT*, as amended by the owner ruling) are still
+to run.
+
+**Device layer (`RTLSDRCore`).**
+- `RtlSdrDevice` P/Invokes `rtlsdr_set_direct_sampling`, `rtlsdr_get_direct_sampling` and `rtlsdr_get_tuner_type`.
+  The tuner is read at `Open` (it needs a handle), mapped by `HfDirectSampling.TunerName` (5 = `R820T`, which
+  covers R820T/R820T2/R860), and cached per dongle so later enumerations report it; before the first open in a
+  process it reads `Unknown (not opened yet)`. The hard-coded `TunerType = "RTL2832U"` is gone.
+- `DeviceInfo` gains `Product` (the EEPROM iProduct, e.g. `NESDR SMArt v5`) and `HfDirectSampling`
+  (`Off`/`I`/`Q`). `MinFrequencyHz` is `HfDirectSampling.HfMinFrequencyHz` (100 kHz) when HF is not `Off`,
+  otherwise `RtlSdrDevice.TunerMinFrequencyHz` (24 MHz). The mock's default info and `SdrDeviceFactory`'s mock
+  entry are now one object (`MockSdrDevice.CreateDefaultDeviceInfo`): a simulated Q-branch dongle, 100 kHz floor.
+  The mock's `SetFrequency` floor follows its HF state (24 MHz in tuner mode). `BandSweepPlans.UnavailableReason`
+  still reads the static constants, unchanged.
+- `ISdrDevice`: `SupportsHfDirectSampling`, `IsHfMode` (false while closed), `SetHfMode(bool)`, idempotent; on a
+  device without HF, `SetHfMode(true)` is false and `SetHfMode(false)` is true. `RtlSdrDevice` reads the mode back
+  after setting it and fails on a mismatch. Implemented on `RtlSdrDevice`, `MockSdrDevice`, `FakeSdrDevice`
+  (RTLSDRCore.Tests) and the two band-map test devices; Moq mocks need nothing.
+- In HF mode the tuner is in standby, so `SetGainMode`/`SetGain` on `RtlSdrDevice` and `MockSdrDevice` return true
+  and log at Debug instead of calling librtlsdr. No Error per tune.
+
+**Which bands, on which paths.** `HfBands.Requires(BandType)` is true for AM and Shortwave only (custom bands are
+tuner bands). The receiver calls `ApplyHfModeFor(band)`, which makes no device call when the mode already
+matches:
+- `Startup`: open → `SetupSignalProcessing` → HF mode → sample rate → frequency → gain → streaming.
+- `SetBand` (and `SetFrequency` → `FindBandForFrequency` → `SetBand`): stop streaming → HF mode → sample rate →
+  frequency → resume. The HF switch comes before the band is recorded, so a refused switch leaves the receiver on
+  its old band and frequency, streaming. A custom-band tune from HF mode switches HF off with streaming paused.
+- Idle sweep: `DeviceSweepTuner(device, gain, hfMode)` switches the mode in `Open`, before the sample rate and any
+  tune; `BandMapService.RunIdle` passes `HfBands.Requires(run.Plan)`.
+- Live sweep: **refused, not switched.** `BandMapService.PlanFor` builds the plan of the band *asked for*, and the
+  live path measures it with the radio's running receiver, so a request for FM while the radio plays AM does reach
+  the live path today (the reverse, AM/SW sweeps, arrives with `AUD-103`'s plans). Switching the mode would mean
+  stopping the playing radio's stream and reprogramming the dongle under it, so `RadioReceiver.RunLiveSweep`
+  throws `InvalidOperationException` when the swept band needs the other mode (`LiveSweepModeConflict`), and
+  `BandMapService` asks first through `ILiveBandSweeper.LiveSweepRefusal` and reports the new reason
+  `radio-other-hf-mode` (409 from `BandMapController`, timer evaluations record it as a skip).
+
+**Which dongles.** Config key **`RTLSDR:HfDirectSampling`** = `Auto` | `Q` | `I` | `Off`, **default `Auto`**, set
+in `src/Radio.API/appsettings.json` (not in `deploy/*/appsettings.Production.json`). `Auto` is Q when the USB
+product string is in `HfDirectSampling.KnownGoodProducts` (`NESDR SMArt v5`, compared case-insensitively after
+trimming), otherwise Off. `RTLSDRCore` stays configuration-free: the setting is a constructor/factory argument.
+`Radio.Infrastructure.Audio.Factories.SdrHfConfiguration.Read` reads it through `IConfiguration` (so a config-store
+row overrides the JSON) each time a device is created, for both `RadioFactory` (the radio) and the DI-supplied
+idle-sweep device factory. An invalid value is `Auto` plus one Warning.
+
+**Tune failures.** `SetFrequencyInternal` returns the device's result. `Startup` fails (closes the device, state
+`Error`) when the HF switch, the sample rate or the tune is refused. `SetBand` returns false for any of the three
+or a failed resume. New `RadioReceiver.TrySetFrequency` returns `TuneResult` (`Success` / `OutOfRange` /
+`Refused`); `SetFrequency` is `TrySetFrequency(...) == Success`. A hardware refusal is the new
+**`Radio.Core.Exceptions.TunerRefusedException`** (derives from `InvalidOperationException`, which
+`TuneInBandAsync` already threw for a receiver fault). `SDRRadioAudioSource` throws it from `SetFrequencyAsync`
+(`Refused`), `SetBandAsync` (was `ArgumentException`) and `TuneInBandAsync` (was `InvalidOperationException`);
+`ArgumentOutOfRangeException` stays for `OutOfRange` and out-of-band frequencies. **HTTP mapping:**
+`RadioController` answers **503 `application/problem+json`**, title *"The tuner refused the request"*, detail the
+exception message, on `POST /api/radio/frequency` (both forms), `POST /api/radio/band` and
+`POST /api/radio/presets/{id}/load`. Out-of-range is still 400.
+
+**Every caller of `SetFrequency`/`SetBand`, and what changed.**
+| Caller | Change |
+|---|---|
+| `RadioController` frequency / band / preset load | catches `TunerRefusedException` → 503 (Information log) |
+| `PresetSelectorService` (encoder preset recall) | catches it → failure card "The tuner refused that station", Information log; other exceptions unchanged |
+| `SourceSelectorService` (encoder band commit) | catches it → failure card "&lt;band&gt;: the tuner refused", Information log |
+| `RotaryEncoderActionRouter` and `/frequency/up`/`down` (`TuneFrequencyUp/Down`) | none: a step returns false at a band edge as well, so the result stays ignored; a refusal is logged at Warning by the receiver |
+| `SDRRadioAudioSource.RestorePersistedRadioPreferencesAsync` | none: it runs before `Startup`, with the device closed, so nothing reaches hardware; it already catches and warns |
+| Scan / seek (`ScanInternal`, `ScanStations`) | none: each hop's refusal is logged at Warning by the receiver and the scan carries on; no background loop can throw from it |
+| Live sweep cleanup retune (`RunLiveSweep` `finally`) | none: unchanged device call |
+| `RadioBandMemoryService` | none: it stores frequencies and does not tune |
+
+The receiver logs a refusal once at Warning; callers that catch the exception log at Information, so a refusal is
+one Warning line in journald, not three. (`RtlSdrDevice` itself still logs a native `set_center_freq` failure at
+Error, as before.)
+
+**Diagnostics.** `GET /api/radio/devices` gains `hardware[]`: `product`, `tunerType`, `hfDirectSampling`
+(`Q`/`I`/`Off`), `hfEnabled`, `hfSetting`, `isHfMode`, `isInUse`, `min/maxFrequencyHz`, plus name, manufacturer,
+serial and index (`IRadioFactory.GetSdrHardware`, a default interface member returning empty).
+
+**Other decisions.**
+- `MockSdrDevice.SetSampleRate` now also accepts librtlsdr's (225 kHz, 300 kHz] range. The receiver runs at
+  240 kHz, which the mock's discrete list rejected; that was invisible while `Startup` ignored the result.
+- `RadioReceiver` takes an optional Serilog `ILogger` (the old static logger is the default) so a test can assert
+  on its log levels.
+
+**Box checks for the Builder: the log lines.** `RTLSDRCore` is at Information in `src/Radio.API/appsettings.json`
+(`"RTLSDRCore": "Information"`, not one of `LOG-2`'s Warning holds), and the API's console sink is Warning-only
+(`LOG-11`), so **all of these are in the file sink, not the journal** (`/opt/radio-console/logs/radio-*.txt`):
+- once per process, at the first open: `[INF] [RTLSDRCore.Hardware.RtlSdrDevice] RTL-SDR device 0: product NESDR SMArt v5, tuner R820T, HF direct sampling Q branch (RTLSDR:HfDirectSampling=Auto), lower limit 100… kHz`
+- each switch to AM/SW: `[INF] [RTLSDRCore.Hardware.RtlSdrDevice] RTL-SDR device 0: HF direct sampling ON (Q branch, mode 2 read back); tuner in standby`
+- each switch back: `… HF direct sampling OFF (mode 0 read back); tuner active`
+
+What reaches the journal is Warning only: `The device refused …`, `… refused direct sampling mode …`,
+`… reports direct sampling mode … after mode … was set`, `The {Band} band needs HF direct sampling, which this
+device does not have …`. None of these should appear on the SMArt v5.
+
+**librtlsdr's own stderr lines are expected.** `Enabled direct sampling mode, input 2` and `Disabled direct
+sampling mode` are printed by librtlsdr itself, and stderr reaches journald, so each appears **once per band
+change** into or out of AM/SW (not once per tune). They are not a fault.
+
+### Pre-merge fixes (2026-10-11)
+
+From the pre-merge review (checked against osmocom librtlsdr master) and the box UAT on the SMArt v5:
+
+- **H1 — gain after HF off.** librtlsdr's HF-off branch runs the R820T's `init`, which resets its gain
+  registers (box: signalStrength 100 after a cold FM start, 44 after FM → AM → SW → FM on the same station).
+  Every switch that leaves the device in tuner mode now re-applies the gain mode, and the manual gain when auto
+  is off, under the tune lock; the custom-band path also sets the sample rate again (`init` resets the IF filter).
+- **M1 — no `PLL not locked!` on AM/SW → FM.** librtlsdr's HF-off branch ends with
+  `rtlsdr_set_center_freq(dev, dev->freq)`, and `dev->freq` was still the HF frequency. The receiver now tunes
+  the device to the new frequency while HF is still on (only the IF/DDC is programmed then), then switches HF
+  off, then tunes as usual. A refused pre-tune is logged at Debug by the receiver (the device layer logs its own Error) and does not fail the switch. If HF off is then refused, the device is tuned back to the receiver's current frequency (re-review finding, fixed before merge).
+- **M2 — half-done switch.** On any failed `SetHfMode`, `RtlSdrDevice` reads librtlsdr's recorded mode back (librtlsdr sets it even when a register write fails, so this is not a hardware read), sets the previous
+  mode once more if the hardware is not in it, and caches the mode read back last. `ISdrDevice.SetHfMode`'s docs
+  say what `IsHfMode` means after a failure.
+- **M3 — start-up retry.** `Startup` tries the sample rate and the first tune once more before failing; no wait.
+- **M4 — saved AM/SW on a device without HF.** `Startup` falls back to FM (band centre) with one Warning instead
+  of failing.
+- **S1 — HF was digital silence.** The squelch compared the raw IQ RMS (≈ 0.02 in direct sampling, no tuner
+  gain) with 0.1 and always closed. On AM and SW the wideband squelch is no longer applied (`SquelchOpen`
+  reports open); mute and the sweep silencing still apply; FM/AIR/WB/VHF are unchanged. `AUD-101` moves the level
+  to the filtered channel and applies AGC.
+- **L2 — mode at open.** `Open` reads the direct-sampling mode back (`rtlsdr_open` sets mode 1 itself for an
+  unknown tuner); idempotence compares mode numbers.
+- **L3 — custom band.** Streaming resumes after the tune, not before it.
+- **L4 — 409 for a device without HF.** `TuneResult.Unsupported` / `RadioReceiver.TrySetBand` →
+  `TunerCapabilityException` (a `TunerRefusedException`) → **409** problem+json *"The SDR device has no HF direct
+  sampling"*. A transient refusal stays 503, out of range stays 400.
+- **L5 — `IsInUse`.** `RadioFactory` forgets its radio source once it is disposed, so `GetSdrHardware` no
+  longer reports a dongle in use after the source is gone.
+- **L6 — version.** `RTLSDRCore` 1.0.0 → 1.1.0 (`ISdrDevice` gained abstract members).
+- **L7 — threads and typo.** The device mode fields are volatile; `sweepCts =Cancellation…` typo fixed.
+
+**Not in scope, noted:** `POST /api/radio/band` lands on a band-edge frequency (measured on the box: FM → 87.5
+MHz, AM → 1710 kHz), not the band's remembered frequency. Band memory is used only by the encoder selectors and
+the preferences; this predates `AUD-99` and is not changed here.
+
+## Box UAT — 2026-10-11, 23:36–23:44 UTC (Builder), build `5cc20e5` deployed and SHA-verified on both services
+
+No-station acceptance (owner ruling above). The console was muted by the owner throughout and was left muted, so
+audio was measured at the fingerprint tap, which is **before** mute: on FM it read −16.6/−17.1 dBFS while muted,
+which validates the instrument. `Radio.Infrastructure.Audio` was raised to Debug for the run (file sink only)
+and reset afterwards.
+
+| Check | Result |
+|---|---|
+| Deploy | `Verified: API is running commit 5cc20e5`, `Verified: Web is running commit 5cc20e5`, kiosk live (12 connections); `radio-api` and `radio-web` both `active` |
+| Start-up decision (file sink, INF) | `product NESDR SMArt v5, tuner R820T, HF direct sampling Q branch (RTLSDR:HfDirectSampling="Auto"), lower limit 100.0 kHz`; `/api/radio/devices` agrees |
+| Cold-start FM baseline | 97.745 MHz, signalStrength **100** (clip), stereo, RDS `WSMW` |
+| AM (`POST /band`) | 200; `isHfMode: true`; `HF direct sampling ON ("Q" branch, mode 2 read back); tuner in standby` (INF); tap **−50.9 dBFS**, full 13 s captures, **0 silence chunks**. Low-level noise, not silence |
+| SW (`POST /band`, then tune 9.6 MHz) | both 200; `isHfMode: true`; tap −50.4 / −47.5 dBFS (4 zero chunks during the retune, then 0) |
+| SW → FM 97.745 | 200; `isHfMode: false`; signalStrength **100** (clip), equal to the cold start (it was 44 on `341f264`, before H1's fix); stereo, RDS `WSMW`; tap −19.5 / −16.1 dBFS |
+| `PLL not locked` | **none** at the SW → FM switch (`341f264` printed two). One at the service start (19:37:34 EDT), which **predates this row**: every `radio-api` start in the last 30 h prints it, including `2a2893d` at 03:01 and 16:23. Not chased |
+| FM live sweep | `completed`, path `live`, **101** channels in 20.9 s; radio back on 97.745 MHz in stereo with RDS |
+| FM scan requested while AM plays | **409** *"The radio is playing a band that uses the other receiver mode…"* |
+| AM ↔ FM, 5 switches in 2 s | all 200; 0 `PLL not locked`; one `Buffer underrun` Warning after the burst (none after the spaced switches; underruns also occur on this box without this row: 1 in the prior 30 h) |
+| Journal (bounded) | Expected librtlsdr stderr: `Enabled direct sampling mode, input 2` / `Disabled direct sampling mode`, once per mode change. No new Warning or Error per tune |
+
+**Not checked:** the panel's look on AM/SW (`AUD-102`'s scope), and listening by ear (the console was muted).
+**Box left on:** FM 97.745 MHz, log levels reset, the UAT scripts removed from `/tmp`.
+
+### Re-review of the fixes (2026-10-11) and deferrals
+
+A second adversarial review of `341f264..bba19a4f` found **no HIGH**. Its one MEDIUM is fixed before merge: a
+refused HF-off after the M1 pre-tune left the device's DDC on the new frequency while the receiver reported the
+old one, so the device is now re-tuned to the receiver's frequency (tests:
+`SetBand_FromAmToFm_RefusedHfOff_PutsTheDeviceBackOnTheAmFrequency`, and the device-frequency assert in
+`CustomBand_FromAm_RefusedHfOff_IsRefused_AndResumesStreaming`). LOWs L-a, L-b and L-c (comments claiming a
+"hardware" read-back, an unreachable idempotence claim, and the pre-tune log level) are corrected.
+**Deferred, LOW, with reasons:**
+- **L-d:** a request that gets 409 (a device without HF, asked for AM/SW) still pauses and resumes streaming and logs
+  one Warning. It does not happen on this box (the SMArt v5 has HF), it predates the fixes, and it is cosmetic on a
+  dongle without HF.
+- **L-e:** the 409 title is written for the only capability that exists today (HF). Revisit if
+  `TunerCapabilityException` is ever reused.
+- **L-f:** `RtlSdrDevice.RecoverAfterFailedSwitch` has no unit test. It is native-only, so it was reviewed by
+  reading.
+
+## ⚠ Open before merge — one FM failure after AM, not reproduced (2026-10-12, 00:15–00:30 UTC, Builder)
+
+✅ **OWNER RULING 2026-10-12: *"Merge + watchdog row."*** The fault is accepted as intermittent and possibly
+pre-existing. #800 is merged. The watchdog and instrumentation are filed as [`AUD-106`](AUD-106.md), which carries the
+evidence below and the reproduction attempts.
+
+**What happened (build `5cc20e5`).** After about 7 minutes on AM (8 tunes 45 s apart, Debug logging on
+`Radio.Infrastructure.Audio`), a `POST /api/radio/frequency` to 97.745 MHz at 00:15:19 UTC switched the radio
+back to FM. That switch logged `HF direct sampling OFF (mode 0 read back); tuner active` and restarted
+streaming. From then on FM had **no stereo pilot, no RDS (PI null) on 97.745, 94.7 or 92.3 MHz** for more than
+two minutes, across three FM→FM retunes, while signalStrength still changed per station (100, 37, 100), so IQ
+was flowing. A good return logs `RDS: Block sync acquired` about 0.4 s after streaming restarts; this one never
+did. **A service restart (the deploy of `0028577` at about 00:20 UTC) cleared it.**
+
+**Not reproduced on `0028577`, in about 50 transitions:**
+- AM → 8 tunes 5 s apart → FM: RDS in 1 s.
+- An FM live sweep (gain reads 28, see `AUD-90`) → AM → 3 tunes → FM: RDS in 1 s.
+- The full replay, a 6-minute AM dwell with tunes 44 s apart and Debug logging on → FM: RDS in 1 s.
+- 6 rounds of rapid AM ↔ FM ↔ SW switching: RDS in 1 s every round.
+
+**Unknown:** whether this predates `AUD-99`. A log heuristic (an FM switch with no `Block sync acquired` within
+5 s) proved invalid, because the decoder does not log a re-sync every time, so the old logs cannot answer it.
+Candidates not ruled out: R820T/RTL2832 state left by the HF-off path (the `AUD-99` code) on an unlucky timing,
+or an older intermittent receiver fault that band changes happen to expose.
+
+**Not merged because of it.** The merge policy pauses on a risk to the FM path. **Recovery if it recurs:** restart
+`radio-api` (and then start `radio-web`), or reselect the radio source.
+
+## Nighttime skywave check (2026-10-12, 00:08–00:15 UTC) — inconclusive
+
+The owner hears, on a separate AM radio at night: 1690, 1590, 1500, 1290, 1210, 1190, 1090, 1030, 960, 840, 750
+and 710 kHz. Through the API on `5cc20e5`, listed channels (1090, 750, 1190, 710, 1030) and empty ones (1180,
+1400, 1650) read the same `signalStrength` 1–2 and `rssiDbu` −59.4/−58.8: that meter is wideband on this build,
+which is `AUD-101`'s gap. The tap readings were invalid: no capture ran during the sweep (the fingerprint
+schedule had backed off), so every row showed the last FM value. An in-channel re-run of the step 0 probe
+needs `radio-api` stopped, and the session's permission policy refused that. It was not worked around.
+**Do this on `AUD-101`**, where the level comes from the filtered channel and the same API comparison needs no
+outage. The 960 kHz entry is also the dongle's crystal spur (step 0: +18 dB over the median), so it is not
+evidence unless it measures clearly above that.

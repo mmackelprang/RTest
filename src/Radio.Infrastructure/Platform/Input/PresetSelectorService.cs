@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Configuration;
+using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
@@ -467,11 +468,18 @@ public sealed class PresetSelectorService : IDisposable
       _logger.LogInformation(
         "Recalled preset {Name} ({Band} {Frequency})", preset.Name, preset.Band, preset.Frequency);
     }
+    catch (TunerRefusedException ex)
+    {
+      // AUD-99: the hardware refused the band, the HF switch or the frequency. The receiver has
+      // logged it at Warning; this adds the preset at Information rather than a second Warning.
+      _logger.LogInformation("Preset {Id} not recalled: {Reason}", id, ex.Message);
+      PublishFailed(row, "The tuner refused that station");
+    }
     catch (Exception ex)
     {
       // Deliberately not narrowed. SDRRadioAudioSource throws ArgumentOutOfRangeException from
-      // SetFrequencyAsync and ArgumentException from SetBandAsync, and an unobserved task exception
-      // here would leave the user in silence with a spinner up.
+      // SetFrequencyAsync and ArgumentException for an unsupported band from SetBandAsync, and an
+      // unobserved task exception here would leave the user in silence with a spinner up.
       _logger.LogError(ex, "Error recalling preset {Id}", id);
       PublishFailed(row, "Could not tune that station");
     }

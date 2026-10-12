@@ -101,6 +101,11 @@ public class BandMapController : ControllerBase
       BandMapService.ReasonNoSdrDevice => StatusCode(StatusCodes.Status503ServiceUnavailable,
         new { error = "No SDR device is available" }),
       BandMapService.ReasonRadioBusy => Conflict(new { error = "The radio cannot be swept right now" }),
+      // AUD-99: e.g. FM requested while the radio plays AM; the live sweep never switches HF mode.
+      BandMapService.ReasonRadioOtherMode => Conflict(new
+      {
+        error = "The radio is playing a band that uses the other receiver mode; switch the radio to this band to scan it",
+      }),
       BandMapService.ReasonBandNotReceivable => Conflict(new { error = "This band cannot be scanned" }),
       BandMapService.ReasonOtherBandSweeping => Conflict(new
       {

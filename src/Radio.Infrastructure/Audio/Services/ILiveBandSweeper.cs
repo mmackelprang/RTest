@@ -13,6 +13,15 @@ public interface ILiveBandSweeper
   bool CanSweepLive { get; }
 
   /// <summary>
+  /// Why a live sweep of <paramref name="plan"/> would be refused for the receiver's HF mode, or
+  /// null when it would not (AUD-99). A live sweep never switches HF direct sampling under the
+  /// playing radio, so a plan whose band needs the other mode is refused. The default
+  /// implementation refuses nothing.
+  /// </summary>
+  /// <param name="plan">The plan a live sweep would measure.</param>
+  string? LiveSweepRefusal(BandSweepPlan plan) => null;
+
+  /// <summary>
   /// Sweeps <paramref name="channels"/> on a background thread: one tune per channel, centred on
   /// it, each measured over the FM window (<see cref="BandSweepPlans.FmHalfWindowHz"/> /
   /// <see cref="BandSweepPlans.FmDcExcludeHz"/>).

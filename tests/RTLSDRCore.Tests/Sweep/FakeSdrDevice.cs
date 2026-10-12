@@ -33,6 +33,25 @@ internal sealed class FakeSdrDevice : ISdrDevice
 
   public bool OpenResult { get; set; } = true;
 
+  /// <summary>AUD-99: whether the fake has HF direct sampling. True unless a test says otherwise.</summary>
+  public bool SupportsHfDirectSampling { get; set; } = true;
+
+  private bool _hfMode;
+
+  public bool IsHfMode => IsOpen && _hfMode;
+
+  /// <summary>When false, SetHfMode refuses any change of mode (it is still recorded).</summary>
+  public bool HfSwitchResult { get; set; } = true;
+
+  /// <summary>Decides what SetFrequency returns for a frequency; always true by default.</summary>
+  public Func<long, bool> SetFrequencyResult { get; set; } = _ => true;
+
+  /// <summary>When false, SetSampleRate refuses (it is still recorded).</summary>
+  public bool SampleRateResult { get; set; } = true;
+
+  /// <summary>The next this-many SetSampleRate calls refuse, whatever <see cref="SampleRateResult"/> says; counts down.</summary>
+  public int RefuseNextSampleRates { get; set; }
+
   public bool Disposed { get; private set; }
 
   /// <summary>Returned by successive ReadSamples calls; null entries mean "fill the buffer".</summary>
@@ -117,6 +136,24 @@ internal sealed class FakeSdrDevice : ISdrDevice
     Record("Close");
     IsStreaming = false;
     IsOpen = false;
+    _hfMode = false;
+  }
+
+  public bool SetHfMode(bool on)
+  {
+    Record($"SetHfMode:{on}");
+    if (on && (!IsOpen || !SupportsHfDirectSampling))
+    {
+      return false;
+    }
+
+    if (on != _hfMode && !HfSwitchResult)
+    {
+      return false;
+    }
+
+    _hfMode = on;
+    return true;
   }
 
   public bool SetFrequency(long frequencyHz)
@@ -124,6 +161,10 @@ internal sealed class FakeSdrDevice : ISdrDevice
     lock (_gate)
     {
       _calls.Add($"SetFrequency:{frequencyHz}");
+      if (!SetFrequencyResult(frequencyHz))
+      {
+        return false;
+      }
       _frequencyHz = frequencyHz;
     }
     return true;
@@ -140,7 +181,12 @@ internal sealed class FakeSdrDevice : ISdrDevice
   public bool SetSampleRate(int sampleRate)
   {
     Record($"SetSampleRate:{sampleRate}");
-    return true;
+    if (RefuseNextSampleRates > 0)
+    {
+      RefuseNextSampleRates--;
+      return false;
+    }
+    return SampleRateResult;
   }
 
   public int GetSampleRate() => 240_000;

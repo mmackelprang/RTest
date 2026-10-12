@@ -33,4 +33,10 @@ public interface IRadioFactory
   /// <param name="deviceType">The device type to check.</param>
   /// <returns>True if the device type is available; otherwise, false.</returns>
   bool IsDeviceAvailable(string deviceType);
+
+  /// <summary>
+  /// The SDR dongles present, with their product, tuner and HF direct-sampling state (AUD-99).
+  /// Empty when there are none, or when the factory does not report hardware.
+  /// </summary>
+  IReadOnlyList<Models.Audio.SdrHardwareInfo> GetSdrHardware() => Array.Empty<Models.Audio.SdrHardwareInfo>();
 }
