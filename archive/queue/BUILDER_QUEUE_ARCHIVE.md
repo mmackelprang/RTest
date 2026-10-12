@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (134)
+## Shipped rows (135)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3683,3 +3683,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-107.md`](AUD-107.md)**
 
 🟢 **NEW 2026-10-12 (P3; filed by the `AUD-101` fixer as `AUD-101`'s out-of-scope follow-up; read from code, no box evidence yet) — NFM (Weather, VHF) has no IQ channel filter.** `CalculateRates` gives SDR rate = demod rate = 240 kHz for a 12.5 kHz NFM channel, so no IQ decimator is built and the FM demodulator sees the whole ±120 kHz capture: the defect `AUD-101` fixed for AM. Pattern: `AUD-101`'s `AmChannelizer` (mix, filter, decimate in one pass). ⚠ Keep the wideband signal-strength scale on these tuner-mode bands (`AUD-101` had to move AIR back to it after the box). — [detail](AUD-107.md)
+
+### AUD-106 — FM acquisition watchdog: instrument every FM start, snapshot a miss, recover a known station
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#806](https://github.com/mmackelprang/RTest/pull/806) — box UAT on `aa502f6`: 20 AM/SW→FM returns logged, 0 watchdog fires (dossier). The fault has not recurred, so recovery on the box is unexercised; the stereo detector's noise false-positive is `AUD-109`. |
+| Plan | _plan TBD: a mono station without RDS must not trigger it; decide the trigger in the plan_ |
+| Spec / handoff | _no spec doc_ |
+| Depends on | `AUD-99` ✅ ([#800](https://github.com/mmackelprang/RTest/pull/800)) |
+| Branch | `feat/aud-106-fm-decode-watchdog` (suggested) |
+
+**Detail: [`queue/AUD-106.md`](AUD-106.md)**
+
+🟡 **NEW 2026-10-12 (owner ruling on #800: *"Merge + watchdog row."*; MEASURED once, not reproduced) — FM stereo/RDS-loss watchdog.** At 00:15:19 UTC, after about 7 min on AM, a switch back to FM decoded **no pilot and no RDS** on 97.745, 94.7 and 92.3 MHz while IQ flowed (signalStrength per station). FM→FM retunes did not help; a service restart did. About 50 replays on `0028577` all recovered in 1 s. Instrument every FM (re)start's pilot and RDS outcome with a one-shot diagnostic snapshot, then add a rate-limited watchdog: re-run the band setup, then reopen the device. — [detail](AUD-106.md)

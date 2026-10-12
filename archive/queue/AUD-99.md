@@ -430,7 +430,7 @@ old one, so the device is now re-tuned to the receiver's frequency (tests:
 ## ⚠ Open before merge — one FM failure after AM, not reproduced (2026-10-12, 00:15–00:30 UTC, Builder)
 
 ✅ **OWNER RULING 2026-10-12: *"Merge + watchdog row."*** The fault is accepted as intermittent and possibly
-pre-existing. #800 is merged. The watchdog and instrumentation are filed as [`AUD-106`](../../docs/queue/AUD-106.md), which carries the
+pre-existing. #800 is merged. The watchdog and instrumentation are filed as [`AUD-106`](AUD-106.md), which carries the
 evidence below and the reproduction attempts.
 
 **What happened (build `5cc20e5`).** After about 7 minutes on AM (8 tunes 45 s apart, Debug logging on

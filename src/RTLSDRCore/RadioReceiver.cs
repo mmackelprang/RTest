@@ -12,7 +12,7 @@ namespace RTLSDRCore;
   /// <summary>
   /// Main radio receiver class that coordinates hardware, signal processing, and audio output
   /// </summary>
-  public class RadioReceiver : IRadioControl, IDisposable
+  public partial class RadioReceiver : IRadioControl, IDisposable
   {
       private readonly ILogger Logger;
 
@@ -33,9 +33,18 @@ namespace RTLSDRCore;
       // Replaced as a whole by SetupSignalProcessing; the DSP thread reads it once per block.
       // Never non-null at the same time as _amChain once a setup has finished.
       private volatile NfmReceiveChain? _nfmChain;
-      // Counts the receiver's tunes of the device. Each IQ block is stamped with the value current
-      // when the USB thread raised it (OnSamplesAvailable), and the AM chain re-seeds its DC
-      // blocker and AGC on the second block stamped with a new value (AmReceiveChain.BeginBlock).
+
+      // AUD-106: the FM acquisition watchdog. _fmStart is replaced (as a whole) each time a WFM chain
+      // is built, carrying why and the tune generation it was published at; the DSP thread compares it
+      // with the last one it saw to open a start window. _pendingFmStart is the reason the next WFM
+      // chain records, set by the caller just before the call that builds it (null: a band change).
+      private volatile FmChainStart? _fmStart;
+      private FmChainStart? _watchedFmStart;
+      private FmChainStart? _pendingFmStart;
+      // Counts the receiver's tunes of the device, and (AUD-106) each WFM chain it publishes. Each IQ
+      // block is stamped with the value current when the USB thread raised it (OnSamplesAvailable),
+      // and the AM chain re-seeds its DC blocker and AGC on the second block stamped with a new value
+      // (AmReceiveChain.BeginBlock).
       private int _tuneGeneration;
 
       // One raised IQ block and the tune generation current when it was raised. Stamping at raise
@@ -391,6 +400,7 @@ namespace RTLSDRCore;
 
                   // Setup signal processing chain first (calculates the
                   // appropriate SDR sample rate for the current modulation)
+                  _pendingFmStart = new FmChainStart("start-up", ByRecovery: false);
                   SetupSignalProcessing();
 
                   // AUD-99: the HF mode first (AM/SW on, every other band off),
@@ -506,7 +516,10 @@ namespace RTLSDRCore;
       /// Stops streaming and closes the device after <see cref="Startup"/>
       /// failed with the device possibly open, so a failed start never
       /// leaves the dongle held (AUD-76: the device gate is released on
-      /// failure and an idle band sweep may then open the device).
+      /// failure and an idle band sweep may then open the device). Also used by the FM watchdog's
+      /// recovery (AUD-106) when the device fails to reopen or to restart streaming, so a later
+      /// <see cref="Startup"/> starts clean; on that path the receiver stays in Error and the
+      /// source's AUD-76 gate is not released here (it is released by the source's shutdown).
       /// </summary>
       private void CloseDeviceAfterFailedStartup()
       {
@@ -636,8 +649,9 @@ namespace RTLSDRCore;
 
           if (band != null)
           {
-              // Switch to the appropriate band
-              return TrySetBand(band.Type, frequencyHz);
+              // Switch to the appropriate band. TrySetBand rebuilds the chain even inside FM, so the
+              // watchdog logs this as a frequency tune, not a band change (AUD-106).
+              return TrySetBandCore(band.Type, frequencyHz, new FmChainStart("frequency tune", ByRecovery: false));
           }
 
           // No matching band found - check if within the range the tuner path receives
@@ -1147,13 +1161,22 @@ namespace RTLSDRCore;
       /// device refused the HF switch, the sample rate or the frequency, streaming could not be
       /// resumed, or the switch threw.
       /// </returns>
-      public TuneResult TrySetBand(BandType bandType, long? specificFrequency = null)
+      public TuneResult TrySetBand(BandType bandType, long? specificFrequency = null) =>
+          TrySetBandCore(bandType, specificFrequency, fmStart: null);
+
+      /// <summary>
+      /// <see cref="TrySetBand(BandType, long?)"/>, recording <paramref name="fmStart"/> as the reason for
+      /// the WFM chain it builds (AUD-106; null: a band change). The reason is set and cleared under
+      /// <c>_lock</c>, so an early return cannot leave it for the next chain.
+      /// </summary>
+      private TuneResult TrySetBandCore(BandType bandType, long? specificFrequency, FmChainStart? fmStart)
       {
           // A band change cancels a live band sweep before streaming is paused.
           CancelSweep();
 
           lock (_lock)
           {
+              _pendingFmStart = fmStart;
               try
               {
                   var band = BandPresets.GetBand(bandType);
@@ -1206,6 +1229,10 @@ namespace RTLSDRCore;
                   Logger.Error(ex, "Error setting band {BandType}", bandType);
                   return TuneResult.Refused;
               }
+              finally
+              {
+                  _pendingFmStart = null;
+              }
           }
       }
 
@@ -1244,6 +1271,7 @@ namespace RTLSDRCore;
               // affects bandwidth, demod rate, and filter configuration.
               if (_state == ReceiverState.Running || _state == ReceiverState.Scanning)
               {
+                  _pendingFmStart = new FmChainStart("modulation change", ByRecovery: false);
                   SetupSignalProcessing();
 
                   // AUD-101: the new modulation may start or stop using the AM chain, which
@@ -2043,11 +2071,14 @@ namespace RTLSDRCore;
               _rdsDecoder = new RdsDecoder(_demodSampleRate);
               _rdsDecoder.StationNameDecoded += OnRdsDecoderStationNameDecoded;
               _rdsDecoder.ProgramIdChanged += OnRdsDecoderProgramIdChanged;
+              // AUD-106: a new WFM chain is an FM start for the acquisition watchdog.
+              PublishFmStart();
           }
           else
           {
               _stereoDecoder = null;
               _rdsDecoder = null;
+              _pendingFmStart = null;
           }
 
           // Step 6: De-emphasis filter (compensates FM pre-emphasis).
@@ -2148,6 +2179,7 @@ namespace RTLSDRCore;
       /// </summary>
       private void SetupAmSignalProcessing(int bandwidth)
       {
+          _pendingFmStart = null;   // AUD-106: the reason was for an FM chain; this is not one
           // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
           const int maxIqChunk = 16384;
           var chain = new AmReceiveChain(_sdrSampleRate, bandwidth, maxIqChunk);
@@ -2188,6 +2220,7 @@ namespace RTLSDRCore;
       /// </summary>
       private void SetupNfmSignalProcessing(int bandwidth)
       {
+          _pendingFmStart = null;   // AUD-106: the reason was for an FM chain; this is not one
           // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
           const int maxIqChunk = 16384;
           var chain = new NfmReceiveChain(_sdrSampleRate, bandwidth, maxIqChunk);
@@ -2498,6 +2531,9 @@ namespace RTLSDRCore;
               _rdsDecoder?.Process(
                   _demodBuffer.AsSpan(0, demodCount), demodCount,
                   pllPhaseForRds, pllFreqForRds);
+
+              // AUD-106: judge the acquisition (pilot, RDS) while the composite is still intact.
+              ObserveFmAcquisition(samples, tuneGeneration, _demodBuffer.AsSpan(0, demodCount));
 
               // 3b. De-emphasis per channel: de-interleave → process → re-interleave.
               // DeEmphasisFilter.Process works in-place on contiguous spans, so we

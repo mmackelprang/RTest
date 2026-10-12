@@ -79,6 +79,15 @@ namespace RTLSDRCore.Hardware;
       bool SetHfMode(bool on);
 
       /// <summary>
+      /// The direct-sampling mode the driver has recorded (AUD-106's diagnostic snapshot): 0 off, 1 the
+      /// I branch, 2 the Q branch. For <see cref="RtlSdrDevice"/> this is <c>rtlsdr_get_direct_sampling</c>,
+      /// which returns librtlsdr's own record (a field of its device struct), not a register read; it can
+      /// differ from <see cref="IsHfMode"/>, this wrapper's record, only after a failed switch. Null when
+      /// the device cannot say (closed, or an implementation without a driver). Diagnostic only.
+      /// </summary>
+      int? ReadDriverDirectSamplingMode() => null;
+
+      /// <summary>
       /// Gets the current center frequency
       /// </summary>
       /// <returns>Frequency in Hz</returns>

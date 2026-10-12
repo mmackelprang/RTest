@@ -69,6 +69,12 @@ public class RdsDecoder
   private uint _shiftRegister;
   private int _bitsReceived;
   private SyncState _syncState = SyncState.Searching;
+
+  /// <summary>
+  /// Whether the decoder is in block sync now (AUD-106: the FM acquisition watchdog reads it after
+  /// each block, on the DSP thread that runs <see cref="Process"/>).
+  /// </summary>
+  public bool IsSynchronized => _syncState == SyncState.Synced;
   private int _syncConfirmCount;
   private int _blockIndex; // 0=A, 1=B, 2=C, 3=D within a group
   private int _goodBlockRun;

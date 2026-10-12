@@ -295,3 +295,35 @@ AvailableGains = new[] {
     36.4f, 37.2f, 38.6f, 40.2f, 42.1f, 43.4f, 43.9f, 44.5f, 48.0f, 49.6f 
 }
 ```
+
+## FM acquisition watchdog (AUD-106)
+
+Every FM start (start-up, band change, frequency tune, modulation change, a watchdog step) logs one line at
+Information to the file sink (`RTLSDRCore.RadioReceiver`):
+
+```
+FM acquisition (band change) on 97.745 MHz: pilot 68 ms, RDS sync 136 ms (judged over 136 ms; pilot level 0.0657, in phase 0.0495, PLL 19000.0 Hz, mean signal 1.00)
+```
+
+- **pilot** is the stereo detector, which measures energy in 18.5–19.5 kHz. It reads noise as a pilot: empty
+  channels on the box show "pilot 68 ms" with a level of 0.11–0.15, higher than a real pilot's 0.065
+  (`AUD-109`).
+- **in phase** is the pilot's component in phase with the PLL. It is the lock indicator: about 0.05 on a real
+  broadcast pilot, and 0.003–0.011 on the box's empty channels. A frequency counts as locked for the watchdog
+  on RDS sync, or on 8 consecutive blocks at in-phase ≥ 0.02 and ≥ 0.5 × the level.
+- When there is neither pilot nor RDS, a second line, `FM acquisition snapshot`, records:
+  - the IQ DC offset and I/Q power ratio;
+  - the composite mean. Multiplied by 75 kHz it estimates how far the carrier is off centre.
+  - the PLL;
+  - librtlsdr's recorded mode, centre, rate and gain. These are not register reads.
+
+**Recovery** happens only on a frequency that was locked earlier in the process, with neither pilot nor RDS
+within 3 s:
+
+1. Re-run the band setup: HF on and off, sample rate, tune, gain.
+2. Close and reopen the device.
+3. Give up.
+
+Each step logs once at Warning (`FM watchdog: ...`), which reaches journald. An episode ends on a healthy
+acquisition, or when a person selects FM again. At most 3 episodes run per hour. If a Warning appears, also
+check journald for librtlsdr's `[R82XX] PLL not locked!`.
