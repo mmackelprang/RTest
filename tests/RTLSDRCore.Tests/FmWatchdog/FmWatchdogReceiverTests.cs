@@ -199,6 +199,29 @@ public class FmWatchdogReceiverTests
   }
 
   [Fact]
+  public void StepTwo_ReopensWithoutSwitchingHfOn()
+  {
+    // Second review M-A: rtlsdr_open initialises the tuner, so step 2 has no reason to switch HF on,
+    // and a failed HF-off there would strand FM with the tuner in standby.
+    using Fixture f = new(Stereo);
+    f.Run(4);
+    Assert.True(f.Receiver.SetBand(BandType.AM, AmHz));
+    f.Run(2);
+    f.OnAir(Mono);
+    Assert.True(f.Receiver.SetBand(BandType.FM, FmHz));
+    f.Run(4);
+    Assert.Equal(FmWatchdogAction.RerunBandSetup, f.Snapshot()[^1].Action);
+    int before = f.Harness.Device.Calls.Count;
+
+    f.Run(4);
+
+    Assert.Equal(FmWatchdogAction.ReopenDevice, f.Snapshot()[^1].Action);
+    string[] since = f.Harness.Device.Calls.Skip(before).ToArray();
+    Assert.Contains("Close", since);
+    Assert.DoesNotContain("SetHfMode:True", since);
+  }
+
+  [Fact]
   public void ARecoveryStep_IsSkipped_WhenTheReceiverWasRetunedSinceTheMiss()
   {
     // Review M2: a step queued behind a person's preset press must not interrupt the new station.
