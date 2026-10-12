@@ -77,6 +77,15 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
       return;
     }
 
+    if (!IsInBand(band, frequency.Hertz))
+    {
+      // AUD-105 review: the radio source reports a custom band as FM, so leaving 400 MHz would
+      // otherwise overwrite FM's station with a value GetAsync then ignores, and FM would fall back
+      // to its default. Not written, so the last in-band value survives.
+      _logger.LogDebug("Not remembering {Band} at {Hz} Hz: outside the band", band, frequency.Hertz);
+      return;
+    }
+
     try
     {
       var store = await ResolveStoreAsync(cancellationToken);

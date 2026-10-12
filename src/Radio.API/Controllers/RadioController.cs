@@ -203,7 +203,7 @@ public class RadioController : ControllerBase
   /// <response code="200">Returns the updated radio state.</response>
   /// <response code="400">If the radio is not active or the band is invalid.</response>
   /// <response code="409">If the band is AM or SW and the SDR device has no HF direct sampling (AUD-99).</response>
-  /// <response code="503">If the tuner refused the band change, the HF switch the band needs (AUD-99), or the remembered frequency (AUD-105; the band has then changed).</response>
+  /// <response code="503">If the tuner refused the band change at the band's frequency, or the HF switch the band needs (AUD-99).</response>
   [HttpPost("band")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]

@@ -121,12 +121,23 @@ internal sealed class FakeRadioSource : IAudioSource, IRadioControl
   public Task SetEqualizerModeAsync(RadioEqualizerMode mode, CancellationToken cancellationToken = default) => Task.CompletedTask;
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
   public Task TogglePowerStateAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+  /// <summary>
+  /// Records the band in <see cref="BandsSet"/> and, unless <see cref="IgnoresBandChanges"/>, moves
+  /// to the band and records the frequency in <see cref="FrequenciesSet"/>. A tuner that ignores band
+  /// changes ignores the whole tune (it cannot tune a frequency in a band it did not switch to).
+  /// </summary>
   public Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
   {
-    FrequenciesSet.Add(frequency);
+    BandsSet.Add(band);
     _log?.Add($"TuneInBand:{band}:{frequency.Hertz}");
-    CurrentBand = band;
-    CurrentFrequency = frequency;
+
+    if (!IgnoresBandChanges)
+    {
+      FrequenciesSet.Add(frequency);
+      CurrentBand = band;
+      CurrentFrequency = frequency;
+    }
+
     return Task.CompletedTask;
   }
 

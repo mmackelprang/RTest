@@ -334,6 +334,19 @@ public class SourceSelectorServiceTests
   }
 
   [Fact]
+  public void CommitBand_DuringASeek_StopsTheSeekBeforeRememberingTheFrequency()
+  {
+    using var h = new Harness();
+    var radio = ActiveRadio(h);
+    radio.IsScanning = true;
+
+    h.HighlightRow("band:AM");
+    h.Selector.Press();
+
+    Assert.False(radio.IsScanning);
+  }
+
+  [Fact]
   public void CommitBand_FallsBackToTheBandDefault_WhenNothingIsRemembered()
   {
     using var h = new Harness();
@@ -352,7 +365,8 @@ public class SourceSelectorServiceTests
   public void CommitBand_FromAnotherSource_ActivatesRadioThenSetsBandThenFrequency()
   {
     // D7 requirement 2, asserted in order: the source has to exist before the band can be set on
-    // it, and the band has to be set before that band's frequency means anything.
+    // it, and the band has to be set before that band's frequency means anything. Since AUD-105
+    // the band and its frequency are one in-band tune (RadioBandSwitch).
     using var h = new Harness();
     var bluetooth = new FakePrimarySource(AudioSourceType.Bluetooth, "Phone");
     h.Audio.Cached[AudioSourceType.Bluetooth] = bluetooth;
@@ -369,7 +383,7 @@ public class SourceSelectorServiceTests
     h.Selector.Press();
 
     Assert.Equal(
-      new[] { "GetOrCreate:Radio", "SetBand:AM", "TuneInBand:AM:1130000" },
+      new[] { "GetOrCreate:Radio", "TuneInBand:AM:1130000" },
       h.Log.Entries.ToArray());
   }
 

@@ -138,6 +138,38 @@ public class RadioControllerBandMemoryTests
     Assert.Equal(101_100_000, state.Frequency);
   }
 
+  [Theory]
+  [InlineData("AIR", 108_000_000L)]   // AIR's bottom edge is FM's top edge
+  [InlineData("VHF", 30_000_000L)]    // VHF's bottom edge is SW's top edge
+  [InlineData("VHF", 121_500_000L)]   // inside AIR
+  [InlineData("WB", 162_550_000L)]
+  public async Task BandWhoseFrequencyIsAlsoInAnotherBand_StaysOnTheBandAskedFor(string band, long hz)
+  {
+    // The AUD-105 review's case: with nothing remembered the memory service falls back to the
+    // bottom edge, and AIR's and VHF's are shared with FM and SW. Restoring by frequency alone
+    // inferred the other band.
+    _memory.Defaults[Enum.Parse<RadioBand>(band)] = hz;
+    await Tune(97_745_000);
+
+    RadioStateDto state = await Band(band);
+
+    Assert.Equal(band, state.Band);
+    Assert.Equal(hz, state.Frequency);
+  }
+
+  [Fact]
+  public async Task ADefaultOutsideTheBand_FallsBackToTheBandsClamp_InsteadOfFailing()
+  {
+    // A misconfigured Radio:DefaultFMFrequencyMHz is not range-checked by the memory service.
+    _memory.Defaults[RadioBand.FM] = 50_000_000;
+    await Tune(1_030_000);
+
+    RadioStateDto state = await Band("FM");
+
+    Assert.Equal("FM", state.Band);
+    Assert.InRange(state.Frequency, 87_500_000, 108_000_000);
+  }
+
   /// <summary>
   /// <see cref="IRadioBandMemory"/> over two dictionaries: what was remembered, and what the real
   /// service would return from configuration when nothing is (its default rung).
