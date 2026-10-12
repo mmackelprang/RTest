@@ -51,7 +51,7 @@ receiver.Shutdown();
 |------|----------------|------------|----------|
 | AM Broadcast | 530 kHz - 1710 kHz | AM | AM radio stations |
 | FM Broadcast | 87.5 MHz - 108 MHz | WFM | FM radio stations |
-| Shortwave | 1.6 MHz - 30 MHz | AM/SSB | International broadcasts, amateur radio |
+| Shortwave | 1.711 MHz - 30 MHz | AM/SSB | International broadcasts, amateur radio |
 | Aircraft | 108 MHz - 137 MHz | AM | Aviation communications |
 | Weather | 162.4 MHz - 162.55 MHz | NFM | NOAA Weather Radio |
 | VHF | 30 MHz - 300 MHz | NFM | Amateur radio, public safety |

@@ -723,7 +723,7 @@ public class PlayHistoryTracker : IDisposable
     if (source is IRadioControl radio)
     {
       band = radio.CurrentBand.ToString();
-      freq = radio.CurrentFrequency.ToDisplayString();
+      freq = BandUnits.Format(radio.CurrentBand, radio.CurrentFrequency);
       station = radio.RdsStationName;
     }
     else if (source is IPrimaryAudioSource ps && ps.Metadata != null)

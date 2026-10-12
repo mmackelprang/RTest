@@ -342,7 +342,7 @@ public sealed class PresetSelectorService : IDisposable
         Primary = x.Preset.Name,
         // Band in the secondary line because slot ordinals are per band: two rows can both read
         // "01", and the band is what tells them apart (the plan's D-1).
-        Secondary = $"{x.Preset.Band} {new Frequency((long)x.Preset.Frequency).ToDisplayString()}",
+        Secondary = $"{x.Preset.Band} {BandUnits.Format(x.Preset.Band, new Frequency((long)x.Preset.Frequency))}",
         Ordinal = x.Slot.ToString("00"),
         AccentVar = "--source-radio",
         IsCurrent = live is not null
@@ -537,7 +537,7 @@ public sealed class PresetSelectorService : IDisposable
 
       PublishNotice(
         $"Saved to {newSlot:00}",
-        $"{saved.Name} · {new Frequency((long)hz).ToDisplayString()} {band}",
+        $"{saved.Name} · {BandUnits.Format(band, new Frequency((long)hz))} {band}",
         EncoderInteractionTimings.SelectorNoticeMs);
 
       _logger.LogInformation("Saved preset {Name} to {Band} slot {Slot}", saved.Name, band, newSlot);
@@ -583,23 +583,23 @@ public sealed class PresetSelectorService : IDisposable
   }
 
   /// <summary>
-  /// What to call the station being saved: the stable RDS name when the tuner has one, otherwise the
-  /// band and the formatted frequency.
+  /// What to call the station being saved: the stable RDS name when the tuner has one, otherwise
+  /// <see cref="RadioPreset.GetDefaultName"/>'s band and frequency in the band's unit
+  /// (<c>FM - 101.5</c>, <c>AM - 1010</c>, <c>SW - 5905</c>).
   ///
   /// <para>
-  /// The fallback is spelled out here, and an explicit non-blank name is always passed to
-  /// <see cref="IRadioPresetService.AddPresetAsync"/>, so that method's own default is never
-  /// reached. <c>RadioPreset.GetDefaultName</c> formats the frequency as display units while
-  /// <c>RadioPreset.Frequency</c> holds hertz, so it would name this preset "FM - 101500000.0". The
-  /// wording here matches <c>RadioControlPanel.OpenSavePresetDialog</c>'s own fallback, which is the
-  /// dialog this gesture replaces.
+  /// An explicit non-blank name is always passed to <see cref="IRadioPresetService.AddPresetAsync"/>.
+  /// Since AUD-102 <c>GetDefaultName</c> takes hertz, which is what <paramref name="hz"/> is; before
+  /// that it took display units and named this preset "FM - 101500000.0", so this method spelled out
+  /// "{band} {frequency}" instead, which printed SW 5.905 MHz as "SW 5.9 MHz" and AM 1010 kHz as
+  /// "AM 1.0 MHz".
   /// </para>
   /// </summary>
   private static string NameFor(IRadioControl radio, RadioBand band, double hz)
   {
     string? stable = radio.RdsStationNameStable;
     return string.IsNullOrWhiteSpace(stable)
-      ? $"{band} {new Frequency((long)hz).ToDisplayString()}"
+      ? RadioPreset.GetDefaultName(band, hz)
       : stable;
   }
 
@@ -740,7 +740,7 @@ public sealed class PresetSelectorService : IDisposable
     var mgr = _audioManagerFactory();
     return mgr.ActiveSource switch
     {
-      IRadioControl radio => $"{radio.CurrentBand} {radio.CurrentFrequency.ToDisplayString()}",
+      IRadioControl radio => $"{radio.CurrentBand} {BandUnits.Format(radio.CurrentBand, radio.CurrentFrequency)}",
       { } source => source.Name,
       _ => "nothing",
     };

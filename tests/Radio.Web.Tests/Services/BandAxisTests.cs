@@ -21,7 +21,8 @@ public class BandAxisTests
   private static readonly BandAxis Vhf = new("VHF", 161_400_000, 163_400_000, 161_400_000, 163_400_000, 12_500);
   private static readonly BandAxis VhfOnTheHalf = new("VHF", 161_500_000, 163_500_000, 161_500_000, 163_500_000, 12_500);
   private static readonly BandAxis Am = new("AM", 530_000, 1_710_000, 530_000, 1_710_000, 10_000);
-  private static readonly BandAxis Sw = new("SW", 1_600_000, 30_000_000, 1_600_000, 30_000_000, 5_000);
+  // AUD-102: SW is labelled in kHz like AM, on the preset's 1711 kHz–30 MHz range.
+  private static readonly BandAxis Sw = new("SW", 1_711_000, 30_000_000, 1_715_000, 30_000_000, 5_000);
 
   private static string[] Labels(BandAxis axis) => axis.Ticks().Select(t => t.Label).ToArray();
 
@@ -123,8 +124,23 @@ public class BandAxisTests
   }
 
   [Fact]
-  public void Sw_TicksEvery5MHz() =>
-    Labels(Sw).Should().Equal("5", "10", "15", "20", "25", "30");
+  public void Sw_TicksEvery5MHz_InKhz()
+  {
+    Sw.IsKhz.Should().BeTrue();
+    Labels(Sw).Should().Equal("5000", "10000", "15000", "20000", "25000", "30000");
+    Sw.Ticks()[0].Hz.Should().Be(5_000_000);
+  }
+
+  [Theory]
+  [InlineData("AM", true)]
+  [InlineData("SW", true)]
+  [InlineData("sw", true)]
+  [InlineData("FM", false)]
+  [InlineData("AIR", false)]
+  [InlineData("WB", false)]
+  [InlineData("VHF", false)]
+  public void IsKhz_OnAmAndSwOnly(string band, bool expected) =>
+    new BandAxis(band, 1_000_000, 2_000_000, 1_000_000, 2_000_000, 10_000).IsKhz.Should().Be(expected);
 
   [Fact]
   public void NonFmTicks_AreAtMostMaxTicks_AndAllOnThePlot()
@@ -269,7 +285,7 @@ public class BandAxisTests
     Air.Labels()[^1].Text.Should().Be("135");
     Am.Labels()[^1].Text.Should().Be("1600");
     Am.Labels()[0].Text.Should().Be("600");
-    Sw.Labels()[^1].Should().Be(new BandAxisLabel(1.0, "30", BandAxisLabelAlign.End));
+    Sw.Labels()[^1].Should().Be(new BandAxisLabel(1.0, "30000", BandAxisLabelAlign.End));
     new[] { BandAxis.Fm, Air, Am, Sw, Wb, VhfOnTheHalf }.SelectMany(a => a.Labels())
       .Should().OnlyContain(l => !l.Text.Contains("Hz"));
   }

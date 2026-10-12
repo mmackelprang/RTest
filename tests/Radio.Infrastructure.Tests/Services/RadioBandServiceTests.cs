@@ -1,4 +1,11 @@
+using Moq;
+using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Services;
+using RTLSDRCore.Bands;
+using RTLSDRCore.Enums;
+using RTLSDRCore.Hardware;
+using RTLSDRCore.Sweep;
 
 namespace Radio.Infrastructure.Tests.Services;
 
@@ -19,7 +26,7 @@ public class RadioBandServiceTests
   [InlineData("WB", 162_400_000, 162_550_000, "162.4–162.55 MHz")]
   [InlineData("VHF", 136_000_000, 174_000_000, "136–174 MHz")]
   [InlineData("AIR", 108_000_000, 137_000_000, "108–137 MHz")]
-  [InlineData("SW", 1_800_000, 30_000_000, "1.8–30 MHz")]
+  [InlineData("SW", 1_711_000, 30_000_000, "1711–30000 kHz")] // AUD-102: SW is in kHz like AM
   public void FormatRange_ReturnsExpectedString(string band, long minHz, long maxHz, string expected)
   {
     Assert.Equal(expected, RadioBandService.FormatRange(band, minHz, maxHz));
@@ -28,7 +35,7 @@ public class RadioBandServiceTests
   [Fact]
   public void FormatRange_AmUsesKhz_NotMhz()
   {
-    // AM is the only band that prints in kHz — guard against a regression
+    // AM and SW print in kHz (AUD-102) — guard against a regression
     // that would render "AM 0.53–1.7 MHz".
     var range = RadioBandService.FormatRange("AM", 520_000, 1_710_000);
     Assert.EndsWith("kHz", range);
@@ -92,5 +99,106 @@ public class RadioBandServiceTests
       // present, the capacity must be 4.
       Assert.Equal(4, wb.BandPresetCapacity);
     }
+  }
+
+  // ── AUD-102: the receivable flag ─────────────────────────────────────────
+
+  private static SdrHardwareInfo Device(long minHz, bool inUse = false, int index = 0) => new(
+    index, "Generic RTL2832U", "Realtek", "NESDR SMArt v5", "00000001", "R820T",
+    minHz < RtlSdrDevice.TunerMinFrequencyHz ? "Q" : "Off", "Auto", false, inUse,
+    minHz, 1_766_000_000);
+
+  private static List<Radio.Core.Models.RadioBandModel> BandsFor(params SdrHardwareInfo[] hardware)
+  {
+    var factory = new Mock<IRadioFactory>();
+    factory.Setup(f => f.GetSdrHardware()).Returns(hardware);
+    return new RadioBandService(factory.Object).GetAvailableBands().ToList();
+  }
+
+  [Fact]
+  public void GetAvailableBands_HfDevice_EveryBandIsReceivable()
+  {
+    // An HF-capable dongle (AUD-99: 100 kHz floor) receives all six bands.
+    var bands = BandsFor(Device(HfDirectSampling.HfMinFrequencyHz));
+
+    Assert.Equal(6, bands.Count);
+    Assert.All(bands, b =>
+    {
+      Assert.True(b.IsReceivable, b.Type);
+      Assert.Null(b.UnavailableReason);
+    });
+  }
+
+  [Fact]
+  public void GetAvailableBands_DeviceWithoutHf_AmAndSwAreNotReceivable_WithTheBandMapsSentence()
+  {
+    var bands = BandsFor(Device(RtlSdrDevice.TunerMinFrequencyHz));
+
+    var am = bands.Single(b => b.Type == "AM");
+    var sw = bands.Single(b => b.Type == "SW");
+    Assert.False(am.IsReceivable);
+    Assert.False(sw.IsReceivable);
+    Assert.Equal(
+      "The AM Broadcast band (530–1,710 kHz) is below this tuner's 24 MHz lower limit and cannot be received.",
+      am.UnavailableReason);
+    Assert.Equal(
+      "The Shortwave band (1.711–30 MHz) is mostly below this tuner's 24 MHz lower limit and cannot be received.",
+      sw.UnavailableReason);
+
+    // The same sentence the band map shows today, but for its last two words.
+    Assert.Equal(
+      BandSweepPlans.UnavailableReason(BandType.AM)!.Replace("cannot be scanned.", "cannot be received.", StringComparison.Ordinal),
+      am.UnavailableReason);
+
+    Assert.All(bands.Where(b => b.Type is not ("AM" or "SW")), b =>
+    {
+      Assert.True(b.IsReceivable, b.Type);
+      Assert.Null(b.UnavailableReason);
+    });
+  }
+
+  [Fact]
+  public void GetAvailableBands_PrefersTheDeviceInUse()
+  {
+    // Device 0 has no HF; device 1 is the radio's and has it. The radio's device decides.
+    var bands = BandsFor(
+      Device(RtlSdrDevice.TunerMinFrequencyHz, inUse: false, index: 0),
+      Device(HfDirectSampling.HfMinFrequencyHz, inUse: true, index: 1));
+
+    Assert.True(bands.Single(b => b.Type == "AM").IsReceivable);
+  }
+
+  [Fact]
+  public void GetAvailableBands_NoDevice_EveryBandIsReceivable()
+  {
+    // No factory (tests, dev box) and a factory that enumerates nothing both mean "no device", and
+    // with no device there is no limit to report.
+    Assert.All(new RadioBandService().GetAvailableBands(), b => Assert.True(b.IsReceivable, b.Type));
+    Assert.All(BandsFor(), b =>
+    {
+      Assert.True(b.IsReceivable, b.Type);
+      Assert.Null(b.UnavailableReason);
+    });
+  }
+
+  [Fact]
+  public void GetAvailableBands_FactoryThrows_StillServesTheBands()
+  {
+    var factory = new Mock<IRadioFactory>();
+    factory.Setup(f => f.GetSdrHardware()).Throws(new InvalidOperationException("librtlsdr missing"));
+
+    var bands = new RadioBandService(factory.Object).GetAvailableBands().ToList();
+
+    Assert.Equal(6, bands.Count);
+    Assert.All(bands, b => Assert.True(b.IsReceivable, b.Type));
+  }
+
+  [Fact]
+  public void GetAvailableBands_SwRangeIsInKhz()
+  {
+    var sw = new RadioBandService().GetAvailableBands().Single(b => b.Type == "SW");
+
+    Assert.Equal("1711–30000 kHz", sw.Range);
+    Assert.Equal(1_711_000, sw.MinFrequencyHz);
   }
 }

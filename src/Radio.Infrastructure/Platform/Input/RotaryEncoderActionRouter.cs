@@ -646,7 +646,7 @@ public class RotaryEncoderActionRouter : IDisposable
     {
       PublishHud(index, "TUNING", b =>
       {
-        b.PrimaryText = radio.CurrentFrequency.ToDisplayString();
+        b.PrimaryText = BandUnits.Format(radio.CurrentBand, radio.CurrentFrequency);
         b.SecondaryText = radio.CurrentBand.ToString().ToUpperInvariant();
         b.PrimaryIsFrequency = true;
       });
@@ -827,7 +827,7 @@ public class RotaryEncoderActionRouter : IDisposable
       // rather than where the detent aimed it.
       PublishHud(index, "TUNING", b =>
       {
-        b.PrimaryText = radio.CurrentFrequency.ToDisplayString();
+        b.PrimaryText = BandUnits.Format(radio.CurrentBand, radio.CurrentFrequency);
         b.SecondaryText = radio.CurrentBand.ToString().ToUpperInvariant();
         b.PrimaryIsFrequency = true;
       });

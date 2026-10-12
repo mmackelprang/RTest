@@ -170,7 +170,7 @@ public class RadioPresetServiceTests
       .ReturnsAsync(10);
 
     _repositoryMock
-      .Setup(r => r.GetByBandAndFrequencyAsync(RadioBand.FM, 101.5, It.IsAny<CancellationToken>()))
+      .Setup(r => r.GetByBandAndFrequencyAsync(RadioBand.FM, 101_500_000, It.IsAny<CancellationToken>()))
       .ReturnsAsync((RadioPreset?)null);
 
     _repositoryMock
@@ -179,18 +179,18 @@ public class RadioPresetServiceTests
 
     var service = CreateService();
 
-    // Act
-    var result = await service.AddPresetAsync(null, RadioBand.FM, 101.5);
+    // Act. A preset's frequency is hertz on every caller (AUD-102), and so is GetDefaultName's.
+    var result = await service.AddPresetAsync(null, RadioBand.FM, 101_500_000);
 
     // Assert
     Assert.NotNull(result);
     Assert.Equal("FM - 101.5", result.Name);
     Assert.Equal(RadioBand.FM, result.Band);
-    Assert.Equal(101.5, result.Frequency);
+    Assert.Equal(101_500_000, result.Frequency);
     Assert.NotEmpty(result.Id);
 
     _repositoryMock.Verify(r => r.AddAsync(
-      It.Is<RadioPreset>(p => p.Name == "FM - 101.5" && p.Band == RadioBand.FM && p.Frequency == 101.5),
+      It.Is<RadioPreset>(p => p.Name == "FM - 101.5" && p.Band == RadioBand.FM && p.Frequency == 101_500_000),
       It.IsAny<CancellationToken>()), Times.Once);
   }
 

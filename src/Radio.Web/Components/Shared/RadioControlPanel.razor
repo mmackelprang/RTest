@@ -345,7 +345,7 @@
     <div class="kiosk-entry-card" @onclick:stopPropagation="true">
       <h6>Set Frequency</h6>
       <RadzenNumeric TValue="double" @bind-Value="_newFrequency"
-                     Placeholder="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
+                     Placeholder="@FrequencyFormatter.DialogPlaceholder(_radioState?.Band)"
                      Min="@((decimal)GetMinFrequency())" Max="@((decimal)GetMaxFrequency())" Step="@GetDialogStep().ToString()"
                      Style="width: 100%;" inputmode="decimal" />
       <div class="kiosk-entry-actions">
@@ -1680,9 +1680,8 @@
   {
     if (_radioState != null)
     {
-      _newFrequency = _radioState.Band == "AM"
-        ? _radioState.Frequency / 1_000.0
-        : _radioState.Frequency / 1_000_000.0;
+      // AUD-102: kHz on AM and SW, MHz otherwise (BandUnits.IsKhz).
+      _newFrequency = FrequencyFormatter.ToDisplayUnits(_radioState.Frequency, _radioState.Band);
     }
     _isFrequencyDialogOpen = true;
   }
@@ -1693,9 +1692,7 @@
   {
     try
     {
-      var frequencyHz = _radioState?.Band == "AM"
-        ? _newFrequency * 1_000.0
-        : _newFrequency * 1_000_000.0;
+      var frequencyHz = FrequencyFormatter.FromDisplayUnits(_newFrequency, _radioState?.Band);
       if (await RadioApi.SetFrequencyAsync(frequencyHz))
       {
         _isFrequencyDialogOpen = false;

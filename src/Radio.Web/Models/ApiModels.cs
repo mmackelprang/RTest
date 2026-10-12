@@ -900,11 +900,8 @@ public class RadioConfigDto
   public double DefaultFMFrequencyMHz { get; set; } = 101.5;
   public double DefaultAMFrequencyKHz { get; set; } = 1000.0;
   public double DefaultFMStepMHz { get; set; } = 0.1;
-  public double DefaultAMStepKHz { get; set; } = 10.0;
   public double MinFMFrequencyMHz { get; set; } = 87.5;
   public double MaxFMFrequencyMHz { get; set; } = 108.0;
-  public double MinAMFrequencyKHz { get; set; } = 520.0;
-  public double MaxAMFrequencyKHz { get; set; } = 1710.0;
 
   /// <summary>
   /// Signal-strength percentage at which the scan stops on a station.

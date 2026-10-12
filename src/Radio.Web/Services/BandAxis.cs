@@ -5,7 +5,7 @@ namespace Radio.Web.Services;
 
 /// <summary>A labelled tick on the BAND view's frequency axis.</summary>
 /// <param name="Hz">The tick's frequency, in Hz.</param>
-/// <param name="Label">The tick's value: kHz on AM, MHz otherwise, without a unit.</param>
+/// <param name="Label">The tick's value: kHz on AM and SW, MHz otherwise, without a unit.</param>
 public sealed record BandAxisTick(double Hz, string Label);
 
 /// <summary>How an axis label sits against its tick.</summary>
@@ -93,8 +93,8 @@ public sealed record BandAxis(
   /// <summary>True when <paramref name="band"/> is FM (case-insensitive).</summary>
   public static bool IsFm(string? band) => string.Equals(band, "FM", StringComparison.OrdinalIgnoreCase);
 
-  /// <summary>True on AM, whose axis is labelled in kHz.</summary>
-  public bool IsKhz => string.Equals(Band, "AM", StringComparison.OrdinalIgnoreCase);
+  /// <summary>True on AM and SW, whose axes are labelled in kHz (<see cref="Radio.Core.Models.Audio.BandUnits.IsKhz(string?)"/>, AUD-102).</summary>
+  public bool IsKhz => Radio.Core.Models.Audio.BandUnits.IsKhz(Band);
 
   /// <summary>
   /// How far either side of a tap a peak may be and still win the tap, in Hz. FM: two channel
@@ -183,7 +183,7 @@ public sealed record BandAxis(
   /// <summary>
   /// The axis's labelled ticks, ascending; the gridlines are drawn at the same frequencies. FM: 88,
   /// 92, 96, 100, 104 and 108 MHz, as AUD-76 shipped. Any other band: the densest "nice" step
-  /// (1, 2, 2.5 or 5 × 10^k, in kHz on AM and MHz otherwise) that puts at most <see cref="MaxTicks"/>
+  /// (1, 2, 2.5 or 5 × 10^k, in kHz on AM and SW and MHz otherwise) that puts at most <see cref="MaxTicks"/>
   /// ticks on the plot, labelled with just enough decimals for the step (0.05 MHz → <c>162.45</c>).
   /// </summary>
   public IReadOnlyList<BandAxisTick> Ticks()

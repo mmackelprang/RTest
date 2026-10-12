@@ -1,4 +1,3 @@
-using System.Globalization;
 using RTLSDRCore.Bands;
 using RTLSDRCore.Enums;
 using RTLSDRCore.Hardware;
@@ -131,38 +130,14 @@ public static class BandSweepPlans
   /// A preset band can be swept only when its whole range is within
   /// <see cref="RtlSdrDevice.TunerMinFrequencyHz"/> to <see cref="RtlSdrDevice.TunerMaxFrequencyHz"/>.
   /// </summary>
-  public static string? UnavailableReason(BandType band)
-  {
-    if (band == BandType.Custom || !Enum.IsDefined(band))
-    {
-      return "This band has no channel plan and cannot be scanned.";
-    }
-
-    RadioBand preset = BandPresets.GetBand(band);
-    long min = preset.MinFrequencyHz;
-    long max = preset.MaxFrequencyHz;
-    string range = FormatRange(min, max);
-    string limit = FormatMegahertz(RtlSdrDevice.TunerMinFrequencyHz);
-
-    if (max < RtlSdrDevice.TunerMinFrequencyHz)
-    {
-      return $"The {preset.Name} band ({range}) is below this tuner's {limit} lower limit and cannot be scanned.";
-    }
-
-    if (min < RtlSdrDevice.TunerMinFrequencyHz)
-    {
-      // More than half of the band below the floor reads as "mostly".
-      bool mostly = RtlSdrDevice.TunerMinFrequencyHz - min > max - RtlSdrDevice.TunerMinFrequencyHz;
-      return $"The {preset.Name} band ({range}) is {(mostly ? "mostly" : "partly")} below this tuner's {limit} lower limit and cannot be scanned.";
-    }
-
-    if (max > RtlSdrDevice.TunerMaxFrequencyHz)
-    {
-      return $"The {preset.Name} band ({range}) extends above this tuner's {FormatMegahertz(RtlSdrDevice.TunerMaxFrequencyHz)} upper limit and cannot be scanned.";
-    }
-
-    return null;
-  }
+  /// <remarks>
+  /// The sentence comes from <see cref="BandReception.UnavailableReason"/>, the function the band
+  /// list's receivable flag uses (AUD-102), given the tuner's fixed range rather than a device's.
+  /// AUD-103 is to pass the device's range here instead, once AM and SW have sweep plans.
+  /// </remarks>
+  public static string? UnavailableReason(BandType band) =>
+    BandReception.UnavailableReason(
+      band, RtlSdrDevice.TunerMinFrequencyHz, RtlSdrDevice.TunerMaxFrequencyHz, cannot: "scanned");
 
   /// <summary>
   /// Groups a uniform channel grid into narrowband tunes: groups of up to the largest count whose
@@ -263,12 +238,4 @@ public static class BandSweepPlans
     int count = (int)((last - first) / VhfChannelSpacingHz) + 1;
     return CreateNarrowband("VHF", first, count, VhfChannelSpacingHz, first, last);
   }
-
-  private static string FormatRange(long minHz, long maxHz) =>
-    maxHz < 3_000_000
-      ? string.Format(CultureInfo.InvariantCulture, "{0:#,0}–{1:#,0} kHz", minHz / 1_000.0, maxHz / 1_000.0)
-      : string.Format(CultureInfo.InvariantCulture, "{0:0.###}–{1:0.###} MHz", minHz / 1_000_000.0, maxHz / 1_000_000.0);
-
-  private static string FormatMegahertz(long hz) =>
-    string.Format(CultureInfo.InvariantCulture, "{0:0.###} MHz", hz / 1_000_000.0);
 }

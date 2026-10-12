@@ -1,4 +1,5 @@
 using System.Globalization;
+using Radio.Core.Models.Audio;
 
 namespace Radio.Web.Formatting;
 
@@ -62,17 +63,18 @@ public static class BandMapText
   }
 
   /// <summary>
-  /// A plotted range as the strip under the map names it (UI-31), with an en dash and the unit: AM in
-  /// whole kHz (<c>530–1710 kHz</c>), every other band in MHz with at most two decimals
+  /// A plotted range as the strip under the map names it (UI-31), with an en dash and the unit: AM and
+  /// SW in kHz (<c>530–1710 kHz</c>, <c>1711–30000 kHz</c>; <see cref="BandUnits.IsKhz(string?)"/>,
+  /// AUD-102), every other band in MHz with at most two decimals
   /// (<c>87.5–108 MHz</c>, <c>145.52–147.52 MHz</c>). Used for VHF's window, and for any band whose
   /// nominal range (the control panel's band list) could not be read. The same shape as the API's
   /// <c>RadioBandService.FormatRange</c>, which composes that list's <c>Range</c>; keep the two alike.
   /// </summary>
   public static string FormatRange(long minHz, long maxHz, string? band)
   {
-    if (string.Equals(band, "AM", StringComparison.OrdinalIgnoreCase))
+    if (BandUnits.IsKhz(band))
     {
-      return string.Create(CultureInfo.InvariantCulture, $"{minHz / 1_000.0:0}–{maxHz / 1_000.0:0} kHz");
+      return $"{BandUnits.FormatKhz(minHz)}–{BandUnits.FormatKhz(maxHz)} kHz";
     }
 
     return string.Create(CultureInfo.InvariantCulture, $"{minHz / 1_000_000.0:0.##}–{maxHz / 1_000_000.0:0.##} MHz");
@@ -84,15 +86,16 @@ public static class BandMapText
 
   /// <summary>
   /// A frequency as the BAND view names it for <paramref name="band"/>, without a unit (AUD-91): FM in MHz
-  /// with one decimal (<c>99.5</c>, as AUD-76), AM in whole kHz (<c>1010</c>), and every other band in MHz
+  /// with one decimal (<c>99.5</c>, as AUD-76), AM and SW in kHz (<c>1010</c>, <c>5905</c>, and
+  /// <c>5907.5</c> off the 5 kHz grid; AUD-102), and every other band in MHz
   /// with at least three decimals and as many more as the frequency needs, down to the hertz
   /// (<c>162.475</c>, <c>118.100</c>, and <c>162.4125</c> for a channel of VHF's 12.5 kHz grid).
   /// </summary>
   public static string FormatFrequency(double hz, string? band)
   {
-    if (string.Equals(band, "AM", StringComparison.OrdinalIgnoreCase))
+    if (BandUnits.IsKhz(band))
     {
-      return (hz / 1_000.0).ToString("0", CultureInfo.InvariantCulture);
+      return BandUnits.FormatKhz(hz);
     }
 
     return string.Equals(band, "FM", StringComparison.OrdinalIgnoreCase)
@@ -102,7 +105,7 @@ public static class BandMapText
 
   /// <summary>
   /// A frequency and its band, as the tune messages name a station: <c>99.5 FM</c> on FM, as AUD-76
-  /// shipped it; elsewhere with the unit, <c>162.475 MHz WB</c>, <c>1010 kHz AM</c>.
+  /// shipped it; elsewhere with the unit, <c>162.475 MHz WB</c>, <c>1010 kHz AM</c>, <c>5905 kHz SW</c>.
   /// </summary>
   public static string FormatStation(double hz, string band)
   {
@@ -111,7 +114,7 @@ public static class BandMapText
       return $"{FormatMhz(hz)} {band}";
     }
 
-    string unit = string.Equals(band, "AM", StringComparison.OrdinalIgnoreCase) ? "kHz" : "MHz";
+    string unit = BandUnits.IsKhz(band) ? "kHz" : "MHz";
     return $"{FormatFrequency(hz, band)} {unit} {band}";
   }
 }

@@ -1,6 +1,8 @@
 using System.Globalization;
 using Radio.Core.Interfaces;
+using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models;
+using Radio.Core.Models.Audio;
 using RTLSDRCore.Bands;
 
 namespace Radio.Infrastructure.Services;
@@ -24,14 +26,31 @@ public class RadioBandService : IRadioBandService
         ["WB"] = 4,
       };
 
+    private readonly IRadioFactory? _radioFactory;
+
+    /// <summary>
+    /// Creates the band list service.
+    /// </summary>
+    /// <param name="radioFactory">
+    /// Supplies the SDR device's receivable range for <see cref="RadioBandModel.IsReceivable"/>
+    /// (AUD-102). Optional: without it, or when it reports no device, every band is receivable.
+    /// </param>
+    public RadioBandService(IRadioFactory? radioFactory = null)
+    {
+        _radioFactory = radioFactory;
+    }
+
     public IEnumerable<RadioBandModel> GetAvailableBands()
     {
+        SdrHardwareInfo? device = ReceivingDevice();
+
         var bands = typeof(BandPresets).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
             .Where(p => p.PropertyType == typeof(RTLSDRCore.Models.RadioBand))
             .Select(p => (RTLSDRCore.Models.RadioBand)p.GetValue(null)!)
             .Select(b =>
             {
                 var code = MapBandTypeToCode(b.Type);
+                string? unavailable = UnavailableReason(b.Type, device);
                 return new RadioBandModel
                 {
                     Type = code,
@@ -45,6 +64,8 @@ public class RadioBandService : IRadioBandService
                     Description = b.Description,
                     Range = FormatRange(code, b.MinFrequencyHz, b.MaxFrequencyHz),
                     BandPresetCapacity = ResolveCapacity(code),
+                    IsReceivable = unavailable == null,
+                    UnavailableReason = unavailable,
                 };
             });
 
@@ -52,25 +73,54 @@ public class RadioBandService : IRadioBandService
     }
 
     /// <summary>
-    /// Formats the band's frequency range as a UI-ready string with the right
-    /// unit (kHz for AM/SW HF, MHz for FM/VHF/WB/AIR). Uses a typographic
+    /// Why <paramref name="device"/> cannot receive <paramref name="band"/>, or null when it can or
+    /// no device is known (AUD-102). The sentence is <see cref="BandReception.UnavailableReason"/>'s,
+    /// the function the band map's reason is built on too. Exposed internal for unit testing.
+    /// </summary>
+    internal static string? UnavailableReason(RTLSDRCore.Enums.BandType band, SdrHardwareInfo? device) =>
+        device == null
+            ? null
+            : BandReception.UnavailableReason(band, device.MinFrequencyHz, device.MaxFrequencyHz);
+
+    /// <summary>
+    /// The device whose range decides <see cref="RadioBandModel.IsReceivable"/>: the radio's own device
+    /// when the radio source has one, otherwise the first enumerated SDR, otherwise null. A factory
+    /// that throws counts as no device: the band list must still be served.
+    /// </summary>
+    private SdrHardwareInfo? ReceivingDevice()
+    {
+        if (_radioFactory == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            IReadOnlyList<SdrHardwareInfo> hardware = _radioFactory.GetSdrHardware() ?? Array.Empty<SdrHardwareInfo>();
+            return hardware.FirstOrDefault(h => h.IsInUse) ?? hardware.FirstOrDefault();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Formats the band's frequency range as a UI-ready string in the band's unit
+    /// (<see cref="BandUnits.IsKhz(string?)"/>: kHz on AM and SW, MHz otherwise). Uses a typographic
     /// en-dash (U+2013) between min/max to match the canvas mock. Exposed
     /// internal for unit testing via InternalsVisibleTo.
     /// </summary>
     internal static string FormatRange(string bandCode, long minHz, long maxHz)
     {
-        // Shortwave covers 1.8–30 MHz on the radio: render in MHz for legibility
-        // (kHz would print "1800–30000"). AM stays in kHz. Other bands ride the
-        // MHz default because their floors are above 100 MHz.
-        var useKhz = string.Equals(bandCode, "AM", StringComparison.OrdinalIgnoreCase);
-
-        if (useKhz)
+        if (BandUnits.IsKhz(bandCode))
         {
+            // AUD-102: SW is in kHz like AM ("1711–30000 kHz"), the unit its readout uses.
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0:0}–{1:0} kHz",
-                minHz / 1_000.0,
-                maxHz / 1_000.0);
+                "{0}–{1} kHz",
+                BandUnits.FormatKhz(minHz),
+                BandUnits.FormatKhz(maxHz));
         }
 
         return string.Format(

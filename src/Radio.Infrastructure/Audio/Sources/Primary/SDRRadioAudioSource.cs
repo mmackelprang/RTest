@@ -425,9 +425,22 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       throw new ArgumentOutOfRangeException(nameof(step), "Frequency step must be greater than zero");
     }
 
+    RTLSDRCore.Models.RadioBand band = _radioReceiver.CurrentBand;
+    if (!IsAllowedStep(band, step.Hertz))
+    {
+      throw new FrequencyStepNotAllowedException(nameof(step), step.Hertz, band.Name, band.AllowedStepSizes);
+    }
+
     _frequencyStep = step;
     return Task.CompletedTask;
   }
+
+  /// <summary>
+  /// True when <paramref name="stepHz"/> is one of <paramref name="band"/>'s allowed steps, or the
+  /// band lists none (a custom band) (AUD-102).
+  /// </summary>
+  internal static bool IsAllowedStep(RTLSDRCore.Models.RadioBand band, long stepHz) =>
+    band.AllowedStepSizes.Length == 0 || Array.IndexOf(band.AllowedStepSizes, stepHz) >= 0;
 
   #endregion
 
@@ -1100,8 +1113,25 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       if (stepEntry != null && !string.IsNullOrEmpty(stepEntry.Value)
           && double.TryParse(stepEntry.Value, out var savedStepHz) && savedStepHz > 0)
       {
-        _frequencyStep = new Frequency((long)savedStepHz);
-        Logger.LogDebug("📻 SDR RADIO: Restoring persisted frequency step: {Step}", _frequencyStep.ToDisplayString());
+        // AUD-102: the saved step must be one of the restored band's allowed steps, as a step set
+        // through SetFrequencyStepAsync must be. A step saved before a band change (AUD-95 keeps the
+        // old band's step across a frequency-only tune, and that is what the preferences loop
+        // saves) falls back to the band's default instead of failing the restore. Logged once per
+        // restore. While the radio is the active source the preferences loop saves the step in use,
+        // so the default replaces the stale value at its next save.
+        RTLSDRCore.Models.RadioBand restoredBand = _radioReceiver.CurrentBand;
+        if (IsAllowedStep(restoredBand, (long)savedStepHz))
+        {
+          _frequencyStep = new Frequency((long)savedStepHz);
+          Logger.LogDebug("📻 SDR RADIO: Restoring persisted frequency step: {Step}", _frequencyStep.ToDisplayString());
+        }
+        else
+        {
+          _frequencyStep = new Frequency(restoredBand.DefaultStepHz);
+          Logger.LogWarning(
+            "📻 SDR RADIO: The saved frequency step {SavedStepHz} Hz is not allowed on the {Band} band; using its default {DefaultStepHz} Hz",
+            (long)savedStepHz, restoredBand.Name, restoredBand.DefaultStepHz);
+        }
       }
 
       Logger.LogInformation(

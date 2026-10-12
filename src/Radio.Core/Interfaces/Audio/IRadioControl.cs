@@ -174,7 +174,12 @@ public interface IRadioControl
   /// <param name="step">The step size. Use <see cref="Frequency.FromMegahertz"/> or <see cref="Frequency.FromKilohertz"/> to create from common units.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the asynchronous operation.</returns>
-  /// <exception cref="ArgumentOutOfRangeException">Thrown when the step size is invalid.</exception>
+  /// <exception cref="ArgumentOutOfRangeException">Thrown when the step size is zero or less.</exception>
+  /// <exception cref="Exceptions.FrequencyStepNotAllowedException">
+  /// Thrown when the current band lists allowed steps and the step is not one of them (AUD-102). A
+  /// band with no list (a custom band) accepts any positive step. Only the step being set is checked:
+  /// a step kept from another band by a frequency-only tune (AUD-95) stays in use until it is changed.
+  /// </exception>
   Task SetFrequencyStepAsync(Frequency step, CancellationToken cancellationToken = default);
 
   #endregion

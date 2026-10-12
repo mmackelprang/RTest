@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Radio.Core.Models.Audio;
 
 /// <summary>
@@ -21,7 +23,7 @@ public sealed record RadioPreset
   public required RadioBand Band { get; init; }
 
   /// <summary>
-  /// The frequency of the station.
+  /// The frequency of the station, in hertz.
   /// </summary>
   public required double Frequency { get; init; }
 
@@ -36,22 +38,29 @@ public sealed record RadioPreset
   public DateTimeOffset LastModifiedAt { get; init; } = DateTimeOffset.UtcNow;
 
   /// <summary>
-  /// Generates a default name for a preset based on band and frequency.
+  /// Generates a default name for a preset based on band and frequency, in the band's display unit
+  /// without the unit (AUD-102): kHz on AM and SW (<see cref="BandUnits.IsKhz(RadioBand)"/>), MHz
+  /// otherwise.
   /// </summary>
   /// <param name="band">The radio band.</param>
-  /// <param name="frequency">The frequency.</param>
-  /// <returns>A formatted name like "FM - 101.5" or "AM - 1010".</returns>
-  public static string GetDefaultName(RadioBand band, double frequency)
+  /// <param name="frequencyHz">The frequency in hertz, as <see cref="Frequency"/> stores it.</param>
+  /// <returns>
+  /// <c>AM - 1010</c>, <c>SW - 5905</c> (<c>SW - 5907.5</c> off the 5 kHz grid), <c>FM - 101.5</c>,
+  /// and MHz with three or more decimals as needed on WB, AIR and VHF (<c>WB - 162.475</c>,
+  /// <c>VHF - 146.5125</c>).
+  /// </returns>
+  public static string GetDefaultName(RadioBand band, double frequencyHz)
   {
-    return band switch
+    if (BandUnits.IsKhz(band))
     {
-      RadioBand.AM => $"AM - {frequency:F0}",
-      RadioBand.FM => $"FM - {frequency:F1}",
-      RadioBand.WB => $"WB - {frequency:F2}",
-      RadioBand.VHF => $"VHF - {frequency:F2}",
-      RadioBand.SW => $"SW - {frequency:F2}",
-      _ => $"{band} - {frequency}"
-    };
+      return $"{band} - {BandUnits.FormatKhz(frequencyHz)}";
+    }
+
+    double mhz = frequencyHz / 1_000_000.0;
+    string value = band == RadioBand.FM
+      ? mhz.ToString("0.0", CultureInfo.InvariantCulture)
+      : mhz.ToString("0.000###", CultureInfo.InvariantCulture);
+    return $"{band} - {value}";
   }
 
   /// <summary>

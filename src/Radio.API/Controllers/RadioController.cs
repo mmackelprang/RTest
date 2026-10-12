@@ -239,7 +239,11 @@ public class RadioController : ControllerBase
   /// <param name="request">The step size to set.</param>
   /// <returns>The updated radio state.</returns>
   /// <response code="200">Returns the updated radio state.</response>
-  /// <response code="400">If the radio is not active or the step size is invalid.</response>
+  /// <response code="400">
+  /// If the radio is not active, the step is zero or less, or the step is not one of the current
+  /// band's allowed steps (AUD-102). The last case's body carries the band's allowed steps:
+  /// <c>{ "error": "...", "band": "FM Broadcast", "allowedStepsHz": [50000, 100000, 200000] }</c>.
+  /// </response>
   [HttpPost("step")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -247,8 +251,9 @@ public class RadioController : ControllerBase
   {
     try
     {
-      // Note: Step validation is delegated to IRadioControl.SetFrequencyStepAsync
-      // which throws ArgumentOutOfRangeException for invalid values
+      // Step validation is delegated to IRadioControl.SetFrequencyStepAsync, which throws
+      // ArgumentOutOfRangeException for a step of zero or less and its subclass
+      // FrequencyStepNotAllowedException for a step the band does not allow.
       var radioSource = GetActiveRadioSource();
       if (radioSource == null)
       {
@@ -257,6 +262,18 @@ public class RadioController : ControllerBase
 
       await radioSource.SetFrequencyStepAsync(new Frequency(request.Step));
       return Ok(radioSource.MapToRadioStateDto());
+    }
+    catch (FrequencyStepNotAllowedException ex)
+    {
+      // A client error with a complete answer in the body, so Information (the file sink), not a
+      // Warning in the journal.
+      _logger.LogInformation("Refused frequency step {Step} Hz on the {Band} band", ex.StepHz, ex.BandName);
+      return BadRequest(new
+      {
+        error = $"A {ex.StepHz} Hz step is not allowed on the {ex.BandName} band.",
+        band = ex.BandName,
+        allowedStepsHz = ex.AllowedStepsHz,
+      });
     }
     catch (ArgumentOutOfRangeException ex)
     {

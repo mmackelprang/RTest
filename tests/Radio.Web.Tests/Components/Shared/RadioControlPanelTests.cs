@@ -401,6 +401,90 @@ public class RadioControlPanelTests : TestContext
     }, TimeSpan.FromSeconds(2));
   }
 
+  // ── AUD-102: SW in kHz ────────────────────────────────────────────────────
+
+  private static Radio.Core.Models.RadioBandModel BuildSwBand() =>
+    new()
+    {
+      Type = "SW",
+      Name = "Shortwave",
+      MinFrequencyHz = 1_711_000,
+      MaxFrequencyHz = 30_000_000,
+      DefaultStepHz = 5_000,
+      AllowedStepSizes = new long[] { 1_000, 2_500, 5_000 },
+      DefaultModulation = "AM",
+      DefaultBandwidthHz = 6_000,
+      Description = "Shortwave",
+      Range = "1711–30000 kHz",
+      BandPresetCapacity = 16,
+    };
+
+  private static RadioStateDto SwState(double hz) =>
+    BuildState(frequency: hz, band: "SW") with { Step = 5_000 };
+
+  [Theory]
+  [InlineData("SW", 5_905_000d, "5905 kHz")]
+  [InlineData("SW", 5_900_000d, "5900 kHz")]
+  [InlineData("SW", 5_910_000d, "5910 kHz")]
+  [InlineData("SW", 5_907_500d, "5907.5 kHz")]
+  [InlineData("AM", 1_010_000d, "1010 kHz")]
+  [InlineData("FM", 101_500_000d, "101.50 MHz")] // unchanged
+  public void FrequencyReadout_SwAndAmInKhz_FmUnchanged(string band, double hz, string expected)
+  {
+    var state = BuildState(frequency: hz, band: band);
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand(), BuildAmBand(), BuildSwBand() });
+
+    cut.Find(".rcp-freq-well .display-frequency").TextContent.Trim().Should().Be(expected);
+  }
+
+  [Fact]
+  public void SwStepChip_CyclesTheBandsSteps_AndAFiveKilohertzStepIsShownAsSuch()
+  {
+    var (cut, handler, _) = RenderStatusBar(SwState(5_905_000), bands: new[] { BuildFmBand(), BuildSwBand() });
+
+    var step = cut.Find(".rcp-sb-step");
+    step.TextContent.Should().Contain("5 kHz");
+
+    step.Click();
+
+    cut.WaitForAssertion(() =>
+    {
+      var body = PostBodies(handler, "/api/radio/step").Should().ContainSingle().Subject;
+      body.Should().Contain("1000", "SW's allowed steps are 1/2.5/5 kHz, so 5 kHz wraps to 1 kHz");
+    }, TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public async Task SwFrequencyDialog_IsInKhz_AndSendsHertz()
+  {
+    var (cut, handler, _) = RenderStatusBar(SwState(5_905_000), bands: new[] { BuildSwBand() });
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    cut.Find(".rcp-freq-well .display-frequency").Click();
+
+    cut.Markup.Should().Contain("Frequency (kHz)");
+    ((double)typeof(RadioControlPanel).GetField("_newFrequency", flags)!.GetValue(cut.Instance)!)
+      .Should().Be(5905, "the dialog opens on the readout's value, in kHz");
+
+    typeof(RadioControlPanel).GetField("_newFrequency", flags)!.SetValue(cut.Instance, 9600d);
+    await cut.InvokeAsync(() => (Task)typeof(RadioControlPanel).GetMethod("SetFrequencyAsync", flags)!.Invoke(cut.Instance, null)!);
+
+    PostBodies(handler, "/api/radio/frequency").Should().ContainSingle()
+      .Which.Should().Contain("9600000", "9600 kHz typed on SW is 9.6 MHz in hertz");
+  }
+
+  [Fact]
+  public void SavePresetDialog_OnSw_IsSeededInKhz()
+  {
+    var cut = RenderPanel(SwState(5_905_000), bands: new[] { BuildSwBand() });
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    cut.InvokeAsync(() => typeof(RadioControlPanel).GetMethod("OpenSavePresetDialog", flags)!.Invoke(cut.Instance, null));
+
+    ((string?)typeof(RadioControlPanel).GetField("_presetName", flags)!.GetValue(cut.Instance))
+      .Should().Be("SW 5905 kHz");
+  }
+
   [Theory]
   [InlineData("FM", true, false, "STEREO", true)]
   [InlineData("FM", false, false, "STEREO", false)]

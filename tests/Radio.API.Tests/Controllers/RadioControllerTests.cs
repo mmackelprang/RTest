@@ -430,13 +430,14 @@ public class RadioControllerTests : IClassFixture<CustomWebApplicationFactory<Pr
   [Fact]
   public async Task CreatePreset_WithoutName_UsesDefaultName()
   {
-    // Arrange - Use random frequency to avoid collisions
+    // Arrange - Use random frequency to avoid collisions. A preset's frequency is hertz (AUD-102);
+    // the name is in the band's unit, kHz on AM.
     var random = new Random();
-    var uniqueFreq = random.Next(530, 1700); // AM Range
+    var uniqueKhz = random.Next(530, 1700); // AM Range
     var request = new CreateRadioPresetRequest
     {
       Band = "AM",
-      Frequency = uniqueFreq
+      Frequency = uniqueKhz * 1_000
     };
 
     // Act
@@ -445,17 +446,17 @@ public class RadioControllerTests : IClassFixture<CustomWebApplicationFactory<Pr
     // Assert - retry with different values if conflict
     for (var retry = 0; retry < 5 && response.StatusCode == HttpStatusCode.Conflict; retry++)
     {
-      uniqueFreq = random.Next(530, 1700);
-      request = request with { Frequency = uniqueFreq };
+      uniqueKhz = random.Next(530, 1700);
+      request = request with { Frequency = uniqueKhz * 1_000 };
       response = await _client.PostAsJsonAsync("/api/radio/presets", request);
     }
 
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     var preset = await response.Content.ReadFromJsonAsync<RadioPresetDto>();
     Assert.NotNull(preset);
-    Assert.Equal($"AM - {uniqueFreq}", preset.Name);
+    Assert.Equal($"AM - {uniqueKhz}", preset.Name);
     Assert.Equal("AM", preset.Band);
-    Assert.Equal(uniqueFreq, preset.Frequency);
+    Assert.Equal(uniqueKhz * 1_000, preset.Frequency);
   }
 
   [Fact]

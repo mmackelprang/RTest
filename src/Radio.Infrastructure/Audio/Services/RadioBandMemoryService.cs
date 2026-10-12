@@ -170,7 +170,8 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
   ///
   /// <para>
   /// FM and AM have configured defaults; the other four do not, so they land on the bottom edge of
-  /// the band from <c>BandPresets</c>. The bottom edge is a real, tunable frequency and it is where
+  /// the band from <c>BandPresets</c>, rounded up to the band's default-step grid (AUD-102; this only
+  /// moves SW, from 1711 to 1715 kHz). The bottom edge is a real, tunable frequency and it is where
   /// a mechanical dial would sit at rest — it is not a placeholder.
   /// </para>
   /// </summary>
@@ -205,7 +206,15 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
 
     try
     {
-      return new Frequency(BandPresets.GetBand(mapped.Value).MinFrequencyHz);
+      // The first frequency at or above the bottom edge on the band's default-step grid. On WB, AIR
+      // and VHF that is the edge itself. On SW (AUD-102: 1711 kHz, one above AM's top channel) it is
+      // 1715 kHz, so 5 kHz steps from there land on the 5 kHz broadcast grid rather than 1716, 1721...
+      RTLSDRCore.Models.RadioBand preset = BandPresets.GetBand(mapped.Value);
+      long step = preset.DefaultStepHz;
+      long hz = step > 0
+        ? (preset.MinFrequencyHz + step - 1) / step * step
+        : preset.MinFrequencyHz;
+      return new Frequency(Math.Min(hz, preset.MaxFrequencyHz));
     }
     catch (ArgumentException ex)
     {

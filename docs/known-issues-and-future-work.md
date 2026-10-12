@@ -158,7 +158,7 @@ library has no direct-sampling or upconverter-offset support (`RtlSdrDevice.cs:1
 
 ### Requirements for any option
 
-1. Cover **AM 530–1710 kHz, SW 1.6–30 MHz, FM 87.5–108, AIR 108–137, WB 162.40–162.55, VHF 30–300 MHz**.
+1. Cover **AM 530–1710 kHz, SW 1.6–30 MHz (1.711–30 MHz since `AUD-102`), FM 87.5–108, AIR 108–137, WB 162.40–162.55, VHF 30–300 MHz**.
 2. **Switch between HF and VHF automatically, per band, from software.** It is a sealed cabinet — a manual
    pass-through switch is not acceptable.
 3. Stay on a `librtlsdr`-compatible API if at all possible (`RTLSDRCore` is a P/Invoke wrapper around it);
@@ -265,6 +265,34 @@ and the knob — works unchanged once a band can be swept, which is what makes a
 - V4 Lite (R828S): <https://www.sdrstore.eu/rtl-sdr-blog-v4-lite-r828s-driver-update-changes/>, <https://www.sdrstore.eu/rtl-sdr-blog-v4-end-of-life-v4-lite-explained/>
 - Ham It Up Plus v2 (125 MHz, manual pass-through): <https://www.nooelec.com/store/ham-it-up-plus.html>
 - SpyVerter review (noise floor / SNR): <https://www.rtl-sdr.com/review-of-the-spyverter-upconverter/>
+
+---
+
+## AM and SW station identity — not built (filed by `AUD-102`, 2026-10-12)
+
+**What exists.** On FM the station name comes from RDS: `RdsStationNameStable` (the call sign decoded from
+the PI code) seeds the save-preset dialog and the encoder's preset name. AM and SW have
+**no RDS**, so on those bands the name is always empty and every fallback uses the band and frequency instead:
+an unnamed preset is `AM - 1010` or `SW - 5905` (`RadioPreset.GetDefaultName`, kHz since `AUD-102`), and the
+panel's save dialog is seeded `SW 5905 kHz`.
+
+**What would be needed.** One of:
+- **A lookup table by frequency and location.** For AM in North America, the FCC's AM station data (call sign,
+  frequency, city, day/night power) keyed by frequency, filtered by distance from the box's configured
+  location. Day and night differ: skywave brings in distant stations after dark (see `AUD-101`'s 1030 kHz
+  reading), so a nearest-station guess is right by day and often wrong at night.
+- **For SW, a broadcast schedule** (e.g. the EiBi or HFCC schedules: frequency, time in UTC, station,
+  language). SW stations change frequency through the day and by season, so the lookup needs the time as well
+  as the frequency.
+- **Fingerprinting.** The existing song-recognition pipeline identifies music, not the station, and AM/SW talk
+  formats would rarely match.
+
+**Gotchas.** A guessed name must not be written as if it were decoded: RDS's `Stable` name is authoritative,
+a table guess is not, and the preset name is kept as written (`AUD-102` renames nothing). Any table needs a
+refresh path, and a shipped file is safer than a live call: a lookup must not fail a save when the box has no
+internet.
+
+**Priority.** Low. Not requested; recorded so the empty name on AM/SW is understood as a known gap, not a bug.
 
 ---
 
@@ -2090,7 +2118,14 @@ One ordering helper the repository, both pages and the selector share. **Gotcha:
 `SlotNumber` to the persisted model. Deleting a preset renumbers the ones after it within its band, so a
 stored ordinal becomes state that every delete has to maintain, in exchange for saving a projection.
 
-### 4. `RadioPreset.GetDefaultName` formats hertz as display units
+### 4. ✅ CLOSED by `AUD-102` (2026-10-12) — `RadioPreset.GetDefaultName` formatted hertz as display units
+
+`GetDefaultName(band, frequencyHz)` now takes hertz and names in the band's unit (`AM - 1010`, `SW - 5905`,
+`FM - 101.5`). Every caller already passed hertz: `RadioPresetService.AddPresetAsync` (from
+`POST /api/radio/presets`, whose Web callers send `RadioStateDto.Frequency` in Hz) and the encoder, which now
+uses it for its fallback name instead of spelling out `{band} {ToDisplayString()}`. Stored presets keep their
+names; nothing is renamed. The original entry follows.
+
 
 `RadioPreset.Frequency` holds **hertz** (a `double`). `GetDefaultName(band, frequency)` formats it as though
 it were display units — `RadioBand.FM => $"FM - {frequency:F1}"` — so a real frequency produces

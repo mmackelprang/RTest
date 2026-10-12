@@ -759,11 +759,8 @@ policy behaves: [fingerprinting.md § Call policy](fingerprinting.md#call-policy
 | `DefaultFMFrequencyMHz` | `double` | `101.5` | Default FM frequency in MHz |
 | `DefaultAMFrequencyKHz` | `double` | `1000.0` | Default AM frequency in kHz |
 | `DefaultFMStepMHz` | `double` | `0.1` | Default FM frequency step in MHz (typical: 0.1 or 0.2) |
-| `DefaultAMStepKHz` | `double` | `10.0` | Default AM frequency step in kHz (typical: 9 or 10) |
 | `MinFMFrequencyMHz` | `double` | `87.5` | Minimum FM frequency in MHz |
 | `MaxFMFrequencyMHz` | `double` | `108.0` | Maximum FM frequency in MHz |
-| `MinAMFrequencyKHz` | `double` | `520.0` | Minimum AM frequency in kHz |
-| `MaxAMFrequencyKHz` | `double` | `1710.0` | Maximum AM frequency in kHz |
 | `ScanStopThreshold` | `int` | `50` | Signal strength threshold for scan stop (0-100) |
 | `ScanStepDelayMs` | `int` | `100` | Time to wait between frequency steps during scanning (milliseconds) |
 | `DefaultDeviceVolume` | `int` | `50` | Default device volume (0-100) |

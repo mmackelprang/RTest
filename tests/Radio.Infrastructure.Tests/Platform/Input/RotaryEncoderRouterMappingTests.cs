@@ -403,6 +403,23 @@ public class RotaryEncoderRouterMappingTests
     Assert.Equal(1, Assert.Single(h.Hud.Published).EncoderIndex);
   }
 
+  [Theory]
+  [InlineData(RadioBand.SW, 5_905_000L, "5905 kHz")] // was "5.9 MHz", the same for 5.900 and 5.910
+  [InlineData(RadioBand.AM, 1_010_000L, "1010 kHz")] // was "1.0 MHz"
+  [InlineData(RadioBand.FM, 101_500_000L, "101.5 MHz")]
+  public void TuningTurn_CardShowsTheFrequencyInTheBandsUnit(RadioBand band, long hz, string expected)
+  {
+    // AUD-102: the TUNING card is a frequency readout, so it follows BandUnits like the panel.
+    using var h = new Harness();
+    var radio = h.WithActiveRadio();
+    radio.CurrentBand = band;
+    radio.CurrentFrequency = new Frequency(hz);
+
+    h.Encoders.RaiseTurn(3, 1);
+
+    Assert.Equal(expected, Assert.Single(h.Hud.Published).PrimaryText);
+  }
+
   [Fact]
   public void TuningTurn_PublishesInItsOwnQuarter()
   {
