@@ -56,7 +56,14 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
     var memory = await LoadAsync(cancellationToken);
     if (memory.TryGetValue(band.ToString(), out long hz) && hz > 0)
     {
-      return new Frequency(hz);
+      if (IsInBand(band, hz))
+      {
+        return new Frequency(hz);
+      }
+
+      // A value saved before a band edge moved (AUD-102: SW now starts at 1.711 MHz, so an old SW
+      // memory of 1.60-1.71 MHz is AM's) would otherwise tune another band. Treated as absent.
+      _logger.LogDebug("Ignoring remembered {Band} frequency {Hz} Hz: outside the band", band, hz);
     }
 
     return DefaultFor(band);
@@ -184,6 +191,35 @@ public sealed class RadioBandMemoryService : IRadioBandMemory
       RadioBand.AM => Frequency.FromKilohertz(opts.DefaultAMFrequencyKHz),
       _ => BottomEdge(band),
     };
+  }
+
+  private static bool IsInBand(RadioBand band, long hz)
+  {
+    BandType? mapped = band switch
+    {
+      RadioBand.AM => BandType.AM,
+      RadioBand.FM => BandType.FM,
+      RadioBand.SW => BandType.Shortwave,
+      RadioBand.WB => BandType.Weather,
+      RadioBand.VHF => BandType.VHF,
+      RadioBand.AIR => BandType.Aircraft,
+      _ => null,
+    };
+
+    if (mapped is null)
+    {
+      return true;
+    }
+
+    try
+    {
+      return BandPresets.GetBand(mapped.Value).ContainsFrequency(hz);
+    }
+    catch (ArgumentException)
+    {
+      // As in BottomEdge: BandPresets throws for a type it does not define; keep the memory.
+      return true;
+    }
   }
 
   private Frequency? BottomEdge(RadioBand band)

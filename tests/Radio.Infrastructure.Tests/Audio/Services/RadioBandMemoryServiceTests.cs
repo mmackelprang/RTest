@@ -171,6 +171,19 @@ public class RadioBandMemoryServiceTests
     Assert.Equal(BandPresets.GetBand(type).MinFrequencyHz, frequency!.Value.Hertz);
   }
 
+  [Theory]
+  [InlineData("1650000")]   // an SW memory saved before AUD-102 moved SW's edge to 1.711 MHz: AM's now
+  [InlineData("40000000")]  // above the band
+  public async Task Get_IgnoresARememberedValueOutsideTheBand_AndFallsBack(string storedHz)
+  {
+    _store.Entries["RadioBandMemory:LastFrequencyHzByBand:SW"] = storedHz;
+    var service = CreateService();
+
+    var frequency = await service.GetAsync(RadioBand.SW);
+
+    Assert.Equal(1_715_000, frequency!.Value.Hertz);
+  }
+
   [Fact]
   public async Task Get_ReturnsNull_WhenNoMemoryAndNoDefault()
   {

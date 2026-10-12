@@ -1165,7 +1165,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private void UpdateMetadataFromState()
   {
     _metadata[StandardMetadataKeys.Album] = CurrentBand.ToString();
-    _metadata["Frequency"] = CurrentFrequency.ToDisplayString();
+    _metadata["Frequency"] = BandUnits.Format(CurrentBand, CurrentFrequency);
     _metadata["SignalStrength"] = $"{SignalStrength}%";
     _metadata["Stereo"] = IsStereo ? "Yes" : "No";
   }

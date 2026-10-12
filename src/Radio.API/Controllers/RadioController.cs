@@ -242,7 +242,8 @@ public class RadioController : ControllerBase
   /// <response code="400">
   /// If the radio is not active, the step is zero or less, or the step is not one of the current
   /// band's allowed steps (AUD-102). The last case's body carries the band's allowed steps:
-  /// <c>{ "error": "...", "band": "FM Broadcast", "allowedStepsHz": [50000, 100000, 200000] }</c>.
+  /// <c>{ "error": "...", "band": "FM Broadcast", "bandCode": "FM", "allowedStepsHz": [50000, 100000, 200000] }</c>
+  /// (<c>bandCode</c> is the code <c>RadioStateDto.Band</c> uses).
   /// </response>
   [HttpPost("step")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
@@ -272,6 +273,7 @@ public class RadioController : ControllerBase
       {
         error = $"A {ex.StepHz} Hz step is not allowed on the {ex.BandName} band.",
         band = ex.BandName,
+        bandCode = GetActiveRadioSource()?.CurrentBand.ToString(),
         allowedStepsHz = ex.AllowedStepsHz,
       });
     }

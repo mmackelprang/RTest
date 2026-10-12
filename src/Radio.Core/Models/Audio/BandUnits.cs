@@ -4,9 +4,11 @@ namespace Radio.Core.Models.Audio;
 
 /// <summary>
 /// Which unit a band's frequencies are shown in (AUD-102): kHz on AM and SW, MHz on every other band.
-/// The one rule behind every frequency the UI shows (the panel and Radio page readouts, both
-/// frequency-entry dialogs, the band list's ranges, the band map text and axis, the encoder cards and
-/// preset names), so no two surfaces can disagree about it.
+/// The rule used by the panel and Radio page readouts, both frequency-entry dialogs, the band list's
+/// ranges, the band map text and axis, the encoder cards, preset names and the radio source's
+/// "Frequency" metadata (history titles). One exception: <c>RTLSDRCore.Bands.BandReception</c>'s
+/// unavailable-reason sentence formats its own range, kept byte-identical to the band map's earlier
+/// text (it prints SW in MHz).
 /// </summary>
 /// <remarks>
 /// SW is in kHz because its channels are 5 kHz apart (and 2.5 or 1 kHz steps are allowed): in MHz with

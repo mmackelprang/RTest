@@ -57,6 +57,7 @@ public sealed class RadioControllerStepValidationTests : IDisposable
     Assert.Equal(new long[] { 50_000, 100_000, 200_000 },
       body.GetProperty("allowedStepsHz").EnumerateArray().Select(e => e.GetInt64()).ToArray());
     Assert.Equal("FM Broadcast", body.GetProperty("band").GetString());
+    Assert.Equal("FM", body.GetProperty("bandCode").GetString());
     Assert.Contains("7 Hz", body.GetProperty("error").GetString());
     Assert.Equal(before, _source.FrequencyStep.Hertz);
   }
@@ -68,8 +69,10 @@ public sealed class RadioControllerStepValidationTests : IDisposable
 
     ActionResult<RadioStateDto> result = await _controller.SetFrequencyStep(new SetFrequencyStepRequest { Step = 10_000 });
 
+    JsonElement body = BadRequestBody(result);
     Assert.Equal(new long[] { 1_000, 2_500, 5_000 },
-      BadRequestBody(result).GetProperty("allowedStepsHz").EnumerateArray().Select(e => e.GetInt64()).ToArray());
+      body.GetProperty("allowedStepsHz").EnumerateArray().Select(e => e.GetInt64()).ToArray());
+    Assert.Equal("SW", body.GetProperty("bandCode").GetString());
   }
 
   [Theory]

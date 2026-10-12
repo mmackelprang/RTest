@@ -28,6 +28,21 @@ public class StationListScanTests
     Assert.Equal(expected, StationListScan.Next(Stations, currentHz, ascending, Gap));
   }
 
+  [Theory]
+  // AUD-102 review L3: Shortwave starts at 1711 kHz, off its 5 kHz grid; a scan wrapping up lands on
+  // 1715 kHz so later steps stay on the broadcast grid.
+  [InlineData(BandType.Shortwave, 1_711_000, 5_000, true, 1_715_000)]
+  [InlineData(BandType.Shortwave, 30_000_000, 5_000, false, 30_000_000)]
+  [InlineData(BandType.AM, 530_000, 10_000, true, 530_000)]
+  [InlineData(BandType.AM, 1_710_000, 9_000, false, 1_710_000)]
+  // FM is not rounded: its US channels sit on odd tenths, which an absolute 200 kHz grid would miss.
+  [InlineData(BandType.FM, 87_500_000, 200_000, true, 87_500_000)]
+  [InlineData(BandType.FM, 108_000_000, 200_000, false, 108_000_000)]
+  public void ScanWrapTarget_RoundsOntoTheStepGridOnHfBandsOnly(BandType type, long edgeHz, long stepHz, bool roundUp, long expected)
+  {
+    Assert.Equal(expected, RadioReceiver.ScanWrapTarget(RTLSDRCore.Bands.BandPresets.GetBand(type), edgeHz, stepHz, roundUp));
+  }
+
   [Fact]
   public void Next_IsNull_WhenTheOnlyStationIsTheCurrentOne()
   {
