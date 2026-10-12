@@ -188,8 +188,15 @@ namespace RTLSDRCore;
       RadioState GetRadioState();
 
       /// <summary>
-      /// Gets the current signal strength (0.0 to 1.0)
+      /// Gets the current signal strength (nominally 0.0 to 1.0; above 1.0 when the input is
+      /// overdriven).
       /// </summary>
+      /// <remarks>
+      /// On AM-modulated bands (AM, Shortwave, Aircraft) <c>RadioReceiver</c> reports the level of
+      /// the filtered channel on a dB scale: <c>(L + 60) / 60</c> with L = 10·log10 of the mean
+      /// in-channel power in dBFS, so 0 is −60 dBFS and each 0.01 is 0.6 dB (AUD-101). On every other
+      /// band it is the RMS magnitude of the raw IQ capture.
+      /// </remarks>
       float SignalStrength { get; }
 
       #endregion

@@ -530,25 +530,44 @@ namespace RTLSDRCore.DSP;
   }
 
   /// <summary>
-  /// Automatic Gain Control (AGC)
+  /// Automatic Gain Control (AGC): a feed-forward envelope follower with separate attack and decay
+  /// rates, and a gain of <see cref="TargetLevel"/> divided by the followed envelope, clamped to
+  /// [<see cref="MinGain"/>, <see cref="MaxGain"/>].
   /// </summary>
+  /// <remarks>
+  /// <para>
+  /// The envelope follows the absolute level of the <em>input</em>. (Until AUD-101 it followed the
+  /// output, i.e. the input already multiplied by the gain it was about to set, so each gain
+  /// produced the opposite correction on the next sample; nothing called it then.) With the gain
+  /// inside its limits the steady-state output envelope is <see cref="TargetLevel"/> whatever the
+  /// input level, which is what makes the output independent of the carrier strength.
+  /// </para>
+  /// <para>
+  /// After construction and after <see cref="Reset"/> the envelope is seeded with √2 × the RMS of
+  /// the first non-silent block (the peak of a sine of that RMS), so the first block is not passed
+  /// at <see cref="MaxGain"/> while the follower climbs from zero.
+  /// </para>
+  /// </remarks>
   public class AgcProcessor
   {
       private float _gain = 1.0f;
-      private float _peakLevel;
+      private float _envelope;
+      private bool _seeded;
 
       /// <summary>
-      /// Gets or sets the target output level (0.0 to 1.0)
+      /// Gets or sets the target output envelope (0.0 to 1.0)
       /// </summary>
       public float TargetLevel { get; set; } = 0.7f;
 
       /// <summary>
-      /// Gets or sets the attack time constant (0.0 to 1.0, lower = faster)
+      /// Gets or sets the per-sample smoothing coefficient used while the input level is above the
+      /// envelope (0.0 to 1.0; higher is faster). See <see cref="CoefficientFor"/>.
       /// </summary>
       public float AttackRate { get; set; } = 0.01f;
 
       /// <summary>
-      /// Gets or sets the decay time constant (0.0 to 1.0, lower = faster)
+      /// Gets or sets the per-sample smoothing coefficient used while the input level is below the
+      /// envelope (0.0 to 1.0; higher is faster). See <see cref="CoefficientFor"/>.
       /// </summary>
       public float DecayRate { get; set; } = 0.0001f;
 
@@ -563,12 +582,28 @@ namespace RTLSDRCore.DSP;
       public float MinGain { get; set; } = 0.01f;
 
       /// <summary>
-      /// Gets the current gain value
+      /// Gets the current gain value (1.0 after <see cref="Reset"/> until a sample is processed)
       /// </summary>
       public float CurrentGain => _gain;
 
       /// <summary>
-      /// Processes samples through AGC
+      /// Gets the envelope the gain is computed from.
+      /// </summary>
+      public float Envelope => _envelope;
+
+      /// <summary>
+      /// The per-sample smoothing coefficient of a one-pole follower with time constant
+      /// <paramref name="timeConstantSeconds"/> at <paramref name="sampleRate"/>:
+      /// 1 − exp(−1 / (τ·fs)).
+      /// </summary>
+      /// <param name="timeConstantSeconds">Time constant, in seconds.</param>
+      /// <param name="sampleRate">Sample rate, in Hz.</param>
+      public static float CoefficientFor(double timeConstantSeconds, int sampleRate) =>
+          (float)(1.0 - Math.Exp(-1.0 / (timeConstantSeconds * sampleRate)));
+
+      /// <summary>
+      /// Processes samples through AGC. <paramref name="input"/> and <paramref name="output"/> may be
+      /// the same buffer.
       /// </summary>
       /// <param name="input">Input samples</param>
       /// <param name="output">Output buffer</param>
@@ -576,30 +611,37 @@ namespace RTLSDRCore.DSP;
       {
           var count = Math.Min(input.Length, output.Length);
 
+          if (!_seeded && count > 0)
+          {
+              var sumSquares = 0.0;
+              for (var i = 0; i < count; i++)
+              {
+                  sumSquares += (double)input[i] * input[i];
+              }
+              // The peak of a sine with this block's RMS: unlike the block's own peak, one
+              // start-up transient sample cannot set it.
+              var seed = (float)Math.Sqrt(2.0 * sumSquares / count);
+              if (seed > 0)
+              {
+                  _envelope = seed;
+                  _seeded = true;
+              }
+          }
+
           for (var i = 0; i < count; i++)
           {
-              var sample = input[i] * _gain;
-              var absLevel = MathF.Abs(sample);
+              var x = input[i];
+              var level = MathF.Abs(x);
 
-              // Update peak level with attack/decay
-              if (absLevel > _peakLevel)
-              {
-                  _peakLevel = _peakLevel + AttackRate * (absLevel - _peakLevel);
-              }
-              else
-              {
-                  _peakLevel = _peakLevel + DecayRate * (absLevel - _peakLevel);
-              }
+              // Follow the input envelope: fast while it rises, slowly while it falls.
+              _envelope += (level > _envelope ? AttackRate : DecayRate) * (level - _envelope);
 
-              // Adjust gain
-              if (_peakLevel > 0)
-              {
-                  var targetGain = TargetLevel / _peakLevel;
-                  _gain = Math.Clamp(targetGain, MinGain, MaxGain);
-              }
+              _gain = _envelope > 0
+                  ? Math.Clamp(TargetLevel / _envelope, MinGain, MaxGain)
+                  : MaxGain;
 
               // Clip output to prevent distortion
-              output[i] = Math.Clamp(sample, -1.0f, 1.0f);
+              output[i] = Math.Clamp(x * _gain, -1.0f, 1.0f);
           }
       }
 
@@ -609,6 +651,7 @@ namespace RTLSDRCore.DSP;
       public void Reset()
       {
           _gain = 1.0f;
-          _peakLevel = 0;
+          _envelope = 0;
+          _seeded = false;
       }
   }

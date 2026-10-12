@@ -1,4 +1,5 @@
 using RTLSDRCore.Bands;
+using RTLSDRCore.DSP;
 using RTLSDRCore.Enums;
 using RTLSDRCore.Sweep;
 using RTLSDRCore.Tests.Sweep;
@@ -19,6 +20,19 @@ public class RadioReceiverHfModeTests
   private const long FmHz = 101_100_000;
   private const long AmHz = 1_000_000;
   private const long SwHz = 6_000_000;
+
+  // AUD-101: on AM-modulated bands the device is tuned 60 kHz below the frequency the receiver
+  // reports (software offset tuning); these are the device centres for AmHz and SwHz.
+  private const long AmDeviceHz = AmHz - AmReceiveChain.TuningOffsetHz;
+  private const long SwDeviceHz = SwHz - AmReceiveChain.TuningOffsetHz;
+
+  /// <summary>The device centre the receiver tunes for <paramref name="frequencyHz"/> on <paramref name="band"/> (AUD-101).</summary>
+  private static long DeviceHz(BandType band, long frequencyHz)
+  {
+    var preset = BandPresets.GetBand(band);
+    return AmReceiveChain.DeviceFrequencyFor(
+      frequencyHz, AmReceiveChain.Applies(preset.DefaultModulation, preset.DefaultBandwidthHz));
+  }
 
   private static RadioReceiver StartOn(FakeSdrDevice device, BandType band, long frequencyHz, ILogger? logger = null)
   {
@@ -50,8 +64,8 @@ public class RadioReceiverHfModeTests
     List<string> calls = device.Calls.ToList();
     AssertBefore(calls, "Open", "SetHfMode:True");
     AssertBefore(calls, "SetHfMode:True", "SetSampleRate:240000");
-    AssertBefore(calls, "SetHfMode:True", $"SetFrequency:{AmHz}");
-    AssertBefore(calls, $"SetFrequency:{AmHz}", "StartStreaming");
+    AssertBefore(calls, "SetHfMode:True", $"SetFrequency:{AmDeviceHz}");
+    AssertBefore(calls, $"SetFrequency:{AmDeviceHz}", "StartStreaming");
     Assert.True(receiver.IsHfMode);
   }
 
@@ -80,8 +94,9 @@ public class RadioReceiverHfModeTests
     List<string> calls = CallsSince(device, before);
     AssertBefore(calls, "StopStreaming", "SetHfMode:True");
     AssertBefore(calls, "SetHfMode:True", "SetSampleRate:240000");
-    AssertBefore(calls, "SetHfMode:True", $"SetFrequency:{frequencyHz}");
-    AssertBefore(calls, $"SetFrequency:{frequencyHz}", "StartStreaming");
+    long deviceHz = DeviceHz(band, frequencyHz);
+    AssertBefore(calls, "SetHfMode:True", $"SetFrequency:{deviceHz}");
+    AssertBefore(calls, $"SetFrequency:{deviceHz}", "StartStreaming");
     Assert.True(receiver.IsHfMode);
     Assert.Equal(band, receiver.CurrentBand.Type);
   }
@@ -102,7 +117,7 @@ public class RadioReceiverHfModeTests
     List<string> calls = CallsSince(device, before);
     AssertBefore(calls, "StopStreaming", "SetHfMode:False");
     // The real tune is the last one; the first is the pre-tune made while HF is still on.
-    Assert.True(calls.IndexOf("SetHfMode:False") < calls.LastIndexOf($"SetFrequency:{frequencyHz}"),
+    Assert.True(calls.IndexOf("SetHfMode:False") < calls.LastIndexOf($"SetFrequency:{DeviceHz(band, frequencyHz)}"),
       $"no tune after HF off; calls: {string.Join(", ", calls)}");
     Assert.False(receiver.IsHfMode);
   }
@@ -131,7 +146,7 @@ public class RadioReceiverHfModeTests
 
     Assert.True(receiver.SetBand(BandType.AM, AmHz));
     Assert.True(receiver.IsHfMode);
-    Assert.Equal(AmHz, device.GetFrequency());
+    Assert.Equal(AmDeviceHz, device.GetFrequency());
 
     Assert.True(receiver.SetBand(BandType.FM, FmHz));
     Assert.False(receiver.IsHfMode);
@@ -151,7 +166,7 @@ public class RadioReceiverHfModeTests
     Assert.Equal(TuneResult.Success, receiver.TrySetFrequency(SwHz));
 
     List<string> calls = CallsSince(device, before);
-    AssertBefore(calls, "SetHfMode:True", $"SetFrequency:{SwHz}");
+    AssertBefore(calls, "SetHfMode:True", $"SetFrequency:{SwDeviceHz}");
     Assert.Equal(BandType.Shortwave, receiver.CurrentBand.Type);
     Assert.True(receiver.IsHfMode);
   }
@@ -214,6 +229,7 @@ public class RadioReceiverHfModeTests
     Assert.False(receiver.IsHfMode);
     List<string> calls = CallsSince(device, before);
     Assert.DoesNotContain($"SetFrequency:{AmHz}", calls);
+    Assert.DoesNotContain($"SetFrequency:{AmDeviceHz}", calls);
     Assert.Equal("StartStreaming", calls.Last());
     Assert.True(receiver.IsRunning);
   }
@@ -361,7 +377,10 @@ public class RadioReceiverHfModeTests
           "SetGainMode:False",          // H1
           "SetGain:20",
           "SetSampleRate:240000",       // H1: the tuner's init reset the IF filter
-          $"SetFrequency:{CustomHz}",
+          // A custom tune keeps the receiver's modulation and DSP chain (it does not set them up
+          // again), so from AM the AM chain still demodulates, and the tune carries its offset
+          // (AUD-101). The pre-tune above is for the custom band's own modulation (NFM): none.
+          $"SetFrequency:{CustomHz - AmReceiveChain.TuningOffsetHz}",
           "StartStreaming",             // L3: after the tune
         },
         calls);
@@ -386,7 +405,7 @@ public class RadioReceiverHfModeTests
     // The pre-tune moved the device to the custom frequency; after the refusal it is back where the
     // receiver says it is.
     Assert.True(device.IsHfMode);
-    Assert.Equal(AmHz, device.GetFrequency());
+    Assert.Equal(AmDeviceHz, device.GetFrequency());
   }
 
   [Fact]
@@ -401,10 +420,10 @@ public class RadioReceiverHfModeTests
 
     List<string> calls = CallsSince(device, before);
     AssertBefore(calls, $"SetFrequency:{FmHz}", "SetHfMode:False");
-    AssertBefore(calls, "SetHfMode:False", $"SetFrequency:{AmHz}");
+    AssertBefore(calls, "SetHfMode:False", $"SetFrequency:{AmDeviceHz}");
     Assert.Equal(BandType.AM, receiver.CurrentBand.Type);
     Assert.True(device.IsHfMode);
-    Assert.Equal(AmHz, device.GetFrequency());
+    Assert.Equal(AmDeviceHz, device.GetFrequency());
     Assert.True(receiver.IsRunning);
   }
 
@@ -467,7 +486,7 @@ public class RadioReceiverHfModeTests
   }
 
   /// <summary>S1: the audio of <paramref name="blocks"/> weak noise blocks on <paramref name="band"/>, one event per block.</summary>
-  private static List<float[]> AudioFromWeakBlocks(BandType band, long frequencyHz, int blocks, out float signalStrength)
+  private static List<float[]> AudioFromWeakBlocks(BandType band, long frequencyHz, int blocks, out float signalStrength, float? squelchThreshold = null)
   {
     FakeSdrDevice device = new()
     {
@@ -475,6 +494,10 @@ public class RadioReceiverHfModeTests
       BlockFactory = (_, count) => SweepTestSignals.Noise(count, 0.03f),
     };
     using RadioReceiver receiver = StartOn(device, band, frequencyHz);
+    if (squelchThreshold is float threshold)
+    {
+      receiver.SquelchThreshold = threshold;
+    }
 
     using SemaphoreSlim audioEvents = new(0);
     List<float[]> audio = new();
@@ -507,9 +530,12 @@ public class RadioReceiverHfModeTests
   [InlineData(BandType.Shortwave, SwHz)]
   public void HfBand_WeakSignal_IsNotSquelched_ToSilence(BandType band, long frequencyHz)
   {
-    List<float[]> audio = AudioFromWeakBlocks(band, frequencyHz, blocks: 2, out float strength);
+    // AUD-101: the strength on HF bands is now the in-channel level on a dB scale, which reads
+    // about 0.2 for this noise; the threshold is raised to the top so the squelch would close if
+    // it were applied.
+    List<float[]> audio = AudioFromWeakBlocks(band, frequencyHz, blocks: 2, out float strength, squelchThreshold: 1.0f);
 
-    Assert.True(strength < 0.1f, $"signal strength {strength} is not under the squelch threshold");
+    Assert.True(strength < 1.0f, $"signal strength {strength} is not under the squelch threshold");
     Assert.Equal(2, audio.Count);
     Assert.All(audio, block => Assert.Contains(block, s => s != 0f));
   }
@@ -574,7 +600,7 @@ public class RadioReceiverHfModeTests
     Assert.Equal(am.Channels, levels.Select(l => l.FrequencyHz));
     Assert.DoesNotContain(CallsSince(device, before), c => c.StartsWith("SetHfMode", StringComparison.Ordinal));
     Assert.True(receiver.IsHfMode);
-    Assert.Equal(AmHz, device.GetFrequency());   // back on the station
+    Assert.Equal(AmDeviceHz, device.GetFrequency());   // back on the station (its offset centre, AUD-101)
   }
 
   [Fact]
