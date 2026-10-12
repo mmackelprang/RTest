@@ -107,7 +107,7 @@ the kiosk page) picks it up. The same POST with `false` switches it off. Pinned 
 SMArt v5** (option C below; serial `56001418`), fed from an HF/VHF diplexer with an AM antenna on the HF leg and
 an FM antenna on the VHF leg. FM works on it. The work is queued as `AUD-99` (Q-mode probe and device layer),
 `AUD-101` (AM DSP), `AUD-102` (bands/API/UI), `AUD-103` (band map) and `AUD-104` (fingerprinting on AM/SW, owner
-decision). See [`queue/AUD-94.md`](queue/AUD-94.md).
+decision). See [`queue/AUD-94.md`](../archive/queue/AUD-94.md).
 
 **2026-10-11, `AUD-99` (on branch, pending box UAT): direct sampling is implemented.** AM and SW switch the dongle to
 Q-branch direct sampling, every other band switches it off, on the radio, the live sweep and the idle sweep.
@@ -115,7 +115,7 @@ Which dongles get it is the `RTLSDR:HfDirectSampling` setting (`Auto` | `Q` | `I
 `NESDR SMArt v5`, Off otherwise). Tune failures now propagate (503 from the API, not 400), and
 `/api/radio/devices` shows the product, the real tuner and the HF state. **Still pending:** the AM DSP chain
 (`AUD-101`: channel filter, AGC, the software carrier offset), so AM/SW audio is not yet expected to be usable;
-then `AUD-102` (bands/UI) and `AUD-103` (AM/SW sweep plans). Details: [`queue/AUD-99.md`](queue/AUD-99.md).
+then `AUD-102` (bands/UI) and `AUD-103` (AM/SW sweep plans). Details: [`queue/AUD-99.md`](../archive/queue/AUD-99.md).
 
 **2026-10-12, `AUD-101` (on branch, pending box UAT): the AM DSP chain is done.** AM, SW and AIR now tune the
 dongle 60 kHz below the station and shift it back in software (the DC spike is filtered out), filter IQ to the
@@ -124,7 +124,7 @@ half-bandwidth. `signalStrength` / `rssiDbu` on AM and SW are the in-channel lev
 dBFS, 0.6 dB steps); AIR keeps the wideband linear scale for its level, squelch and seek stop, because on the box
 its tuner AGC holds empty channels at −18 to −26 dBFS in the channel. Proved by synthetic tests (no station is
 receivable at the box); HF squelch stays bypassed. **Not fixed, follow-up:** NFM (Weather, VHF) still has no
-channel filter (`AUD-107`). Details: [`queue/AUD-101.md`](queue/AUD-101.md).
+channel filter (`AUD-107`). Details: [`queue/AUD-101.md`](../archive/queue/AUD-101.md).
 
 **2026-10-12, `AUD-103` (on branch, pending box UAT): the band map covers AM and SW.** Discover, the BAND view
 and map-driven Scan now work on AM (530–1710 kHz at 10 kHz, the whole band) and on SW (one ITU broadcast segment
@@ -141,7 +141,7 @@ tunes keep every channel's window at least 12 kHz from the tune centre, where th
 filter, direct sampling at 28.8 MHz folds `28.8 MHz − f` onto `f`, so a map of an upper SW segment can show
 images of lower ones (31 m appears across 15 m, 41 m at the bottom of 13 m); a low-pass filter at the antenna is
 the fix. Not changed: the `UI-22` colour thresholds (on the box's passive antenna every real AM/SW signal measured
-so far would draw as *weak*). Details: [`queue/AUD-103.md`](queue/AUD-103.md). The cost: a real 960 kHz station would also never be a peak or a Scan/seek stop (it can still be tuned directly or from a preset).
+so far would draw as *weak*). Details: [`queue/AUD-103.md`](../archive/queue/AUD-103.md). The cost: a real 960 kHz station would also never be a peak or a Scan/seek stop (it can still be tuned directly or from a preset).
 
 The "~2 days" estimate in the table below predates a code survey that
 found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the

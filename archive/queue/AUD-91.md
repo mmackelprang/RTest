@@ -166,7 +166,7 @@ through `/api/radio/band` and `/api/radio/frequency` and reading `/api/radio/sta
 
 Direct sampling was judged **not small**: it needs P/Invoke for `rtlsdr_set_direct_sampling`, a
 different capture rate and DC handling, and, above all, hardware this dongle does not have. It is
-deferred to [`AUD-94`](../../docs/queue/AUD-94.md) as an owner decision, not built here.
+deferred to [`AUD-94`](AUD-94.md) as an owner decision, not built here.
 
 ## Design (Builder, 2026-10-01)
 
