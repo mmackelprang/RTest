@@ -150,6 +150,9 @@ public static class FmBandMath
   /// <see cref="BandSignalTier.Weak"/> or above, a channel at exactly <see cref="PeakProminenceDb"/>
   /// included. The reverse does not hold: a peak must also be at least as strong as both neighbours, so
   /// a coloured shadow next to a stronger station is not one.
+  /// AUD-103: a known device spur (<see cref="Radio.Core.Models.BandMapStations.IsKnownSpur"/>) is
+  /// <see cref="BandSignalTier.Noise"/> whatever its level, and is left out of the median, as the peak
+  /// rule leaves it out: it is drawn, but not in a station's colour.
   /// </remarks>
   public static BandSignalTier[] SignalTiers(IReadOnlyList<BandMapChannelDto> channels)
   {
@@ -158,8 +161,12 @@ public static class FmBandMath
       return [];
     }
 
-    double median = Median(channels.Select(c => (double)c.LevelDbfs));
-    return channels.Select(c => TierOf(c.LevelDbfs, median)).ToArray();
+    double median = Median(channels
+      .Where(c => !Radio.Core.Models.BandMapStations.IsKnownSpur(c.FrequencyHz))
+      .Select(c => (double)c.LevelDbfs));
+    return channels
+      .Select(c => Radio.Core.Models.BandMapStations.IsKnownSpur(c.FrequencyHz) ? BandSignalTier.Noise : TierOf(c.LevelDbfs, median))
+      .ToArray();
   }
 
   private static BandSignalTier TierOf(double level, double median) =>

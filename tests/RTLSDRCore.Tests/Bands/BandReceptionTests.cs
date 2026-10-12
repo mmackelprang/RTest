@@ -15,11 +15,14 @@ public class BandReceptionTests
   [Fact]
   public void BandMapsReason_IsUnchanged_ByTheMoveIntoTheSharedFunction()
   {
-    // The exact sentence the BAND view showed before AUD-102 (VisualizerPanelBandTests.AmReason).
+    // The exact sentence the BAND view showed before AUD-102 (VisualizerPanelBandTests.AmReason), for a
+    // device without HF direct sampling (AUD-103 passes the device's range).
+    long min = RtlSdrDevice.TunerMinFrequencyHz;
+    long max = RtlSdrDevice.TunerMaxFrequencyHz;
     Assert.Equal(
       "The AM Broadcast band (530–1,710 kHz) is below this tuner's 24 MHz lower limit and cannot be scanned.",
-      BandSweepPlans.UnavailableReason(BandType.AM));
-    Assert.Equal("This band has no channel plan and cannot be scanned.", BandSweepPlans.UnavailableReason(BandType.Custom));
+      BandSweepPlans.UnavailableReason(BandType.AM, min, max));
+    Assert.Equal("This band has no channel plan and cannot be scanned.", BandSweepPlans.UnavailableReason(BandType.Custom, min, max));
   }
 
   [Theory]

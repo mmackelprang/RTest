@@ -42,7 +42,7 @@ public class RadioBandService : IRadioBandService
 
     public IEnumerable<RadioBandModel> GetAvailableBands()
     {
-        SdrHardwareInfo? device = ReceivingDevice();
+        SdrHardwareInfo? device = SdrReceivingDevice.Find(_radioFactory);
 
         var bands = typeof(BandPresets).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
             .Where(p => p.PropertyType == typeof(RTLSDRCore.Models.RadioBand))
@@ -81,29 +81,6 @@ public class RadioBandService : IRadioBandService
         device == null
             ? null
             : BandReception.UnavailableReason(band, device.MinFrequencyHz, device.MaxFrequencyHz);
-
-    /// <summary>
-    /// The device whose range decides <see cref="RadioBandModel.IsReceivable"/>: the radio's own device
-    /// when the radio source has one, otherwise the first enumerated SDR, otherwise null. A factory
-    /// that throws counts as no device: the band list must still be served.
-    /// </summary>
-    private SdrHardwareInfo? ReceivingDevice()
-    {
-        if (_radioFactory == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            IReadOnlyList<SdrHardwareInfo> hardware = _radioFactory.GetSdrHardware() ?? Array.Empty<SdrHardwareInfo>();
-            return hardware.FirstOrDefault(h => h.IsInUse) ?? hardware.FirstOrDefault();
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
 
     /// <summary>
     /// Formats the band's frequency range as a UI-ready string in the band's unit

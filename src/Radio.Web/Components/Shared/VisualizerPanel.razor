@@ -213,7 +213,7 @@
         @if (_bandMap != null)
         {
           <div class="band-strip-title">
-            <span class="band-strip-name">@ShownBand</span>
+            <span class="band-strip-name">@ShownBandName</span>
             @if (IsVhfWindow)
             {
               <span class="band-strip-window">Window</span>
@@ -550,7 +550,7 @@
   /// </summary>
   private string ShownBand => string.IsNullOrEmpty(_bandMap?.Band) ? "FM" : _bandMap!.Band;
 
-  /// <summary>False when the API says the shown band cannot be scanned (AM, SW on this tuner).</summary>
+  /// <summary>False when the API says the shown band cannot be scanned (AM and SW on a tuner without HF direct sampling).</summary>
   private bool IsShownBandMappable => _bandMap?.Mappable != false;
 
   /// <summary>A sweep is running and it is not known to be of another band (an older API names none).</summary>
@@ -569,16 +569,28 @@
   private bool IsVhfWindow => SameBand(ShownBand, "VHF");
 
   /// <summary>
-  /// The strip's range line (UI-31): VHF's plotted window; otherwise the band's range as the control panel's
-  /// band pill names it, falling back to the plotted range when the band list has not been read. Null when
-  /// neither is known (a map without a usable axis, before the band list arrives).
+  /// SW's map is one broadcast segment, named by the API (AUD-103, e.g. <c>31 m</c>); null on every other
+  /// band, and on SW from an API that names none.
+  /// </summary>
+  private string? ShownSegment => SameBand(ShownBand, "SW") && !string.IsNullOrWhiteSpace(_bandMap?.Segment)
+    ? _bandMap!.Segment
+    : null;
+
+  /// <summary>The strip's band name: the band code, and on SW the segment after it (<c>SW 31 m</c>).</summary>
+  private string ShownBandName => ShownSegment is string segment ? $"{ShownBand} {segment}" : ShownBand;
+
+  /// <summary>
+  /// The strip's range line (UI-31): VHF's plotted window and SW's plotted segment (AUD-103); otherwise the
+  /// band's range as the control panel's band pill names it, falling back to the plotted range when the band
+  /// list has not been read. Null when neither is known (a map without a usable axis, before the band list
+  /// arrives).
   /// </summary>
   private string? ShownRange
   {
     get
     {
       bool axisIsShownBand = SameBand(_bandAxis.Band, ShownBand);
-      if (IsVhfWindow)
+      if (IsVhfWindow || ShownSegment != null)
       {
         return axisIsShownBand ? BandMapText.FormatRange(_bandAxis.DisplayMinHz, _bandAxis.DisplayMaxHz, ShownBand) : null;
       }

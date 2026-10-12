@@ -8,6 +8,7 @@ using Radio.API.Controllers;
 using Radio.API.Models;
 using Radio.Core.Configuration;
 using Radio.Core.Models;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Services;
 using RTLSDRCore.Hardware;
 using RTLSDRCore.Sweep;
@@ -34,6 +35,18 @@ public sealed class BandMapControllerBandTests : IDisposable
 
   private BandMapTuning? Tuning { get; set; } = new("FM", 101_100_000);
 
+  /// <summary>AUD-103: the receiving device; null is none known.</summary>
+  private SdrHardwareInfo? Device { get; set; }
+
+  /// <summary>An RTL-SDR whose lower limit is <paramref name="minHz"/>: 100 kHz with HF direct sampling, 24 MHz without.</summary>
+  private static SdrHardwareInfo DeviceWithFloor(long minHz) => new(
+    0, "Generic RTL2832U", "Realtek", "NESDR SMArt v5", "00000001", "R820T",
+    minHz < RtlSdrDevice.TunerMinFrequencyHz ? "Q" : "Off", "Auto", false, false, minHz, RtlSdrDevice.TunerMaxFrequencyHz);
+
+  private static SdrHardwareInfo NoHf => DeviceWithFloor(RtlSdrDevice.TunerMinFrequencyHz);
+
+  private static SdrHardwareInfo Hf => DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+
   private BandMapController CreateController(Func<ISdrDevice?>? deviceFactory = null)
   {
     Mock<IOptionsMonitor<BandMapOptions>> monitor = new();
@@ -47,7 +60,8 @@ public sealed class BandMapControllerBandTests : IDisposable
       sleepService: null,
       deviceFactory: deviceFactory ?? (() => null),
       timeProvider: _time,
-      currentTuning: () => Tuning);
+      currentTuning: () => Tuning,
+      receivingDevice: () => Device);
     return new BandMapController(_service);
   }
 
@@ -110,6 +124,7 @@ public sealed class BandMapControllerBandTests : IDisposable
   [Fact]
   public void Get_AnUnmappableBand_HasNoSeekStations()
   {
+    Device = NoHf;
     BandMapController controller = CreateController();
     _service!.RecordSeekStation("AM", 1_000_000, 0.9f);
 
@@ -207,15 +222,18 @@ public sealed class BandMapControllerBandTests : IDisposable
   }
 
   [Fact]
-  public void Get_Am_IsNotMappable_WithTheReasonAndThePresetAxis()
+  public void Get_Am_OnADeviceWithoutHf_IsNotMappable_WithTheReasonAndThePresetAxis()
   {
+    Device = NoHf;
     BandMapController controller = CreateController();
 
     BandMapResponseDto dto = Body(controller.Get("AM"));
 
     Assert.Equal("AM", dto.Band);
     Assert.False(dto.Mappable);
-    Assert.Equal(BandSweepPlans.UnavailableReason(RTLSDRCore.Enums.BandType.AM), dto.UnavailableReason);
+    Assert.Equal(
+      "The AM Broadcast band (530–1,710 kHz) is below this tuner's 24 MHz lower limit and cannot be scanned.",
+      dto.UnavailableReason);
     Assert.Contains("below this tuner's 24 MHz lower limit", dto.UnavailableReason);
     Assert.Equal(530_000, dto.DisplayMinHz);
     Assert.Equal(1_710_000, dto.DisplayMaxHz);
@@ -223,6 +241,104 @@ public sealed class BandMapControllerBandTests : IDisposable
     Assert.Equal(1_710_000, dto.LastChannelHz);
     Assert.Equal(10_000, dto.ChannelSpacingHz);
     Assert.Empty(dto.Channels);
+  }
+
+  [Fact]
+  public void Get_Am_OnAnHfDevice_IsMappable_WithThePlansAxis_AndNoSegment()
+  {
+    Device = Hf;
+    BandMapController controller = CreateController();
+
+    BandMapResponseDto dto = Body(controller.Get("AM"));
+
+    Assert.True(dto.Mappable);
+    Assert.Null(dto.UnavailableReason);
+    Assert.Equal(530_000, dto.DisplayMinHz);
+    Assert.Equal(1_710_000, dto.DisplayMaxHz);
+    Assert.Equal(530_000, dto.FirstChannelHz);
+    Assert.Equal(1_710_000, dto.LastChannelHz);
+    Assert.Equal(10_000, dto.ChannelSpacingHz);
+    Assert.Null(dto.Segment);
+  }
+
+  [Fact]
+  public void Get_Sw_WithNoMap_IsTheRadiosSegment_AndNamesIt()
+  {
+    Device = Hf;
+    Tuning = new BandMapTuning("SW", 9_650_000);
+    BandMapController controller = CreateController();
+
+    BandMapResponseDto dto = Body(controller.Get("SW"));
+
+    Assert.True(dto.Mappable);
+    Assert.Equal("31 m", dto.Segment);
+    Assert.Equal(9_400_000, dto.DisplayMinHz);
+    Assert.Equal(9_900_000, dto.DisplayMaxHz);
+    Assert.Equal(9_400_000, dto.FirstChannelHz);
+    Assert.Equal(9_900_000, dto.LastChannelHz);
+    Assert.Equal(5_000, dto.ChannelSpacingHz);
+  }
+
+  [Fact]
+  public void Get_Sw_WithAStoredMap_ShowsAndNamesTheStoredSegment_NotTheRadios()
+  {
+    Store(new BandMap
+    {
+      Band = "SW",
+      RangeMinHz = 5_900_000,
+      RangeMaxHz = 6_200_000,
+      ChannelSpacingHz = 5_000,
+      ScannedAtUtc = _time.GetUtcNow(),
+      Channels = new[] { new BandMapChannel(6_000_000, -40f) },
+    });
+    Device = Hf;
+    Tuning = new BandMapTuning("SW", 9_650_000);
+    BandMapController controller = CreateController();
+
+    BandMapResponseDto dto = Body(controller.Get("SW"));
+
+    Assert.Equal("49 m", dto.Segment);
+    Assert.Equal(5_900_000, dto.DisplayMinHz);
+    Assert.Equal(6_200_000, dto.DisplayMaxHz);
+    Assert.Equal(5_900_000, dto.FirstChannelHz);
+    Assert.Equal(6_200_000, dto.LastChannelHz);
+    Assert.Single(dto.Channels);
+  }
+
+  [Fact]
+  public void Get_AStoredAmMap_OnADeviceWithoutHf_IsServedWithoutChannels()
+  {
+    Store(new BandMap
+    {
+      Band = "AM",
+      RangeMinHz = 530_000,
+      RangeMaxHz = 1_710_000,
+      ChannelSpacingHz = 10_000,
+      ScannedAtUtc = _time.GetUtcNow(),
+      Channels = new[] { new BandMapChannel(1_030_000, -40f) },
+    });
+    Device = NoHf;
+    BandMapController controller = CreateController();
+
+    BandMapResponseDto dto = Body(controller.Get("AM"));
+
+    Assert.False(dto.Mappable);
+    Assert.Empty(dto.Channels);
+    Assert.Null(dto.ScannedAtUtc);
+  }
+
+  [Theory]
+  [InlineData("AM")]
+  [InlineData("SW")]
+  public void Scan_AnHfBand_OnAnHfDevice_IsNotRefusedForTheBand(string band)
+  {
+    // No device to sweep with in this test, so the request ends at "no SDR device", past the band check.
+    Device = Hf;
+    BandMapController controller = CreateController();
+
+    ObjectResult result = Assert.IsAssignableFrom<ObjectResult>(controller.Scan(band).Result);
+
+    Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
   }
 
   [Fact]
@@ -241,6 +357,7 @@ public sealed class BandMapControllerBandTests : IDisposable
   [InlineData("sw")]
   public void Scan_UnmappableBand_Returns409WithTheReason(string band)
   {
+    Device = NoHf;
     BandMapController controller = CreateController();
 
     ObjectResult result = Assert.IsAssignableFrom<ObjectResult>(controller.Scan(band).Result);
@@ -248,13 +365,16 @@ public sealed class BandMapControllerBandTests : IDisposable
     Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
     BandSweepPlans.TryParseBandCode(band, out RTLSDRCore.Enums.BandType bandType);
     string? error = result.Value!.GetType().GetProperty("error")!.GetValue(result.Value) as string;
-    Assert.Equal(BandSweepPlans.UnavailableReason(bandType), error);
+    Assert.Equal(
+      BandSweepPlans.UnavailableReason(bandType, RtlSdrDevice.TunerMinFrequencyHz, RtlSdrDevice.TunerMaxFrequencyHz), error);
+    Assert.NotNull(error);
     Assert.Null(_service!.GetStatus().Last);
   }
 
   [Fact]
   public void Scan_WithNoBand_OnAnUnmappableRadioBand_Returns409()
   {
+    Device = NoHf;
     Tuning = new BandMapTuning("AM", 1_000_000);
     BandMapController controller = CreateController();
 

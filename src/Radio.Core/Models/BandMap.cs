@@ -11,8 +11,10 @@ public sealed record BandMapChannel(long FrequencyHz, float LevelDbfs);
 /// </summary>
 /// <param name="FrequencyHz">Where the seek stopped, in Hz.</param>
 /// <param name="SeekStrength">
-/// The seek's own signal reading when it stopped: the RMS magnitude of the receiver's wideband
-/// capture, 0 to about 1.4. Not a dB level and not comparable with <see cref="BandMapChannel.LevelDbfs"/>.
+/// The seek's own signal reading when it stopped: the receiver's signal strength. On AM and SW that
+/// is the in-channel level on AUD-101's scale, 0 to 1 (−60 to 0 dBFS); on every other band the RMS
+/// magnitude of the wideband capture, 0 to about 1.4. Comparable only within one band, and not with
+/// <see cref="BandMapChannel.LevelDbfs"/>.
 /// </param>
 /// <param name="ObservedAtUtc">When the seek stopped there, UTC.</param>
 public sealed record BandMapSeekStation(long FrequencyHz, float SeekStrength, DateTimeOffset ObservedAtUtc);
@@ -28,11 +30,54 @@ public sealed record BandMapSeekStations
 }
 
 /// <summary>
+/// A signal the receiver makes itself, at a fixed frequency, that a band map must not present as a
+/// station (AUD-103).
+/// </summary>
+/// <param name="FrequencyHz">The spur's frequency, in Hz.</param>
+/// <param name="ToleranceHz">A channel within this distance of <paramref name="FrequencyHz"/> is the spur, in Hz.</param>
+/// <param name="Source">Where it comes from and how it was measured, for the reader of the table.</param>
+public sealed record KnownDeviceSpur(long FrequencyHz, long ToleranceHz, string Source);
+
+/// <summary>
 /// Which swept channels of a <see cref="BandMap"/> are stations: the peak rule the BAND view's tap
 /// has used since AUD-76, shared since AUD-100 so Scan stops where a tap would snap.
 /// </summary>
 public static class BandMapStations
 {
+  /// <summary>
+  /// Device spurs that are never stations (AUD-103): <see cref="Peaks"/> skips them, so neither a
+  /// tap nor Scan stops there, and the BAND view draws them in the noise colour. Their channels are
+  /// still measured, stored and drawn.
+  /// </summary>
+  /// <remarks>
+  /// A list of measured spurs, not a formula. The RTL2832U's 28.8 MHz reference has a sub-harmonic
+  /// near every 10 kHz AM channel (28.8 MHz ÷ n for n = 17 to 54), but only 960 kHz (÷ 30) has been
+  /// measured standing out: about +18 dB over the median by day (AUD-99 step 0), −34.1 dBFS in the
+  /// channel against about −50 on its neighbours (AUD-101 box UAT). 1028.6 kHz (÷ 28) is next to
+  /// 1030 kHz, which read at the floor by day and about 7 dB up at night, i.e. skywave, so a formula
+  /// would hide a real station there; 9.6 MHz (÷ 3) read at the floor. Add an entry only for a spur
+  /// that has been measured.
+  /// </remarks>
+  public static IReadOnlyList<KnownDeviceSpur> KnownSpurs { get; } = new KnownDeviceSpur[]
+  {
+    new(960_000, 2_000,
+      "RTL2832U 28.8 MHz reference ÷ 30; measured on the NESDR SMArt v5 in HF direct sampling (AUD-99 step 0, AUD-101 box UAT)"),
+  };
+
+  /// <summary>True when <paramref name="frequencyHz"/> is within a <see cref="KnownSpurs"/> entry's tolerance.</summary>
+  public static bool IsKnownSpur(long frequencyHz)
+  {
+    foreach (KnownDeviceSpur spur in KnownSpurs)
+    {
+      if (Math.Abs(frequencyHz - spur.FrequencyHz) <= spur.ToleranceHz)
+      {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   /// <summary>
   /// How far above the map's median level (its noise estimate) a channel must stand to be a peak,
   /// in dB. The levels are relative, not calibrated, so only differences within one map mean
@@ -45,7 +90,9 @@ public static class BandMapStations
   /// level is at least that of both neighbours in frequency order (a missing neighbour at the band
   /// edge counts as lower) and at least <see cref="PeakProminenceDb"/> above the median level of all
   /// of <paramref name="channels"/>. The neighbour rule drops a strong station's adjacent-channel
-  /// shadow, which is lower than the station.
+  /// shadow, which is lower than the station. Known spurs (<see cref="IsKnownSpur"/>) are left out
+  /// before the rule is applied, as if they had not been measured: they are never peaks, they are
+  /// not in the median, and a real station beside one is not hidden by being lower than it.
   /// </summary>
   public static IReadOnlyList<long> Peaks(IReadOnlyList<BandMapChannel> channels)
   {
@@ -55,7 +102,12 @@ public static class BandMapStations
       return Array.Empty<long>();
     }
 
-    BandMapChannel[] sorted = channels.OrderBy(c => c.FrequencyHz).ToArray();
+    BandMapChannel[] sorted = channels.Where(c => !IsKnownSpur(c.FrequencyHz)).OrderBy(c => c.FrequencyHz).ToArray();
+    if (sorted.Length == 0)
+    {
+      return Array.Empty<long>();
+    }
+
     double threshold = Median(sorted.Select(c => (double)c.LevelDbfs)) + PeakProminenceDb;
     List<long> peaks = new();
     for (int i = 0; i < sorted.Length; i++)

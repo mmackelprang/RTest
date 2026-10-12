@@ -84,7 +84,7 @@ public sealed class BandSweepPlan
     SampleRate = sampleRate;
   }
 
-  /// <summary>Band code: <c>"FM"</c>, <c>"WB"</c>, <c>"AIR"</c> or <c>"VHF"</c> for the built-in plans.</summary>
+  /// <summary>Band code: <c>"FM"</c>, <c>"WB"</c>, <c>"AIR"</c>, <c>"VHF"</c>, <c>"AM"</c> or <c>"SW"</c> for the built-in plans.</summary>
   public string Band { get; }
 
   /// <summary>Every channel centre in the plan, ascending, in Hz.</summary>

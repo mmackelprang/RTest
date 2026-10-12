@@ -8,8 +8,8 @@ namespace RTLSDRCore.Bands;
 /// Whether a device can receive a preset band, and why not when it cannot (AUD-102). One function
 /// for every surface that asks: the band list's <c>IsReceivable</c> / <c>UnavailableReason</c>
 /// (<c>RadioBandService</c>) and the band map's reason (<see cref="Sweep.BandSweepPlans.UnavailableReason"/>,
-/// which today passes the tuner's fixed range; AUD-103 is to pass the device's), so the panel and the
-/// BAND view cannot word the same limit differently.
+/// which <c>BandMapService</c> calls with the same device's range since AUD-103), so the panel and
+/// the BAND view cannot word the same limit differently.
 /// </summary>
 public static class BandReception
 {

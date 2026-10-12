@@ -5,7 +5,9 @@ using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Models;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Services;
+using RTLSDRCore.Bands;
 using RTLSDRCore.Hardware;
 using RTLSDRCore.Models;
 using RTLSDRCore.Sweep;
@@ -55,6 +57,15 @@ public sealed class BandMapServiceBandTests : IDisposable
 
   private Func<BandMapTuning?>? TuningOverride { get; set; }
 
+  /// <summary>AUD-103: the receiving device whose range decides what can be swept; null is none known.</summary>
+  private SdrHardwareInfo? Device { get; set; }
+
+  /// <summary>AUD-103: the SW band memory, or null.</summary>
+  private long? ShortwaveMemory { get; set; }
+
+  /// <summary>AUD-103: whether the idle-path devices have HF direct sampling.</summary>
+  private bool IdleDevicesHaveHf { get; set; }
+
   private BandMapService CreateService(ILiveBandSweeper? live = null)
   {
     Mock<IOptionsMonitor<BandMapOptions>> monitor = new();
@@ -68,12 +79,14 @@ public sealed class BandMapServiceBandTests : IDisposable
       () => _sleep.Object,
       () =>
       {
-        StationDevice device = new();
+        StationDevice device = new() { SupportsHfDirectSampling = IdleDevicesHaveHf };
         _devices.Add(device);
         return device;
       },
       _time,
-      TuningOverride ?? (() => Tuning));
+      TuningOverride ?? (() => Tuning),
+      () => Device,
+      () => ShortwaveMemory);
     _services.Add(service);
     return service;
   }
@@ -113,6 +126,8 @@ public sealed class BandMapServiceBandTests : IDisposable
   [InlineData("SW")]
   public async Task Timer_OnAnUnmappableBand_SkipsWithBandNotReceivable_AndOpensNoDevice(string band)
   {
+    // AUD-103: AM and SW are unmappable on a device without HF direct sampling.
+    Device = BandMapServiceScanTests.DeviceWithFloor(RtlSdrDevice.TunerMinFrequencyHz);
     Tuning = new BandMapTuning(band, 1_000_000);
     BandMapService service = CreateService();
     await service.StartAsync(CancellationToken.None);
@@ -232,6 +247,7 @@ public sealed class BandMapServiceBandTests : IDisposable
   [Fact]
   public void Request_ForAnUnmappableBand_IsUnavailable_TouchesNothing_AndIsNotRecorded()
   {
+    Device = BandMapServiceScanTests.DeviceWithFloor(RtlSdrDevice.TunerMinFrequencyHz);
     Tuning = new BandMapTuning("FM", 101_100_000);
     BandMapService service = CreateService();
 
@@ -413,6 +429,170 @@ public sealed class BandMapServiceBandTests : IDisposable
     Assert.Equal(0, _live.Calls);
   }
 
+  // ── AUD-103: AM and SW ───────────────────────────────────────────────────
+
+  [Theory]
+  [InlineData("AM", 119, 6, 530_000L)]
+  [InlineData("SW", 40, 2, 2_300_000L)]
+  public async Task Request_ForAnHfBand_OnTheIdlePath_SwitchesHfOnBeforeTheSampleRateAndAnyTune(
+    string band, int channels, int tunes, long firstHz)
+  {
+    Device = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    IdleDevicesHaveHf = true;
+    Tuning = new BandMapTuning("FM", 101_100_000);
+    BandMapService service = CreateService();
+
+    BandSweepRequestResult result = service.RequestSweep(band);
+    await Settle(service);
+
+    Assert.Equal(BandSweepRequestOutcome.Started, result.Outcome);
+    StationDevice device = Assert.Single(_devices);
+    Assert.Equal("SetHfMode:True", device.Calls[0]);
+    Assert.Equal($"SetSampleRate:{DeviceSweepTuner.SweepSampleRate}", device.Calls[1]);
+    Assert.Equal(tunes, device.Tunes.Count);
+    BandMap map = service.GetMap(band)!;
+    Assert.Equal(BandSweepResults.Completed, service.GetStatus().Last!.Result);
+    Assert.Equal(BandSweepPaths.Idle, map.Path);
+    Assert.Equal(channels, map.Channels.Count);
+    Assert.Equal(firstHz, map.RangeMinHz);
+  }
+
+  [Theory]
+  [InlineData("FM")]
+  [InlineData("WB")]
+  public async Task Request_ForATunerBand_OnTheIdlePath_NeverSwitchesHfOn(string band)
+  {
+    Device = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    IdleDevicesHaveHf = true;
+    Tuning = new BandMapTuning("AM", 1_000_000);
+    BandMapService service = CreateService();
+
+    service.RequestSweep(band);
+    await Settle(service);
+
+    Assert.Equal(BandSweepResults.Completed, service.GetStatus().Last!.Result);
+    Assert.DoesNotContain("SetHfMode:True", Assert.Single(_devices).Calls);
+  }
+
+  [Theory]
+  [InlineData(null, null, 2_300_000L)]               // radio off SW, nothing remembered: 120 m
+  [InlineData(null, 9_600_000L, 9_400_000L)]         // radio off SW: the segment of the SW band memory (31 m)
+  [InlineData(15_400_000L, 9_600_000L, 15_100_000L)] // radio on SW: its own segment (19 m), not the memory's
+  public async Task Request_ForSw_SweepsTheSegmentOfTheRadioOrElseOfTheBandMemory(
+    long? radioOnSwHz, long? memoryHz, long expectedMinHz)
+  {
+    Device = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    IdleDevicesHaveHf = true;
+    Tuning = radioOnSwHz is long hz ? new BandMapTuning("SW", hz) : new BandMapTuning("FM", 101_100_000);
+    ShortwaveMemory = memoryHz;
+    BandMapService service = CreateService();
+
+    Assert.Equal(expectedMinHz, service.GetPlan("SW")!.DisplayMinHz);
+    service.RequestSweep("SW");
+    await Settle(service);
+
+    Assert.Equal(expectedMinHz, service.GetMap("SW")!.RangeMinHz);
+  }
+
+  [Fact]
+  public async Task Timer_OnSw_TreatsAFreshMapAsDue_OnceTheRadioHasLeftItsSegment()
+  {
+    Device = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    IdleDevicesHaveHf = true;
+    Tuning = new BandMapTuning("SW", 9_600_000);
+    BandMapService service = CreateService();
+    service.RequestSweep();
+    await Settle(service);
+    Assert.Equal(9_400_000, service.GetMap("SW")!.RangeMinHz);
+
+    Tuning = new BandMapTuning("SW", 6_000_000);
+    service.OnTimerTick();
+    await Settle(service);
+
+    Assert.Equal(2, _devices.Count);
+    Assert.Equal(5_900_000, service.GetMap("SW")!.RangeMinHz);
+  }
+
+  [Fact]
+  public void UnavailableReason_ReadsTheReceivingDevice()
+  {
+    BandMapService service = CreateService();
+
+    // With HF direct sampling every preset band can be swept.
+    Device = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    Assert.All(BandPresets.AllBands, b => Assert.Null(service.UnavailableReason(b.Type)));
+    Assert.NotNull(service.GetPlan("AM"));
+
+    // Without it, AM and SW cannot, with the sentence the BAND view has always shown.
+    Device = BandMapServiceScanTests.DeviceWithFloor(RtlSdrDevice.TunerMinFrequencyHz);
+    Assert.Equal(
+      "The AM Broadcast band (530–1,710 kHz) is below this tuner's 24 MHz lower limit and cannot be scanned.",
+      service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+    Assert.Equal(
+      "The Shortwave band (1.711–30 MHz) is mostly below this tuner's 24 MHz lower limit and cannot be scanned.",
+      service.UnavailableReason(RTLSDRCore.Enums.BandType.Shortwave));
+    Assert.Null(service.UnavailableReason(RTLSDRCore.Enums.BandType.FM));
+    Assert.Null(service.GetPlan("AM"));
+
+    // No device known: no device limit; a custom band still has its sentence.
+    Device = null;
+    Assert.Null(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+    Assert.Equal("This band has no channel plan and cannot be scanned.",
+      service.UnavailableReason(RTLSDRCore.Enums.BandType.Custom));
+  }
+
+  [Fact]
+  public void UnavailableReason_WhenReadingTheDeviceThrows_AppliesNoDeviceLimit()
+  {
+    Mock<IOptionsMonitor<BandMapOptions>> monitor = new();
+    monitor.Setup(m => m.CurrentValue).Returns(_options);
+    using BandMapService service = new(
+      NullLogger<BandMapService>.Instance, monitor.Object, new BandMapStore(_root, NullLogger.Instance), _gate,
+      () => _live, receivingDevice: () => throw new InvalidOperationException("librtlsdr missing"));
+
+    Assert.Null(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+  }
+
+  [Fact]
+  public async Task Request_ForAm_WhileTheRadioPlaysAm_SweepsLive()
+  {
+    Device = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    Tuning = new BandMapTuning("AM", 1_000_000);
+    await _gate.ClaimForRadioAsync();
+    _live.CanSweepLive = true;
+    _live.RadioIsHf = true;
+    BandMapService service = CreateService();
+
+    BandSweepRequestResult result = service.RequestSweep("AM");
+    await Settle(service);
+
+    Assert.Equal(BandSweepRequestOutcome.Started, result.Outcome);
+    Assert.Equal("AM", Assert.Single(_live.Plans).Band);
+    Assert.Equal(BandSweepPaths.Live, service.GetMap("AM")!.Path);
+    Assert.Empty(_devices);
+  }
+
+  [Theory]
+  [InlineData("AM", "FM", false)]
+  [InlineData("SW", "FM", false)]
+  [InlineData("FM", "SW", true)]
+  public async Task Request_WhenTheRadioPlaysTheOtherMode_IsRadioOtherMode_AndStartsNothing(string band, string radioBand, bool radioIsHf)
+  {
+    Device = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    Tuning = new BandMapTuning(radioBand, radioIsHf ? 9_600_000 : 101_100_000);
+    await _gate.ClaimForRadioAsync();
+    _live.CanSweepLive = true;
+    _live.RadioIsHf = radioIsHf;
+    BandMapService service = CreateService();
+
+    BandSweepRequestResult result = service.RequestSweep(band);
+
+    Assert.Equal(BandSweepRequestOutcome.Unavailable, result.Outcome);
+    Assert.Equal(BandMapService.ReasonRadioOtherMode, result.Reason);
+    Assert.Equal(0, _live.Calls);
+    Assert.Empty(_devices);
+  }
+
   /// <summary>Overrides the plan overload; reports progress per tune like the receiver does.</summary>
   private sealed class PlanLiveSweeper : ILiveBandSweeper
   {
@@ -423,7 +603,14 @@ public sealed class BandMapServiceBandTests : IDisposable
     /// <summary>AUD-99: returned by <see cref="LiveSweepRefusal"/> for every plan.</summary>
     public string? Refusal { get; set; }
 
-    public string? LiveSweepRefusal(BandSweepPlan plan) => Refusal;
+    /// <summary>
+    /// AUD-103: when set, the radio's HF mode; a plan needing the other mode is refused, as
+    /// <c>RadioReceiver.LiveSweepModeConflict</c> refuses it.
+    /// </summary>
+    public bool? RadioIsHf { get; set; }
+
+    public string? LiveSweepRefusal(BandSweepPlan plan) =>
+      RadioIsHf is bool hf && RTLSDRCore.Bands.HfBands.Requires(plan) != hf ? "needs the other mode" : Refusal;
 
     public int Calls => Volatile.Read(ref _calls);
 
@@ -489,7 +676,12 @@ public sealed class BandMapServiceBandTests : IDisposable
     private long _frequencyHz;
     private int _reads;
 
+    private bool _hfMode;
+
     public List<long> Tunes { get; } = new();
+
+    /// <summary>AUD-103: every SetHfMode, SetSampleRate and SetFrequency call, in order.</summary>
+    public List<string> Calls { get; } = new();
 
     public DeviceInfo DeviceInfo { get; } = new() { Name = "Fake", MinFrequencyHz = 24_000_000, MaxFrequencyHz = 1_766_000_000 };
 
@@ -497,12 +689,21 @@ public sealed class BandMapServiceBandTests : IDisposable
 
     public bool IsStreaming => false;
 
-    // AUD-99: no HF; every plan these tests sweep is a tuner-path band.
-    public bool SupportsHfDirectSampling => false;
+    // AUD-99: no HF unless a test says so (AUD-103's AM and SW idle sweeps).
+    public bool SupportsHfDirectSampling { get; init; }
 
-    public bool IsHfMode => false;
+    public bool IsHfMode => IsOpen && _hfMode;
 
-    public bool SetHfMode(bool on) => !on;
+    public bool SetHfMode(bool on)
+    {
+      Calls.Add($"SetHfMode:{on}");
+      if (on && !SupportsHfDirectSampling)
+      {
+        return false;
+      }
+      _hfMode = on;
+      return true;
+    }
 
     public event EventHandler<IqSamplesEventArgs>? SamplesAvailable
     {
@@ -522,10 +723,15 @@ public sealed class BandMapServiceBandTests : IDisposable
       return true;
     }
 
-    public void Close() => IsOpen = false;
+    public void Close()
+    {
+      IsOpen = false;
+      _hfMode = false;
+    }
 
     public bool SetFrequency(long frequencyHz)
     {
+      Calls.Add($"SetFrequency:{frequencyHz}");
       Tunes.Add(frequencyHz);
       _frequencyHz = frequencyHz;
       return true;
@@ -533,7 +739,11 @@ public sealed class BandMapServiceBandTests : IDisposable
 
     public long GetFrequency() => _frequencyHz;
 
-    public bool SetSampleRate(int sampleRate) => true;
+    public bool SetSampleRate(int sampleRate)
+    {
+      Calls.Add($"SetSampleRate:{sampleRate}");
+      return true;
+    }
 
     public int GetSampleRate() => DeviceSweepTuner.SweepSampleRate;
 

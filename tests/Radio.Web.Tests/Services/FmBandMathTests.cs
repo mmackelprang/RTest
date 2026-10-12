@@ -225,6 +225,23 @@ public class FmBandMathTests
   }
 
   [Fact]
+  public void Tiers_TheAmCrystalSpur_IsDrawnInTheNoiseColour_WhileACarrierBesideItIsNot()
+  {
+    // AUD-103: the box's AM pattern on a -50 floor. 960 kHz is the 28.8 MHz / 30 spur at +16 dB (fair
+    // by level); 970 kHz carries the 968 kHz carrier at +7 dB; 1030 kHz skywave at +8 dB.
+    List<BandMapChannelDto> am = Enumerable.Range(0, 119)
+      .Select(i => 530_000L + i * 10_000L)
+      .Select(hz => new BandMapChannelDto(hz, hz switch { 960_000 => -34f, 970_000 => -43f, 1_030_000 => -42f, _ => -50f }))
+      .ToList();
+
+    BandSignalTier[] tiers = FmBandMath.SignalTiers(am);
+
+    tiers[am.FindIndex(c => c.FrequencyHz == 960_000)].Should().Be(BandSignalTier.Noise);
+    tiers[am.FindIndex(c => c.FrequencyHz == 970_000)].Should().Be(BandSignalTier.Weak);
+    tiers[am.FindIndex(c => c.FrequencyHz == 1_030_000)].Should().Be(BandSignalTier.Weak);
+  }
+
+  [Fact]
   public void Tiers_AreInTheOrderGiven()
   {
     // Unsorted input: the tiers line up with the channels as passed, as NormalizeLevels' heights do.

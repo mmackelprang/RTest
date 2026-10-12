@@ -126,6 +126,15 @@ its tuner AGC holds empty channels at −18 to −26 dBFS in the channel. Proved
 receivable at the box); HF squelch stays bypassed. **Not fixed, follow-up:** NFM (Weather, VHF) still has no
 channel filter (`AUD-107`). Details: [`queue/AUD-101.md`](queue/AUD-101.md).
 
+**2026-10-12, `AUD-103` (on branch, pending box UAT): the band map covers AM and SW.** Discover, the BAND view
+and map-driven Scan now work on AM (530–1710 kHz at 10 kHz, the whole band) and on SW (one ITU broadcast segment
+at a time at 5 kHz, the one containing or nearest the radio's frequency, shown as `SW 31 m` with the segment's
+range). Both sweep paths run in HF direct sampling for AM/SW; a live sweep is refused when the radio is in the
+other mode. Whether AM/SW can be swept now reads the dongle's range (the same device the band list reads), so a
+dongle without HF still shows them as out of range. The 960 kHz crystal spur is measured and drawn but is never
+a station (no peak, no Scan stop). Not changed: the `UI-22` colour thresholds (on the box's passive antenna every
+real AM/SW signal measured so far would draw as *weak*). Details: [`queue/AUD-103.md`](queue/AUD-103.md).
+
 The "~2 days" estimate in the table below predates a code survey that
 found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the
 estimate. *History:* **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not
