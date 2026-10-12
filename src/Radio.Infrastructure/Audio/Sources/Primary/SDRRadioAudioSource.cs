@@ -632,9 +632,16 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
         $"The receiver failed to switch to the {band} band at {frequency.ToDisplayString()}");
     }
 
-    if (bandChanged)
+    // AUD-105 review: also when the step is not one the band allows. A frequency-only tune into
+    // another band keeps the old band's step (AUD-95), and re-selecting the band, which goes through
+    // here since AUD-105, is how a user gets the band's own step back.
+    if (bandChanged || !IsAllowedStep(_radioReceiver.CurrentBand, _frequencyStep.Hertz))
     {
       _frequencyStep = new Frequency(_radioReceiver.CurrentBand.DefaultStepHz);
+    }
+
+    if (bandChanged)
+    {
       MetricsCollector?.Increment("radio.band_changes", 1.0, new Dictionary<string, string>
       {
         ["band"] = band.ToString().ToLowerInvariant()

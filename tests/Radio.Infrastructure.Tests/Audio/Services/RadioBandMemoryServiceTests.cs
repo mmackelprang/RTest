@@ -220,4 +220,17 @@ public class RadioBandMemoryServiceTests
 
     Assert.Empty(_store.Entries);
   }
+
+  [Fact]
+  public async Task Set_IgnoresAFrequencyOutsideTheBand_KeepingTheLastInBandValue()
+  {
+    // AUD-105 review: a custom band is reported as FM, so leaving 400 MHz would overwrite FM's
+    // station with a value Get then ignores.
+    var service = CreateService();
+    await service.SetAsync(RadioBand.FM, Frequency.FromMegahertz(97.745));
+
+    await service.SetAsync(RadioBand.FM, Frequency.FromMegahertz(400));
+
+    Assert.Equal("97745000", _store.Entries["RadioBandMemory:LastFrequencyHzByBand:FM"]);
+  }
 }

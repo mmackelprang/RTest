@@ -20,7 +20,7 @@
     @* Meta stack mirrors the redesigned call/text rows: smart timestamp over the
        duration, so every feed kind shares the same right-aligned spine. *@
     <div class="list-item-meta-stack">
-      <span class="list-item-meta">@PhoneCallFormatting.FormatFeedTimestamp(Item.ReceivedAt.ToLocalTime())</span>
+      <span class="list-item-meta">@PhoneCallFormatting.FormatFeedTimestamp(ReceivedLocal, Clock.GetLocalNow().DateTime)</span>
       <span class="vm-row-duration">@DurationDisplay</span>
     </div>
     <RadzenIcon Icon="@(Expanded ? "expand_more" : "chevron_right")" />
@@ -44,7 +44,31 @@
   private string DisplayName => ResolvedName
     ?? (!string.IsNullOrWhiteSpace(Item.FromName) ? Item.FromName! : Item.FromNumber);
 
-  private bool IsRecent => (DateTime.UtcNow - Item.ReceivedAt) < TimeSpan.FromMinutes(30);
+  /// <summary>
+  /// The clock the row reads "now" and the local time zone from (TEST-12). A parameter rather than
+  /// <c>@inject</c> because neither host registers a <see cref="TimeProvider"/> — the same seam
+  /// <c>PresetBar.Clock</c> uses. Production leaves it at <see cref="TimeProvider.System"/>, whose
+  /// local zone is <see cref="TimeZoneInfo.Local"/>, so the timestamp renders as it did; tests pass a
+  /// <c>FakeTimeProvider</c> so the rendered timestamp does not depend on when the suite runs. (One
+  /// difference: an item whose <see cref="VoicemailItemDto.ReceivedAt"/> has kind
+  /// <see cref="DateTimeKind.Local"/> is now converted to UTC before the 30-minute "Transcript
+  /// pending" check, which it previously was not.)
+  /// </summary>
+  [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
+
+  /// <summary>
+  /// <see cref="VoicemailItemDto.ReceivedAt"/> in <see cref="Clock"/>'s local zone. A value whose
+  /// kind is <see cref="DateTimeKind.Unspecified"/> is read as UTC, as <c>DateTime.ToLocalTime</c>
+  /// (which this replaces) reads it; one of kind <see cref="DateTimeKind.Local"/> is the host's local
+  /// time and is converted to UTC with the host's zone.
+  /// </summary>
+  private DateTime ReceivedLocal => TimeZoneInfo.ConvertTimeFromUtc(ReceivedUtc, Clock.LocalTimeZone);
+
+  private DateTime ReceivedUtc => Item.ReceivedAt.Kind == DateTimeKind.Local
+    ? Item.ReceivedAt.ToUniversalTime()
+    : DateTime.SpecifyKind(Item.ReceivedAt, DateTimeKind.Utc);
+
+  private bool IsRecent => (Clock.GetUtcNow().UtcDateTime - ReceivedUtc) < TimeSpan.FromMinutes(30);
 
   private string Preview => !string.IsNullOrWhiteSpace(Item.Transcript)
     ? FirstLine(Item.Transcript!)

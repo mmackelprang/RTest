@@ -123,8 +123,8 @@ channel and decimate to 48 kHz, apply an AGC (max gain 30), and low-pass the aud
 half-bandwidth. `signalStrength` / `rssiDbu` on AM and SW are the in-channel level (`rssiDbu` ≈ in-channel
 dBFS, 0.6 dB steps); AIR keeps the wideband linear scale for its level, squelch and seek stop, because on the box
 its tuner AGC holds empty channels at −18 to −26 dBFS in the channel. Proved by synthetic tests (no station is
-receivable at the box); HF squelch stays bypassed. **Not fixed, follow-up:** NFM (Weather, VHF) still has no
-channel filter (`AUD-107`). Details: [`queue/AUD-101.md`](../archive/queue/AUD-101.md).
+receivable at the box); HF squelch stays bypassed. NFM (Weather, VHF) got the same channel filter in `AUD-107`
+(2026-10-12: flat to 6 kHz, −6 dB at 8 kHz, 48 kHz discriminator; level, squelch and seek keep the wideband scale). Details: [`queue/AUD-101.md`](../archive/queue/AUD-101.md).
 
 **2026-10-12, `AUD-103` (on branch, pending box UAT): the band map covers AM and SW.** Discover, the BAND view
 and map-driven Scan now work on AM (530–1710 kHz at 10 kHz, the whole band) and on SW (one ITU broadcast segment

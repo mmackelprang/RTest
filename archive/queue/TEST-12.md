@@ -1,6 +1,6 @@
 # `TEST-12` — `VoicemailRowTests.ZeroDuration_RendersEmDash` fails during the minute 10:00 (local) on the dev host's clock
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟢 **P3. Filed 2026-10-12 by the `AUD-101` Builder**, from a full-suite run that failed on it.
 
@@ -28,3 +28,12 @@ the assertion target the duration element rather than the whole markup. Test-onl
 ## Related
 
 None. Pre-existing; unrelated to `AUD-101`.
+
+## Shipped 2026-10-12 — [#805](https://github.com/mmackelprang/RTest/pull/805)
+
+- `VoicemailRow` takes `[Parameter] TimeProvider Clock`, defaulting to `TimeProvider.System`. It uses the clock for
+  "now", for the 30-minute recency check, and for the local zone.
+- The tests use a `FakeTimeProvider` and a fixed item time.
+- They assert on `.vm-row-duration` instead of the whole markup.
+- They pin the 10:00 case, the zone (UTC+05:30) and the pending window.
+- Mutation checks: 4 of 4 killed.

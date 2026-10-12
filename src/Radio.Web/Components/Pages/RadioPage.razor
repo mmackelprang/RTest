@@ -422,14 +422,14 @@
       {
          _radioState = _radioState with { Band = newBand };
          // Also update visible frequency limits immediately if possible, but bands have different ranges
-         // so current frequency might be invalid. The API will handle clamping.
+         // so current frequency might be invalid. The API tunes the band's remembered frequency (AUD-105).
          // We'll trust the eventual state update for frequency.
       }
 
       var success = await RadioApi.SetBandAsync(newBand);
       Logger.LogDebug("SetBandAsync result: {Success}", success);
 
-      // Trigger a reload to get the clamped frequency and step immediately
+      // Trigger a reload to get the band's frequency and step immediately
       if (success)
       {
           await LoadRadioStateAsync();

@@ -121,7 +121,25 @@ internal sealed class FakeRadioSource : IAudioSource, IRadioControl
   public Task SetEqualizerModeAsync(RadioEqualizerMode mode, CancellationToken cancellationToken = default) => Task.CompletedTask;
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
   public Task TogglePowerStateAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-  public Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default) => Task.CompletedTask;
+  /// <summary>
+  /// Records the band in <see cref="BandsSet"/> and, unless <see cref="IgnoresBandChanges"/>, moves
+  /// to the band and records the frequency in <see cref="FrequenciesSet"/>. A tuner that ignores band
+  /// changes ignores the whole tune (it cannot tune a frequency in a band it did not switch to).
+  /// </summary>
+  public Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
+  {
+    BandsSet.Add(band);
+    _log?.Add($"TuneInBand:{band}:{frequency.Hertz}");
+
+    if (!IgnoresBandChanges)
+    {
+      FrequenciesSet.Add(frequency);
+      CurrentBand = band;
+      CurrentFrequency = frequency;
+    }
+
+    return Task.CompletedTask;
+  }
 
   public Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default)
   {
@@ -288,6 +306,9 @@ internal sealed class FakeBandMemory : IRadioBandMemory
 
   public List<(RadioBand Band, Frequency Frequency)> Writes { get; } = [];
 
+  /// <summary>When set, each write is also logged as <c>Remember:{band}:{hz}</c>, to order it against the radio's calls.</summary>
+  public CallLog? Log { get; set; }
+
   public Task<Frequency?> GetAsync(RadioBand band, CancellationToken cancellationToken = default)
   {
     if (Remembered.TryGetValue(band, out var remembered))
@@ -301,6 +322,7 @@ internal sealed class FakeBandMemory : IRadioBandMemory
   public Task SetAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
   {
     Writes.Add((band, frequency));
+    Log?.Add($"Remember:{band}:{frequency.Hertz}");
     Remembered[band] = frequency;
     return Task.CompletedTask;
   }

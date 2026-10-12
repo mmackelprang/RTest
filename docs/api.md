@@ -1054,7 +1054,11 @@ Steps the radio frequency down by one step (based on current sub-band setting).
 
 ### POST /api/radio/band
 
-Switches the radio band (AM/FM/WB/VHF/SW).
+Switches the radio band (AM/FM/WB/VHF/SW/AIR) and tunes the band's remembered frequency, or the band's default
+when nothing is remembered (`AUD-105`). The frequency on the band being left is remembered first, and a running
+seek is stopped. The change is one in-band tune, so a remembered frequency that also lies in another band (VHF
+contains FM, AIR and WB) stays on the band asked for. The step becomes the band's default when the band changes,
+or when the current step is not one the band allows. The encoder's SOURCE selector makes the same change.
 
 **Request Body:**
 
@@ -1071,6 +1075,8 @@ Switches the radio band (AM/FM/WB/VHF/SW).
 
 **Error Responses:**
 - `400 Bad Request` - Radio not active or invalid band value
+- `409 Conflict` - AM or SW on a device without HF direct sampling (`AUD-99`)
+- `503 Service Unavailable` - The tuner refused the band change at the band's frequency (`AUD-99`)
 - `500 Internal Server Error` - Failed to set band
 
 ---

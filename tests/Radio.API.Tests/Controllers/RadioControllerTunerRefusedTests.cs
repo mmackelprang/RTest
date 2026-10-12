@@ -46,7 +46,7 @@ public class RadioControllerTunerRefusedTests
     Mock<IAudioEngine> engine = new();
     engine.Setup(e => e.GetMasterMixer()).Returns(mixer.Object);
     _controller = new RadioController(
-      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>());
+      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>(), Mock.Of<IRadioBandMemory>());
   }
 
   private static ProblemDetails Assert503(ActionResult<RadioStateDto> result)
@@ -121,7 +121,7 @@ public class RadioControllerTunerRefusedTests
     Mock<IAudioEngine> engine = new();
     engine.Setup(e => e.GetMasterMixer()).Returns(mixer.Object);
     return new RadioController(
-      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>());
+      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>(), Mock.Of<IRadioBandMemory>());
   }
 
   [Fact]
@@ -160,7 +160,7 @@ public class RadioControllerTunerRefusedTests
         "Q", "Auto", IsHfMode: true, IsInUse: true, 100_000, 1_766_000_000),
     });
     RadioController controller = new(
-      NullLogger<RadioController>.Instance, Mock.Of<IAudioEngine>(), Mock.Of<IRadioPresetService>(), factory.Object);
+      NullLogger<RadioController>.Instance, Mock.Of<IAudioEngine>(), Mock.Of<IRadioPresetService>(), factory.Object, Mock.Of<IRadioBandMemory>());
 
     ActionResult<RadioDeviceListDto> result = controller.GetAvailableDevices();
 
@@ -187,7 +187,7 @@ public class RadioControllerTunerRefusedTests
     Mock<IAudioEngine> engine = new();
     engine.Setup(e => e.GetMasterMixer()).Returns(mixer.Object);
     RadioController controller = new(
-      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>());
+      NullLogger<RadioController>.Instance, engine.Object, Mock.Of<IRadioPresetService>(), Mock.Of<IRadioFactory>(), Mock.Of<IRadioBandMemory>());
 
     ActionResult<RadioStateDto> result = await controller.SetBand(new SetBandRequest { Band = "AM" });
 

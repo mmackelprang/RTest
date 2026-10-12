@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (131)
+## Shipped rows (134)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3641,3 +3641,45 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-104.md`](AUD-104.md)**
 
 ✅ **CLOSED 2026-10-11, NO CODE CHANGE — owner: *"Same as FM"*.** AM and SW fingerprint exactly as FM does today; no gating, no flag. Ready to archive. — _(Was:)_ 🟢 **NEW 2026-10-11 — fingerprinting on AM/SW. ⛔ OWNER DECISION FIRST.** The radio always asks for a lookup (`SoundFlowAudioTap.cs:136-137`) and, as an unknown-start source under #797, uses about 240 calls/hour, the whole cap, on mostly-talk AM and SW. Options in the dossier (off, slower, unchanged, per-band config). The Planner suggests off on AM/SW behind a flag. — [detail](AUD-104.md)
+
+### AUD-105 — POST /api/radio/band restores the band's remembered frequency, not a band edge
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#805](https://github.com/mmackelprang/RTest/pull/805) — box UAT on the branch build `bc94f65` (dossier). The same pattern in startup restore and preset recall is filed as `AUD-108`. |
+| Plan | _plan TBD: one shared band-recall path for the API and the encoder; coordinate with `AUD-95` (step) and `AUD-102` (edges)_ |
+| Spec / handoff | _no spec doc_ |
+| Depends on | — |
+| Branch | `fix/aud-105-band-post-recall` (suggested) |
+
+**Detail: [`queue/AUD-105.md`](AUD-105.md)**
+
+🟢 **NEW 2026-10-11 (MEASURED in the `AUD-99` box UAT; not caused by `AUD-99`) — `POST /api/radio/band` lands on a band edge, not the band's remembered frequency.** FM 97.745 → AM gave **1710 kHz**; SW → FM gave **87.5 MHz**, and the owner's station had to be restored by hand. Band memory (`RadioBandMemoryService`) is used by the encoder selectors and preferences, not by `RadioController.SetBand`. Where the edge value comes from is not yet traced. — [detail](AUD-105.md)
+
+### TEST-12 — VoicemailRowTests no longer depend on the time of day
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#805](https://github.com/mmackelprang/RTest/pull/805). |
+| Plan | _plan TBD: a fixed timestamp in `Vm(...)`, or assert on the duration element only_ |
+| Spec / handoff | _no spec doc_ |
+| Depends on | — |
+| Branch | `fix/test-12-voicemail-row-clock` (suggested) |
+
+**Detail: [`queue/TEST-12.md`](TEST-12.md)**
+
+🟢 **NEW 2026-10-12 (MEASURED once in the `AUD-101` full run; cause read from the test) — `VoicemailRowTests.ZeroDuration_RendersEmDash` fails during the minute 10:00 local time.** The item's time is `DateTime.UtcNow`, rendered as local time; `10:00 PM` contains the forbidden substring `0:00`. Passed when re-run at 22:03. Test-only. — [detail](TEST-12.md)
+
+### AUD-107 — NFM (Weather, VHF) gets the IQ channel filter AUD-101 built for AM
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#805](https://github.com/mmackelprang/RTest/pull/805) — synthetic tests and box UAT on `bc94f65` (dossier); audio quality by ear is the owner's check (the master was muted). |
+| Plan | _plan TBD. No listener has reported a fault on Weather or VHF_ |
+| Spec / handoff | [`AUD-101`](AUD-101.md) |
+| Depends on | **`AUD-101`** |
+| Branch | `feat/aud-107-nfm-channel-filter` (suggested) |
+
+**Detail: [`queue/AUD-107.md`](AUD-107.md)**
+
+🟢 **NEW 2026-10-12 (P3; filed by the `AUD-101` fixer as `AUD-101`'s out-of-scope follow-up; read from code, no box evidence yet) — NFM (Weather, VHF) has no IQ channel filter.** `CalculateRates` gives SDR rate = demod rate = 240 kHz for a 12.5 kHz NFM channel, so no IQ decimator is built and the FM demodulator sees the whole ±120 kHz capture: the defect `AUD-101` fixed for AM. Pattern: `AUD-101`'s `AmChannelizer` (mix, filter, decimate in one pass). ⚠ Keep the wideband signal-strength scale on these tuner-mode bands (`AUD-101` had to move AIR back to it after the box). — [detail](AUD-107.md)

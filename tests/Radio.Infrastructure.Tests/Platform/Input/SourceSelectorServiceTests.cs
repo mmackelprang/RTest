@@ -317,6 +317,43 @@ public class SourceSelectorServiceTests
   }
 
   [Fact]
+  public void CommitBand_RemembersTheOutgoingBandsFrequency_BeforeChangingBand()
+  {
+    // AUD-105: the preferences loop records the dial only every 30 s, so a station tuned just
+    // before a band change would otherwise be lost on the way back. The band change records it.
+    using var h = new Harness();
+    var radio = ActiveRadio(h);
+    radio.CurrentFrequency = Frequency.FromMegahertz(97.745);
+    h.BandMemory.Remembered[RadioBand.AM] = Frequency.FromKilohertz(1130);
+
+    h.HighlightRow("band:AM");
+    h.Selector.Press();
+
+    Assert.Equal(new[] { (RadioBand.FM, 97_745_000L) }, h.BandMemory.Writes.Select(w => (w.Band, w.Frequency.Hertz)).ToArray());
+    Assert.Equal(new[] { 1_130_000L }, radio.FrequenciesSet.Select(f => f.Hertz).ToArray());
+  }
+
+  [Fact]
+  public void CommitBand_DuringASeek_StopsTheSeekBeforeRememberingTheFrequency()
+  {
+    using var h = new Harness();
+    var radio = ActiveRadio(h);
+    radio.IsScanning = true;
+    radio.CurrentFrequency = Frequency.FromMegahertz(97.745);
+    h.BandMemory.Log = h.Log;
+    h.BandMemory.Remembered[RadioBand.AM] = Frequency.FromKilohertz(1130);
+    int before = h.Log.Entries.Count;
+
+    h.HighlightRow("band:AM");
+    h.Selector.Press();
+
+    Assert.False(radio.IsScanning);
+    Assert.Equal(
+      new[] { "StopScan", "Remember:FM:97745000", "TuneInBand:AM:1130000" },
+      h.Log.Entries.Skip(before).ToArray());
+  }
+
+  [Fact]
   public void CommitBand_FallsBackToTheBandDefault_WhenNothingIsRemembered()
   {
     using var h = new Harness();
@@ -335,7 +372,8 @@ public class SourceSelectorServiceTests
   public void CommitBand_FromAnotherSource_ActivatesRadioThenSetsBandThenFrequency()
   {
     // D7 requirement 2, asserted in order: the source has to exist before the band can be set on
-    // it, and the band has to be set before that band's frequency means anything.
+    // it, and the band has to be set before that band's frequency means anything. Since AUD-105
+    // the band and its frequency are one in-band tune (RadioBandSwitch).
     using var h = new Harness();
     var bluetooth = new FakePrimarySource(AudioSourceType.Bluetooth, "Phone");
     h.Audio.Cached[AudioSourceType.Bluetooth] = bluetooth;
@@ -352,7 +390,7 @@ public class SourceSelectorServiceTests
     h.Selector.Press();
 
     Assert.Equal(
-      new[] { "GetOrCreate:Radio", "SetBand:AM", "SetFrequency:1130000" },
+      new[] { "GetOrCreate:Radio", "TuneInBand:AM:1130000" },
       h.Log.Entries.ToArray());
   }
 
