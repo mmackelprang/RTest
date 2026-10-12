@@ -8,7 +8,10 @@ namespace RTLSDRCore.Tests.Sweep;
 /// <summary>AUD-91: the per-band sweep plans.</summary>
 public class BandSweepPlansTests
 {
-  public static TheoryData<BandType> NarrowbandBands => new() { BandType.Weather, BandType.Aircraft, BandType.VHF };
+  public static TheoryData<BandType> NarrowbandBands => new()
+  {
+    BandType.Weather, BandType.Aircraft, BandType.VHF, BandType.AM, BandType.Shortwave,
+  };
 
   [Fact]
   public void Fm_IsTheAud76Plan_OneTunePerChannelCentredOnIt()
@@ -181,7 +184,7 @@ public class BandSweepPlansTests
   }
 
   [Fact]
-  public void Am_Is119ChannelsAt10Khz_In6Tunes_DisplayedOverTheBand()
+  public void Am_Is119ChannelsAt10Khz_In14Tunes_DisplayedOverTheBand()
   {
     BandSweepPlan plan = BandSweepPlans.For(BandType.AM, 1_000_000)!;
 
@@ -190,11 +193,11 @@ public class BandSweepPlansTests
     Assert.Equal(530_000, plan.Channels[0]);
     Assert.Equal(1_710_000, plan.Channels[^1]);
     Assert.Equal(10_000, plan.ChannelSpacingHz);
-    Assert.Equal(20, BandSweepPlans.NarrowbandGroupSize(10_000));
-    Assert.Equal(new[] { 20, 20, 20, 20, 20, 19 }, plan.Tunes.Select(t => t.ChannelHz.Count));
-    // Even groups centre between their middle channels; the odd last one half a spacing above its middle.
-    Assert.Equal(625_000, plan.Tunes[0].CentreHz);
-    Assert.Equal(1_625_000, plan.Tunes[^1].CentreHz);
+    // AUD-103 review M2: 9 channels per tune, each tune 16 kHz (window 4 + clearance 12) below its first.
+    Assert.Equal(9, BandSweepPlans.HfGroupSize(10_000));
+    Assert.Equal(Enumerable.Repeat(9, 13).Append(2), plan.Tunes.Select(t => t.ChannelHz.Count));
+    Assert.Equal(514_000, plan.Tunes[0].CentreHz);
+    Assert.Equal(1_684_000, plan.Tunes[^1].CentreHz);
     Assert.Equal(530_000, plan.DisplayMinHz);
     Assert.Equal(1_710_000, plan.DisplayMaxHz);
     // The radio's frequency does not move the AM plan.
@@ -202,14 +205,15 @@ public class BandSweepPlansTests
   }
 
   [Theory]
-  [InlineData(9_600_000L, "31 m", 9_400_000L, 9_900_000L, 101, 3)]     // inside a segment
-  [InlineData(5_000_000L, "60 m", 4_750_000L, 5_060_000L, 63, 2)]      // WWV, inside 60 m
-  [InlineData(8_000_000L, "41 m", 7_200_000L, 7_450_000L, 51, 2)]      // between 41 m (550 kHz) and 31 m (1.4 MHz)
-  [InlineData(9_000_000L, "31 m", 9_400_000L, 9_900_000L, 101, 3)]     // between, nearer 31 m (400 kHz)
-  [InlineData(27_000_000L, "11 m", 25_670_000L, 26_100_000L, 87, 3)]   // above the top segment
-  [InlineData(1_715_000L, "120 m", 2_300_000L, 2_495_000L, 40, 2)]     // the SW band memory's no-memory default
-  [InlineData(null, "120 m", 2_300_000L, 2_495_000L, 40, 2)]           // radio not on SW, nothing remembered
-  [InlineData(1_000_000L, "120 m", 2_300_000L, 2_495_000L, 40, 2)]     // not an SW frequency: treated as none
+  [InlineData(9_600_000L, "31 m", 9_400_000L, 9_900_000L, 101, 6)]     // inside a segment
+  [InlineData(5_000_000L, "60 m", 4_750_000L, 5_060_000L, 63, 4)]      // WWV, inside 60 m
+  [InlineData(8_000_000L, "41 m", 7_200_000L, 7_450_000L, 51, 3)]      // between 41 m (550 kHz) and 31 m (1.4 MHz)
+  [InlineData(9_000_000L, "31 m", 9_400_000L, 9_900_000L, 101, 6)]     // between, nearer 31 m (400 kHz)
+  [InlineData(27_000_000L, "11 m", 25_670_000L, 26_100_000L, 87, 6)]   // above the top segment
+  [InlineData(15_400_000L, "19 m", 15_100_000L, 15_800_000L, 141, 9)]  // the widest segment
+  [InlineData(1_715_000L, "120 m", 2_300_000L, 2_495_000L, 40, 3)]     // the SW band memory's no-memory default
+  [InlineData(null, "120 m", 2_300_000L, 2_495_000L, 40, 3)]           // radio not on SW, nothing remembered
+  [InlineData(1_000_000L, "120 m", 2_300_000L, 2_495_000L, 40, 3)]     // not an SW frequency: treated as none
   public void Shortwave_IsTheBroadcastSegmentContainingOrNearestTheFrequency_At5Khz(
     long? currentHz, string segment, long firstHz, long lastHz, int channels, int tunes)
   {
@@ -224,7 +228,7 @@ public class BandSweepPlansTests
     Assert.Equal(channels, plan.Channels.Count);
     Assert.Equal(tunes, plan.Tunes.Count);
     Assert.Equal(5_000, plan.ChannelSpacingHz);
-    Assert.Equal(38, BandSweepPlans.NarrowbandGroupSize(5_000));
+    Assert.Equal(17, BandSweepPlans.HfGroupSize(5_000));
     Assert.All(plan.Channels, hz => Assert.Equal(0, hz % 5_000));
   }
 
@@ -267,11 +271,13 @@ public class BandSweepPlansTests
 
   [Theory]
   [MemberData(nameof(HfPlans))]
-  public void AmAndSw_NoCentreIsOnAChannel_EveryWindowFitsTheCapture_AndEveryCarrierIsOutsideTheDcExclusion(
+  public void AmAndSw_NoWindowComesWithinTheDcClearanceOfItsTuneCentre_AndEveryWindowFitsTheCapture(
     BandType band, long? currentHz)
   {
+    // AUD-103 review M2: in HF direct sampling the DC spike sits on every tune centre.
     BandSweepPlan plan = BandSweepPlans.For(band, currentHz)!;
 
+    Assert.Equal(12_000, BandSweepPlans.HfDcClearanceHz);
     Assert.Equal(BandSweepPlans.NarrowbandHalfWindowHz, plan.HalfWindowHz);
     Assert.Equal(BandSweepPlans.NarrowbandDcExcludeHz, plan.DcExcludeHz);
     Assert.Equal(plan.Channels, plan.Tunes.SelectMany(t => t.ChannelHz));
@@ -283,13 +289,62 @@ public class BandSweepPlansTests
         long offset = Math.Abs(hz - tune.CentreHz);
         Assert.True(offset + plan.HalfWindowHz <= BandSweepPlans.NarrowbandMaxOffsetHz,
           $"{hz} Hz window reaches {offset + plan.HalfWindowHz} Hz from centre {tune.CentreHz}");
-        // Half a spacing at least: 5 kHz on AM, 2.5 kHz on SW. Unlike WB/AIR/VHF the ±4 kHz window
-        // of the nearest channels does reach into the ±1 kHz DC exclusion (exactly to its edge on
-        // AM); those bins are not measured, and the carrier itself always is.
-        Assert.True(offset >= plan.ChannelSpacingHz / 2 && offset > plan.DcExcludeHz,
-          $"{hz} Hz is only {offset} Hz from centre {tune.CentreHz}");
+        Assert.True(offset - plan.HalfWindowHz >= BandSweepPlans.HfDcClearanceHz,
+          $"{hz} Hz window comes within {offset - plan.HalfWindowHz} Hz of centre {tune.CentreHz}");
       });
     });
+  }
+
+  [Fact]
+  public void Am_CoversEveryChannelFrom530To1710Khz_ExactlyOnce()
+  {
+    BandSweepPlan plan = BandSweepPlans.For(BandType.AM, null)!;
+    long[] expected = Enumerable.Range(0, 119).Select(i => 530_000L + i * 10_000L).ToArray();
+
+    List<long> measured = plan.Tunes.SelectMany(t => t.ChannelHz).ToList();
+    Assert.Equal(expected, measured.Order());
+    Assert.Equal(measured.Count, measured.Distinct().Count());
+  }
+
+  [Theory]
+  [InlineData(10_000L, 9)]
+  [InlineData(5_000L, 17)]
+  public void HfGroupSize_MatchesTheClearance(long spacingHz, int expected)
+  {
+    Assert.Equal(expected, BandSweepPlans.HfGroupSize(spacingHz));
+  }
+
+  public static TheoryData<BandType, long?> NonHfNarrowbandPlans => new()
+  {
+    { BandType.Weather, null },
+    { BandType.Aircraft, null },
+    { BandType.VHF, null },
+    { BandType.VHF, 146_523_000 },
+    { BandType.VHF, 299_900_000 },
+  };
+
+  [Theory]
+  [MemberData(nameof(NonHfNarrowbandPlans))]
+  public void NonHfNarrowbandPlans_AreTheAud91Grouping_Unchanged(BandType band, long? currentHz)
+  {
+    // AUD-103 review M2 changed AM and SW only. The AUD-91 grouping, written out independently here:
+    // runs of NarrowbandGroupSize channels, an even run centred between its ends, an odd one half a
+    // spacing above its middle channel.
+    BandSweepPlan plan = BandSweepPlans.For(band, currentHz)!;
+    long spacing = plan.ChannelSpacingHz;
+    int size = BandSweepPlans.NarrowbandGroupSize(spacing);
+    List<(long Centre, long[] Channels)> expected = new();
+    for (int start = 0; start < plan.Channels.Count; start += size)
+    {
+      long[] run = plan.Channels.Skip(start).Take(size).ToArray();
+      long centre = run.Length % 2 == 0 ? (run[0] + run[^1]) / 2 : run[run.Length / 2] + spacing / 2;
+      expected.Add((centre, run));
+    }
+
+    Assert.Equal(expected.Select(e => e.Centre), plan.Tunes.Select(t => t.CentreHz));
+    Assert.Equal(expected.Select(e => e.Channels.Length), plan.Tunes.Select(t => t.ChannelHz.Count));
+    Assert.Equal(BandSweepPlans.NarrowbandHalfWindowHz, plan.HalfWindowHz);
+    Assert.Equal(BandSweepPlans.NarrowbandDcExcludeHz, plan.DcExcludeHz);
   }
 
   [Theory]

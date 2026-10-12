@@ -132,8 +132,16 @@ at a time at 5 kHz, the one containing or nearest the radio's frequency, shown a
 range). Both sweep paths run in HF direct sampling for AM/SW; a live sweep is refused when the radio is in the
 other mode. Whether AM/SW can be swept now reads the dongle's range (the same device the band list reads), so a
 dongle without HF still shows them as out of range. The 960 kHz crystal spur is measured and drawn but is never
-a station (no peak, no Scan stop). Not changed: the `UI-22` colour thresholds (on the box's passive antenna every
-real AM/SW signal measured so far would draw as *weak*). Details: [`queue/AUD-103.md`](queue/AUD-103.md).
+a station: it is no peak, map-driven Scan does not hop to it, the live seek steps past it without stopping, a seek
+stop on it is not recorded (so no "found by scan" ring), and it does not set the bar-height scale. The spur table
+is frequency-only and applies to every dongle (every RTL2832U board runs from a 28.8 MHz reference; only the NESDR
+SMArt v5 has been measured); 1030 kHz and 28.8 MHz ÷ 28 = 1028.6 kHz are deliberately not in it. AM/SW sweep
+tunes keep every channel's window at least 12 kHz from the tune centre, where the direct-sampling DC spike sits
+(AM: 14 tunes, about 3 s; SW: 2 to 9 tunes per segment). **Known limitation, not fixed:** with no HF front-end
+filter, direct sampling at 28.8 MHz folds `28.8 MHz − f` onto `f`, so a map of an upper SW segment can show
+images of lower ones (31 m appears across 15 m, 41 m at the bottom of 13 m); a low-pass filter at the antenna is
+the fix. Not changed: the `UI-22` colour thresholds (on the box's passive antenna every real AM/SW signal measured
+so far would draw as *weak*). Details: [`queue/AUD-103.md`](queue/AUD-103.md).
 
 The "~2 days" estimate in the table below predates a code survey that
 found the AM path has no channel filter, never applies its AGC and swallows tune failures. Read the rows, not the

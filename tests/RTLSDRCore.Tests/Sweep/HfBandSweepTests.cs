@@ -97,8 +97,9 @@ public class HfBandSweepTests
     List<long> tunes = calls.Where(c => c.StartsWith("SetFrequency:", StringComparison.Ordinal))
       .Select(c => long.Parse(c["SetFrequency:".Length..], System.Globalization.CultureInfo.InvariantCulture))
       .ToList();
-    // Every plan centre, in order, then the radio's own (offset) centre once the sweep ends.
-    Assert.Equal(plan.Tunes.Select(t => t.CentreHz).Append(device.GetFrequency()), tunes);
+    // Every plan centre, in order, unshifted; then the retune to the radio's own frequency, which on
+    // AM and SW is offset 60 kHz below it (AUD-101), written out rather than read back from the device.
+    Assert.Equal(plan.Tunes.Select(t => t.CentreHz).Append(radioHz - 60_000), tunes);
     // The sweep's manual gain is set once before the hops, not per tune.
     Assert.Single(calls.TakeWhile(c => !c.StartsWith("SetFrequency:", StringComparison.Ordinal)),
       c => c.StartsWith("SetGain:", StringComparison.Ordinal));

@@ -136,8 +136,8 @@ public static class AudioServiceExtensions
       () => sp.GetRequiredService<IAudioManager>().GetCachedSource(AudioSourceType.Radio) as ILiveBandSweeper,
       () => sp.GetService<ISleepService>(),
       // AUD-99: the idle sweep's device gets the same RTLSDR:HfDirectSampling decision as the radio's.
-      deviceFactory: () => SdrHfConfiguration.CreateFirstRtlSdrOrNull(
-        SdrHfConfiguration.Read(sp.GetService<IConfiguration>() ?? configuration, sp.GetService<ILogger<BandMapService>>())),
+      deviceFactory: SdrHfConfiguration.IdleSweepDeviceFactory(
+        () => sp.GetService<IConfiguration>() ?? configuration, sp.GetService<ILogger<BandMapService>>()),
       timeProvider: sp.GetService<TimeProvider>(),
       currentTuning: () =>
         sp.GetRequiredService<IAudioManager>().GetCachedSource(AudioSourceType.Radio) is Radio.Core.Interfaces.Audio.IRadioControl radio

@@ -120,6 +120,13 @@ public static class FmBandMath
   /// <see cref="DisplayFloorPercentile"/> level maps to 0 and the strongest channel to 1, over a span of
   /// at least <see cref="MinDisplaySpanDb"/>; values outside are clamped.
   /// </summary>
+  /// <remarks>
+  /// AUD-103: known device spurs (<see cref="Radio.Core.Models.BandMapStations.IsKnownSpur"/>) are left
+  /// out of the floor and the maximum, as <see cref="SignalTiers"/> leaves them out of its median, so a
+  /// spur stronger than every station does not shrink the stations' bars. A spur's own bar is still
+  /// drawn, clamped to full height when it is above the strongest station. A map of nothing but spurs is
+  /// scaled by all its channels.
+  /// </remarks>
   public static double[] NormalizeLevels(IReadOnlyList<BandMapChannelDto> channels)
   {
     if (channels.Count == 0)
@@ -128,8 +135,17 @@ public static class FmBandMath
     }
 
     double[] levels = channels.Select(c => (double)c.LevelDbfs).ToArray();
-    double floor = Percentile(levels, DisplayFloorPercentile);
-    double span = Math.Max(levels.Max() - floor, MinDisplaySpanDb);
+    double[] scale = channels
+      .Where(c => !Radio.Core.Models.BandMapStations.IsKnownSpur(c.FrequencyHz))
+      .Select(c => (double)c.LevelDbfs)
+      .ToArray();
+    if (scale.Length == 0)
+    {
+      scale = levels;
+    }
+
+    double floor = Percentile(scale, DisplayFloorPercentile);
+    double span = Math.Max(scale.Max() - floor, MinDisplaySpanDb);
     return levels.Select(l => Math.Clamp((l - floor) / span, 0.0, 1.0)).ToArray();
   }
 

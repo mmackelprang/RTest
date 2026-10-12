@@ -143,19 +143,40 @@ public sealed class BandMapServiceScanTests : IDisposable
   }
 
   [Fact]
-  public void GetScanStations_ASeekStopOnTheSpur_IsNotAStation()
+  public void RecordSeekStation_OnTheSpur_IsNotRecorded_SoNoRingIsDrawn()
   {
+    // AUD-103 review M1: a seek stop on a known spur is not seek history (the BAND view draws a ring
+    // for each seek station); one beside it is.
     Device = DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
     Tuning = new BandMapTuning("AM", 1_000_000);
     SeedHfMap(RTLSDRCore.Enums.BandType.AM, null, (1_030_000, -42f));
     BandMapService service = CreateService();
     service.RecordSeekStation("AM", 960_000, 0.5f);
+    service.RecordSeekStation("AM", 962_000, 0.5f);   // the table's tolerance edge
     service.RecordSeekStation("AM", 1_400_000, 0.3f);
 
     ScanStationList list = service.GetScanStations("AM", 700_000, out _)!;
 
-    // Recorded (the seek did stop there), but not hopped to.
-    Assert.Equal(new long[] { 960_000, 1_400_000 }, service.GetSeekStations("AM").Select(s => s.FrequencyHz));
+    Assert.Equal(new long[] { 1_400_000 }, service.GetSeekStations("AM").Select(s => s.FrequencyHz));
+    Assert.Equal(new long[] { 1_030_000, 1_400_000 }, list.StationsHz);
+  }
+
+  [Fact]
+  public void GetScanStations_AStoredSeekStationOnTheSpur_IsNotAStation()
+  {
+    // A seek file written before the spur was dropped at record time still does not make it a stop.
+    Device = DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    Tuning = new BandMapTuning("AM", 1_000_000);
+    SeedHfMap(RTLSDRCore.Enums.BandType.AM, null, (1_030_000, -42f));
+    Store.SaveSeekStations(new BandMapSeekStations
+    {
+      Band = "AM",
+      Stations = new[] { new BandMapSeekStation(960_000, 0.5f, Now), new BandMapSeekStation(1_400_000, 0.3f, Now) },
+    });
+    BandMapService service = CreateService();
+
+    ScanStationList list = service.GetScanStations("AM", 700_000, out _)!;
+
     Assert.Equal(new long[] { 1_030_000, 1_400_000 }, list.StationsHz);
   }
 

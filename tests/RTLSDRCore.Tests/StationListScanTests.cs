@@ -152,6 +152,44 @@ public class StationListScanTests
   }
 
   [Fact]
+  public void LiveSeek_StepsPastAFrequencySeekSkipsMarks_WithoutStoppingOrRaisingSeekStationFound()
+  {
+    // AUD-103 review M1: threshold 0, so every step would be a stop; the skipped one is tuned (the
+    // seek passes through it) but is neither a stop nor an observation.
+    const long skipped = 103_000_000;
+    using RadioReceiver receiver = StartedReceiver(98_000_000);
+    receiver.SeekSkips = hz => hz == skipped;
+    List<long> tunes = new();
+    List<long> found = new();
+    receiver.FrequencyChanged += (_, e) => tunes.Add(e.NewFrequency);
+    receiver.SeekStationFound += (_, e) => found.Add(e.FrequencyHz);
+
+    Bounded(receiver, () => receiver.ScanFrequencyUp(stepHz: 5_000_000, signalThreshold: 0f, dwellTimeMs: 0));
+
+    Assert.Contains(skipped, tunes);
+    Assert.DoesNotContain(skipped, found);
+    Assert.Equal(tunes.Where(hz => hz != skipped), found);
+    receiver.Shutdown();
+  }
+
+  [Fact]
+  public void LiveSeek_ASeekSkipsPredicateThatThrows_SkipsNothing()
+  {
+    using RadioReceiver receiver = StartedReceiver(98_000_000);
+    receiver.SeekSkips = _ => throw new InvalidOperationException("table unreadable");
+    List<long> tunes = new();
+    List<long> found = new();
+    receiver.FrequencyChanged += (_, e) => tunes.Add(e.NewFrequency);
+    receiver.SeekStationFound += (_, e) => found.Add(e.FrequencyHz);
+
+    Bounded(receiver, () => receiver.ScanFrequencyUp(stepHz: 5_000_000, signalThreshold: 0f, dwellTimeMs: 0));
+
+    Assert.NotEmpty(found);
+    Assert.Equal(tunes, found);
+    receiver.Shutdown();
+  }
+
+  [Fact]
   public void LiveSeek_AHandlerThatThrows_DoesNotEndTheScan()
   {
     using RadioReceiver receiver = StartedReceiver(98_000_000);

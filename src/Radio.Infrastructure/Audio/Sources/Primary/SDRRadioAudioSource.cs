@@ -120,6 +120,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     // AUD-100: a live seek's stops go onto the band map as seek-observed stations.
     _radioReceiver.SeekStationFound += OnSeekStationFound;
 
+    // AUD-103: a live seek steps past a known device spur (the band map's measured spur table, the
+    // one list the peak rule, Scan and the BAND view's colours also read) instead of stopping on it.
+    _radioReceiver.SeekSkips = Radio.Core.Models.BandMapStations.IsKnownSpur;
+
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
     {

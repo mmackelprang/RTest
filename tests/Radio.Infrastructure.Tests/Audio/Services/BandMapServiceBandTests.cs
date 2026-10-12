@@ -432,8 +432,8 @@ public sealed class BandMapServiceBandTests : IDisposable
   // ── AUD-103: AM and SW ───────────────────────────────────────────────────
 
   [Theory]
-  [InlineData("AM", 119, 6, 530_000L)]
-  [InlineData("SW", 40, 2, 2_300_000L)]
+  [InlineData("AM", 119, 14, 530_000L)]
+  [InlineData("SW", 40, 3, 2_300_000L)]
   public async Task Request_ForAnHfBand_OnTheIdlePath_SwitchesHfOnBeforeTheSampleRateAndAnyTune(
     string band, int channels, int tunes, long firstHz)
   {
@@ -523,8 +523,10 @@ public sealed class BandMapServiceBandTests : IDisposable
     Assert.All(BandPresets.AllBands, b => Assert.Null(service.UnavailableReason(b.Type)));
     Assert.NotNull(service.GetPlan("AM"));
 
-    // Without it, AM and SW cannot, with the sentence the BAND view has always shown.
+    // Without it, AM and SW cannot, with the sentence the BAND view has always shown. (The device is
+    // read again once the last read is ReceivingDeviceCacheDuration old.)
     Device = BandMapServiceScanTests.DeviceWithFloor(RtlSdrDevice.TunerMinFrequencyHz);
+    _time.Advance(BandMapService.ReceivingDeviceCacheDuration);
     Assert.Equal(
       "The AM Broadcast band (530–1,710 kHz) is below this tuner's 24 MHz lower limit and cannot be scanned.",
       service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
@@ -536,9 +538,60 @@ public sealed class BandMapServiceBandTests : IDisposable
 
     // No device known: no device limit; a custom band still has its sentence.
     Device = null;
+    _time.Advance(BandMapService.ReceivingDeviceCacheDuration);
     Assert.Null(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
     Assert.Equal("This band has no channel plan and cannot be scanned.",
       service.UnavailableReason(RTLSDRCore.Enums.BandType.Custom));
+  }
+
+  [Fact]
+  public void UnavailableReason_ReusesOneDeviceRead_ForTheCacheDuration()
+  {
+    // AUD-103 review L2: every band-map read asks for the reason; the device (which DI may answer by
+    // enumerating the dongle) is read once per ReceivingDeviceCacheDuration, not once per ask.
+    int reads = 0;
+    SdrHardwareInfo hf = BandMapServiceScanTests.DeviceWithFloor(HfDirectSampling.HfMinFrequencyHz);
+    SdrHardwareInfo tunerOnly = BandMapServiceScanTests.DeviceWithFloor(RtlSdrDevice.TunerMinFrequencyHz);
+    SdrHardwareInfo current = hf;
+    Mock<IOptionsMonitor<BandMapOptions>> monitor = new();
+    monitor.Setup(m => m.CurrentValue).Returns(_options);
+    using BandMapService service = new(
+      NullLogger<BandMapService>.Instance, monitor.Object, new BandMapStore(_root, NullLogger.Instance), _gate,
+      () => _live, timeProvider: _time, receivingDevice: () => { reads++; return current; });
+    Assert.Equal(0, reads);
+
+    for (int i = 0; i < 10; i++)
+    {
+      Assert.Null(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+    }
+    Assert.Equal(1, reads);
+
+    // A changed device is not seen until the read is that old, then it is.
+    current = tunerOnly;
+    _time.Advance(BandMapService.ReceivingDeviceCacheDuration - TimeSpan.FromTicks(1));
+    Assert.Null(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+    Assert.Equal(1, reads);
+    _time.Advance(TimeSpan.FromTicks(1));
+    Assert.NotNull(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+    Assert.Equal(2, reads);
+  }
+
+  [Fact]
+  public void UnavailableReason_ADeviceReadThatThrows_IsNotCached()
+  {
+    int reads = 0;
+    Mock<IOptionsMonitor<BandMapOptions>> monitor = new();
+    monitor.Setup(m => m.CurrentValue).Returns(_options);
+    using BandMapService service = new(
+      NullLogger<BandMapService>.Instance, monitor.Object, new BandMapStore(_root, NullLogger.Instance), _gate,
+      () => _live, timeProvider: _time,
+      receivingDevice: () => ++reads == 1
+        ? throw new InvalidOperationException("librtlsdr missing")
+        : BandMapServiceScanTests.DeviceWithFloor(RtlSdrDevice.TunerMinFrequencyHz));
+
+    Assert.Null(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+    Assert.NotNull(service.UnavailableReason(RTLSDRCore.Enums.BandType.AM));
+    Assert.Equal(2, reads);
   }
 
   [Fact]

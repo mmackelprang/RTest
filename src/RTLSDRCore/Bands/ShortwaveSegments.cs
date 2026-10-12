@@ -36,6 +36,14 @@ public sealed record ShortwaveSegment(string Name, long MinHz, long MaxHz)
 /// 49 m 5900–6200, 41 m 7200–7450, 31 m 9400–9900, 25 m 11600–12100, 22 m 13570–13870,
 /// 19 m 15100–15800, 16 m 17480–17900, 15 m 18900–19020, 13 m 21450–21850, 11 m 25670–26100.
 /// </para>
+/// <para>
+/// Images (AUD-103 review, L6): HF direct sampling digitises the antenna at the RTL2832U's 28.8 MHz
+/// clock with no front-end filter on the dongle, so the 14.4 MHz Nyquist zone folds: a signal at
+/// <c>f</c> also appears at <c>28.8 MHz − f</c>. A map of a segment above 14.4 MHz can therefore show
+/// images of signals below it: 31 m (9.4–9.9 MHz) folds onto 18.9–19.4 MHz, covering 15 m; 41 m
+/// (7.2–7.45 MHz) onto 21.35–21.6 MHz, the bottom of 13 m; 22 m's lower part onto the bottom of 19 m; and
+/// 11 m is the image of 2.7–3.13 MHz. Nothing here removes them; a low-pass filter at the antenna would.
+/// </para>
 /// </remarks>
 public static class ShortwaveSegments
 {

@@ -45,11 +45,20 @@ public sealed record KnownDeviceSpur(long FrequencyHz, long ToleranceHz, string 
 public static class BandMapStations
 {
   /// <summary>
-  /// Device spurs that are never stations (AUD-103): <see cref="Peaks"/> skips them, so neither a
-  /// tap nor Scan stops there, and the BAND view draws them in the noise colour. Their channels are
-  /// still measured, stored and drawn.
+  /// Device spurs that are never stations (AUD-103): <see cref="Peaks"/> skips them, so a tap does
+  /// not snap there and map-driven Scan does not hop there; the live seek steps past them (the radio
+  /// source gives <see cref="IsKnownSpur"/> to the receiver's <c>SeekSkips</c>); a seek stop on one is
+  /// not recorded; and the BAND view draws them in the noise colour and leaves them out of its bar
+  /// scale. Their channels are still measured, stored and drawn.
   /// </summary>
   /// <remarks>
+  /// <para>
+  /// The table is frequency-only: it does not name a dongle and applies to every device, which holds
+  /// because every RTL2832U board clocks from a 28.8 MHz reference. A board whose spur measures
+  /// elsewhere, or not at all, would need the table keyed by device; only the NESDR SMArt v5 has been
+  /// measured.
+  /// </para>
+  /// <para>
   /// A list of measured spurs, not a formula. The RTL2832U's 28.8 MHz reference has a sub-harmonic
   /// near every 10 kHz AM channel (28.8 MHz ÷ n for n = 17 to 54), but only 960 kHz (÷ 30) has been
   /// measured standing out: about +18 dB over the median by day (AUD-99 step 0), −34.1 dBFS in the
@@ -57,6 +66,7 @@ public static class BandMapStations
   /// 1030 kHz, which read at the floor by day and about 7 dB up at night, i.e. skywave, so a formula
   /// would hide a real station there; 9.6 MHz (÷ 3) read at the floor. Add an entry only for a spur
   /// that has been measured.
+  /// </para>
   /// </remarks>
   public static IReadOnlyList<KnownDeviceSpur> KnownSpurs { get; } = new KnownDeviceSpur[]
   {

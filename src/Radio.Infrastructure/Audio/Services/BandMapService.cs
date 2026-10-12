@@ -156,6 +156,9 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
   private readonly Func<BandMapTuning?> _currentTuning;
   private readonly Func<SdrHardwareInfo?> _receivingDevice;
   private readonly Func<long?> _shortwaveMemoryHz;
+  private readonly object _receivingDeviceLock = new();
+  private SdrHardwareInfo? _receivingDeviceCached;
+  private DateTimeOffset? _receivingDeviceReadAtUtc;
   private readonly TimeProvider _time;
   private readonly CancellationTokenSource _stopCts = new();
 
@@ -201,7 +204,8 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
   /// Returns the SDR device whose range decides which bands can be swept
   /// (<see cref="UnavailableReason"/>; AUD-103), or null when none is known. DI supplies
   /// <see cref="Radio.Infrastructure.Services.SdrReceivingDevice.Find"/>, the choice the band list's receivable flag makes.
-  /// Called on each use, never from this constructor. When omitted, or when it returns null or
+  /// Its result is reused for <see cref="ReceivingDeviceCacheDuration"/> (see <see cref="UnavailableReason"/>);
+  /// never called from this constructor. When omitted, or when it returns null or
   /// throws, no device limit applies.
   /// </param>
   /// <param name="shortwaveMemoryHz">
@@ -378,6 +382,15 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
     if (!BandSweepPlans.TryParseBandCode(band, out BandType bandType) || UnavailableReason(bandType) != null)
     {
       _logger.LogDebug("Seek stop at {FrequencyHz} Hz on band {Band} not recorded: the band is not mappable", frequencyHz, band);
+      return;
+    }
+
+    // AUD-103: a stop on a known device spur is not seek history, so the BAND view draws no
+    // "found by scan" ring there. The live seek already steps past one (SDRRadioAudioSource sets
+    // RadioReceiver.SeekSkips); this covers a seek whose receiver was not given the table.
+    if (BandMapStations.IsKnownSpur(frequencyHz))
+    {
+      _logger.LogDebug("Seek stop at {FrequencyHz} Hz on band {Band} not recorded: a known device spur", frequencyHz, band);
       return;
     }
 
@@ -1113,9 +1126,42 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
   /// as on the band list: every preset band can be swept (an idle sweep then finds no device and
   /// says so), and only a custom band gets a sentence.
   /// </summary>
+  /// <remarks>
+  /// A read of the device is reused for <see cref="ReceivingDeviceCacheDuration"/> (AUD-103 review,
+  /// L2): every band-map read asks this, and DI's <c>receivingDevice</c> may re-enumerate the dongle
+  /// (each time logged at Information) once <c>RadioFactory</c>'s 30 s device cache has expired. So a
+  /// newly plugged dongle or a changed <c>RTLSDR:HfDirectSampling</c> reaches this answer within that
+  /// time. A read that throws is not cached; one that returns null (no device) is.
+  /// </remarks>
   /// <param name="band">The band.</param>
   public string? UnavailableReason(BandType band)
   {
+    SdrHardwareInfo? device = ReceivingDevice();
+    return device == null
+      ? BandSweepPlans.UnavailableReason(band, 0, long.MaxValue)
+      : BandSweepPlans.UnavailableReason(band, device.MinFrequencyHz, device.MaxFrequencyHz);
+  }
+
+  /// <summary>How long <see cref="UnavailableReason"/> reuses one read of the receiving device.</summary>
+  public static readonly TimeSpan ReceivingDeviceCacheDuration = TimeSpan.FromMinutes(5);
+
+  /// <summary>
+  /// The receiving device, from a read made less than <see cref="ReceivingDeviceCacheDuration"/> ago by
+  /// this service's clock, else read now. A clock that went back past the last read reads again.
+  /// </summary>
+  private SdrHardwareInfo? ReceivingDevice()
+  {
+    DateTimeOffset now = _time.GetUtcNow();
+    lock (_receivingDeviceLock)
+    {
+      if (_receivingDeviceReadAtUtc is DateTimeOffset readAt
+        && now >= readAt
+        && now - readAt < ReceivingDeviceCacheDuration)
+      {
+        return _receivingDeviceCached;
+      }
+    }
+
     SdrHardwareInfo? device;
     try
     {
@@ -1124,12 +1170,16 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
     catch (Exception ex)
     {
       _logger.LogDebug(ex, "Band map: reading the SDR device's range failed; applying no device limit");
-      device = null;
+      return null;
     }
 
-    return device == null
-      ? BandSweepPlans.UnavailableReason(band, 0, long.MaxValue)
-      : BandSweepPlans.UnavailableReason(band, device.MinFrequencyHz, device.MaxFrequencyHz);
+    lock (_receivingDeviceLock)
+    {
+      _receivingDeviceCached = device;
+      _receivingDeviceReadAtUtc = now;
+    }
+
+    return device;
   }
 
   /// <summary>
@@ -1176,6 +1226,9 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
       : throw new ArgumentException($"'{band}' is not a band code ({string.Join(", ", BandSweepPlans.BandCodes)}).", nameof(band));
   }
 
+  // The device factory when the constructor is given none (tests and hand-built instances): Auto,
+  // which is what an absent RTLSDR:HfDirectSampling reads as. DI never uses it; it passes
+  // SdrHfConfiguration.IdleSweepDeviceFactory, which reads the configured setting on every open.
   private static ISdrDevice? CreateFirstRtlSdrOrNull() =>
     Factories.SdrHfConfiguration.CreateFirstRtlSdrOrNull(HfDirectSamplingSetting.Auto);
 
