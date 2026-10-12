@@ -194,18 +194,20 @@ internal sealed class AmReceiveChain
   }
 
   /// <summary>
-  /// Called once per IQ block, before <see cref="Channelize"/>, with the receiver's current tune
-  /// generation. Decides when the audio state is re-seeded after a tune (AUD-101 review M1).
+  /// Called once per IQ block, before <see cref="Channelize"/>, with the tune generation the
+  /// receiver stamped on the block when the USB thread raised it (not when the DSP thread took it
+  /// from the queue). Decides when the audio state is re-seeded after a tune (AUD-101 review M1).
   /// </summary>
   /// <remarks>
-  /// The first block seen after the generation changes may have been read from the device before
-  /// the tune took effect (it was in flight, or captured and not yet raised), so it can still hold
-  /// the old station; it is processed with the old station's state, which matches it. The block
-  /// after it was read only once that one had been raised, i.e. after the tune, so the audio
+  /// The first block stamped with a new generation was raised after the tune, but its samples may
+  /// have been read from the device before the tune took effect (the read was in flight), so it can
+  /// still hold the old station; it is processed with the old station's state. Blocks stamped with
+  /// the old generation, however many were queued, never count. The next block was read only after
+  /// that one had been raised, i.e. after the tune, so the audio
   /// state is re-seeded on it (<see cref="ReseedPending"/>). The same reasoning as the live band
   /// sweep's <c>LiveSweepTuner._dropNextBlock</c> in <c>RadioReceiver</c>.
   /// </remarks>
-  /// <param name="tuneGeneration">The receiver's count of tunes, read when the block arrived.</param>
+  /// <param name="tuneGeneration">The receiver's count of tunes, stamped when the block was raised.</param>
   public void BeginBlock(int tuneGeneration)
   {
     if (tuneGeneration != SeenTuneGeneration)

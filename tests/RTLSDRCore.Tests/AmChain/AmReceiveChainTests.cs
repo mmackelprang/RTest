@@ -516,6 +516,42 @@ public class AmReceiveChainTests
   }
 
   [Fact]
+  public void Retune_WithOldBlocksQueued_StillReseedsOnlyOnTheNewStation()
+  {
+    // Re-review M1 of the fixes: the tune generation is stamped when a block is raised, not when
+    // the DSP thread takes it from the queue. Old-station blocks waiting in the queue at the tune
+    // must not count as "the first and second block after the tune"; if they did, the re-seed
+    // would land on the strong old station and duck the weak new one.
+    SyntheticRf rf = AmStation(AmHz, 0.5f);
+    rf.Transmitters.Add(new Transmitter(AmHz + 30_000, 0.05f, ToneHz: 1_000, AmDepth: 0.5));
+    using ReceiverHarness h = new(rf, BandType.AM, AmHz);
+    h.Run(Blocks);
+
+    // Hold the DSP thread inside the next block's audio event, then queue three more old-station
+    // blocks behind it (the queue holds 8).
+    h.DspGate.Reset();
+    h.RaiseOnly();
+    h.WaitForEvents(1);
+    for (int i = 0; i < 3; i++)
+    {
+      h.RaiseOnly();
+    }
+
+    Assert.True(h.Receiver.SetFrequency(AmHz + 30_000));
+    // The block in flight across the tune: captured at the old device centre, raised after it.
+    h.RaiseOnly(capturedAtDeviceHz: AmHz - Offset);
+
+    h.DspGate.Set();
+    h.WaitForEvents(4);   // the three queued old blocks and the straddling one
+    int afterOld = h.Events.Length;
+    h.Run(20);
+
+    float[][] after = h.Events[afterOld..];
+    Assert.Equal(20, after.Length);
+    AssertSettledFromTheFirstBlock(after);
+  }
+
+  [Fact]
   public void Aircraft_SquelchReopening_OnAWeakerStation_NeitherStepsTheDcNorDucksTheAgc()
   {
     // A strong station (wideband RMS about 0.32, open), then nothing (closed), then a weaker one

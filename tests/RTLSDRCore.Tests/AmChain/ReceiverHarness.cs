@@ -32,11 +32,42 @@ internal sealed class ReceiverHarness : IDisposable
         _events.Add(block);
       }
       _audioEvents.Release();
+      // Runs on the DSP thread: while the gate is closed the DSP thread is held here, so blocks
+      // raised meanwhile wait in the receiver's processing queue (as under load on the box).
+      DspGate.Wait(TimeSpan.FromSeconds(10));
     };
     Assert.True(Receiver.Startup());
   }
 
   public SyntheticRf Rf { get; }
+
+  /// <summary>
+  /// Holds the DSP thread inside its audio event while reset (closed). Open by default. The wait
+  /// has a 10 s fail-safe so a test that forgets to open it cannot hang.
+  /// </summary>
+  public ManualResetEventSlim DspGate { get; } = new(true);
+
+  /// <summary>Raises a block without waiting for its audio event (for building a queue backlog).</summary>
+  public void RaiseOnly(long? capturedAtDeviceHz = null)
+  {
+    if (capturedAtDeviceHz is long hz)
+    {
+      Device.RaiseBlockCapturedAt(hz);
+    }
+    else
+    {
+      Device.RaiseBlock();
+    }
+  }
+
+  /// <summary>Waits for <paramref name="count"/> audio events (a rendezvous, not a clock).</summary>
+  public void WaitForEvents(int count)
+  {
+    for (int i = 0; i < count; i++)
+    {
+      Assert.True(_audioEvents.Wait(TimeSpan.FromSeconds(10)), "DSP thread produced no audio event");
+    }
+  }
 
   public FakeSdrDevice Device { get; }
 
@@ -100,8 +131,10 @@ internal sealed class ReceiverHarness : IDisposable
 
   public void Dispose()
   {
+    DspGate.Set();
     Receiver.Dispose();
     _audioEvents.Dispose();
+    DspGate.Dispose();
   }
 }
 

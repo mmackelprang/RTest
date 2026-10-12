@@ -29,9 +29,15 @@ namespace RTLSDRCore;
       // modulation. Replaced as a whole by SetupSignalProcessing; the DSP thread reads it once
       // per block.
       private volatile AmReceiveChain? _amChain;
-      // Counts the receiver's tunes of the device; the AM chain re-seeds its DC blocker and AGC
-      // when it sees a new value (AmReceiveChain.ResetForRetune).
+      // Counts the receiver's tunes of the device. Each IQ block is stamped with the value current
+      // when the USB thread raised it (OnSamplesAvailable), and the AM chain re-seeds its DC
+      // blocker and AGC on the second block stamped with a new value (AmReceiveChain.BeginBlock).
       private int _tuneGeneration;
+
+      // One raised IQ block and the tune generation current when it was raised. Stamping at raise
+      // time, not at dequeue time, keeps "the second block after a tune holds only the new
+      // frequency" true however many blocks are waiting in the processing queue.
+      private readonly record struct IqBlock(IqSample[] Samples, int TuneGeneration);
       private Decimator? _iqDecimator;
       private DeEmphasisFilter? _deEmphasis;
       private DeEmphasisFilter? _deEmphasisRight; // second channel for stereo
@@ -72,7 +78,7 @@ namespace RTLSDRCore;
       // a dedicated processing thread dequeues and runs DSP. This decouples
       // USB timing from DSP processing overhead, preventing sample rate
       // deficit caused by synchronous processing blocking the read loop.
-      private BlockingCollection<IqSample[]>? _processingQueue;
+      private BlockingCollection<IqBlock>? _processingQueue;
       private Thread? _processingThread;
 
       // Live band sweep (AUD-76). See SweepChannels for the rules.
@@ -442,8 +448,8 @@ namespace RTLSDRCore;
                   // Start async processing pipeline: USB read thread enqueues
                   // IQ batches, dedicated processing thread runs DSP chain.
                   _processingCts = new CancellationTokenSource();
-                  _processingQueue = new BlockingCollection<IqSample[]>(
-                      new ConcurrentQueue<IqSample[]>(), boundedCapacity: 8);
+                  _processingQueue = new BlockingCollection<IqBlock>(
+                      new ConcurrentQueue<IqBlock>(), boundedCapacity: 8);
                   _processingThread = new Thread(ProcessingLoop)
                   {
                       Name = "RadioReceiver-DSP",
@@ -1743,7 +1749,7 @@ namespace RTLSDRCore;
 
       private void DrainProcessingQueue()
       {
-          BlockingCollection<IqSample[]>? queue = _processingQueue;
+          BlockingCollection<IqBlock>? queue = _processingQueue;
           if (queue == null)
           {
               return;
@@ -2172,7 +2178,7 @@ namespace RTLSDRCore;
     // keep up), we drop the batch rather than blocking USB reads.
     try
           {
-              if (!(_processingQueue?.TryAdd(e.Samples) ?? false))
+              if (!(_processingQueue?.TryAdd(new IqBlock(e.Samples, Volatile.Read(ref _tuneGeneration))) ?? false))
               {
                   Logger.Warning("DSP processing queue full — dropping IQ batch ({Samples} samples)",
                       e.Samples.Length);
@@ -2196,12 +2202,12 @@ namespace RTLSDRCore;
           Logger.Information("DSP processing thread started");
           try
           {
-              foreach (var samples in _processingQueue!.GetConsumingEnumerable(
+              foreach (var block in _processingQueue!.GetConsumingEnumerable(
                            _processingCts?.Token ?? CancellationToken.None))
               {
                   try
                   {
-                      ProcessSamples(samples);
+                      ProcessSamples(block.Samples, block.TuneGeneration);
                   }
                   catch (Exception ex)
                   {
@@ -2245,7 +2251,7 @@ namespace RTLSDRCore;
           return MathF.Sqrt(sumPower / count);
       }
 
-      private void ProcessSamples(IqSample[] samples)
+      private void ProcessSamples(IqSample[] samples, int tuneGeneration)
       {
           AmReceiveChain? am = _amChain;
           // One read of the band per block, so the level's scale and the squelch decision agree.
@@ -2253,9 +2259,10 @@ namespace RTLSDRCore;
           if (am != null)
           {
               // AUD-101: the chain counts blocks since the last tune (see
-              // AmReceiveChain.BeginBlock), and the channel filter runs on every block, squelched
-              // or not, so its history and the in-channel level are always current.
-              am.BeginBlock(Volatile.Read(ref _tuneGeneration));
+              // AmReceiveChain.BeginBlock) using the generation stamped when the block was raised,
+              // and the channel filter runs on every block, squelched or not, so its history and
+              // the in-channel level are always current.
+              am.BeginBlock(tuneGeneration);
               am.Channelize(samples);
           }
 
