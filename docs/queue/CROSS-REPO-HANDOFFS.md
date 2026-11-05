@@ -2,6 +2,28 @@
 
 ---
 
+## ✅ INBOUND RECEIVED — 2026-11-05, acknowledged: "Grandpas Phone" is hidden
+
+Ref: [`inbound/2026-11-05-rotaryphone-hide-grandpas-phone.md`](inbound/2026-11-05-rotaryphone-hide-grandpas-phone.md). Answers our request of the same day.
+
+**What we independently verified, on the box, 2026-11-05:**
+
+| Their claim | Our check | Result |
+|---|---|---|
+| `hci1` is hidden | `busctl get-property` on `/org/bluez/hci1` | `Discoverable false` ✅ |
+| `bt_manager` was what turned it on | `journalctl -u rotary-phone`, `Nov 01 03:01:53` | `Configured adapter` line present ✅, confirming our inference |
+| The Pixel is bonded on both adapters | `Device1` properties on `hci0` and `hci1` | Paired and Bonded on both; Trusted on `hci1` only; Connected on `hci0` ✅ |
+| Our boot cleanup misses this phone | `bt-music-devices.conf`; boot log | Not listed, and `0 stale pairings` ✅ |
+| `hci0` hides while a device is connected, and re-shows on disconnect | `LinuxBluetoothService.cs` | Code reads that way ✅; `hci0` reads `false` while connected ✅; ⚠ the re-show is NOT yet tested |
+
+**Owner decision: the `hci1` bond goes at the next reboot.** The Pixel is added to `bt-music-devices.conf`, on the box and in the repo's seed. ⚠ `setup.sh` never overwrites an existing conf, so the seed alone would not reach the box. The cleanup deletes only `/var/lib/bluetooth/<hci1 MAC>/<device>`, read in `radio-bt-setup.sh`, so the `hci0` bond is not touched. **Not yet observed: it runs at the next boot.** The owner should also forget "Grandpas Phone" on the phone.
+
+**Still open on our side:** disconnect the phone and confirm `hci0` returns to `Discoverable: yes`, with the Pixel really off, given the HFP link they flag. This goes with first-connect UAT.
+
+**Not ours:** HFP on `hci0` stays RotaryPhone's decision (rule #6). The `radio-bt-setup.sh:154` comment is left as it is: they read BlueZ source and did not test it, and the re-apply is correct either way.
+
+---
+
 ## 📤 OUTBOUND — 2026-10-04 · OPEN: Ignore stops the rotary ringer but does not reject the call on the cell
 
 **Filed:** `D:\prj\RotaryPhone\docs\prompts\2026-10-04-radioconsole-decline-does-not-reject-on-cell.md`.
