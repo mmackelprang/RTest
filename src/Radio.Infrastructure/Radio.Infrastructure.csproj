@@ -53,7 +53,7 @@
          reported POLLIN ~34,000 times a second and the socket was never read — costing radio-api a
          full core for its whole uptime (measured on the box 2026-10-06). 2.6.x rewrote that loop. -->
     <PackageReference Include="HidSharp" Version="2.6.4" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
   </ItemGroup>
   <!-- Windows-only: NAudio for WASAPI loopback capture and endpoint volume control -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">

@@ -19,7 +19,7 @@
     <ProjectReference Include="..\Radio.Infrastructure\Radio.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
     <PackageReference Include="Radzen.Blazor" Version="6.6.4" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
