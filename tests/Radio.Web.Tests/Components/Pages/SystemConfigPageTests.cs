@@ -24,6 +24,7 @@ public class SystemConfigPageTests : TestContext
   private readonly RoutedApiHandler _metricsApi = new();
   private readonly RecordingHandler _integrationsApi = new();
   private readonly FakeHouseController _houseController = new();
+  private int _housePollersCreated;
 
   public SystemConfigPageTests()
   {
@@ -77,8 +78,11 @@ public class SystemConfigPageTests : TestContext
 
     HouseAudioApiService houseApi = _houseController.CreateClient(FakeHouseController.StoreWithPassword());
     Services.AddSingleton(houseApi);
-    Services.AddSingleton<Func<HouseAudioPoller>>(
-      () => new HouseAudioPoller(houseApi, TimeProvider.System, TimeSpan.FromHours(1)));
+    Services.AddSingleton<Func<HouseAudioPoller>>(() =>
+    {
+      _housePollersCreated++;
+      return new HouseAudioPoller(houseApi, TimeProvider.System, TimeSpan.FromHours(1));
+    });
 
     // Setup JSInterop for Radzen components
     JSInterop.Mode = JSRuntimeMode.Loose;
@@ -754,11 +758,8 @@ public class SystemConfigPageTests : TestContext
     var cut = RenderComponent<SystemConfigPage>();
     int before = _integrationsApi.Count(IsEncoderPoll);
 
-    // The tab at the old index. Bounded negative: the timer's first tick is immediate on a real
-    // start, and the positive half below proves this instrument can see one.
-    SelectTab(cut, "Store Management");
-    _integrationsApi.Count(IsEncoderPoll).Should().Be(before);
-
+    // Integrations first: visiting the tab at the old index on the way would start the poll, and a
+    // tick from that would satisfy this wait with the constant still wrong.
     SelectTab(cut, "Integrations");
     await _integrationsApi.WaitForAsync(IsEncoderPoll, before + 1);
 
@@ -769,7 +770,7 @@ public class SystemConfigPageTests : TestContext
   public async Task HouseAudio_PollsOnlyWhileItsTabIsShowing()
   {
     var cut = RenderComponent<SystemConfigPage>();
-    _houseController.Seen.Should().BeEmpty("a hidden Radzen tab stays mounted, and an unopened one must cost nothing");
+    _housePollersCreated.Should().Be(0, "a hidden Radzen tab stays mounted, and an unopened one must cost nothing");
 
     SelectTab(cut, "House Audio");
     await _houseController.Handler.WaitForAsync((method, path) => path == "/system", 1);

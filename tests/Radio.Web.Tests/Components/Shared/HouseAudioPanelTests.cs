@@ -24,6 +24,7 @@ public class HouseAudioPanelTests : TestContext
   private readonly FakeTimeProvider _time = new();
   private readonly FakeHouseController _controller = new();
   private HouseAudioPasswordStore _passwords = FakeHouseController.StoreWithPassword();
+  private int _pollersCreated;
 
   public HouseAudioPanelTests()
   {
@@ -34,7 +35,11 @@ public class HouseAudioPanelTests : TestContext
   {
     HouseAudioApiService api = _controller.CreateClient(_passwords);
     Services.AddSingleton(api);
-    Services.AddSingleton<Func<HouseAudioPoller>>(() => new HouseAudioPoller(api, _time, Interval));
+    Services.AddSingleton<Func<HouseAudioPoller>>(() =>
+    {
+      _pollersCreated++;
+      return new HouseAudioPoller(api, _time, Interval);
+    });
     return RenderComponent<HouseAudioPanel>(parameters => parameters.Add(panel => panel.IsActive, active));
   }
 
@@ -205,10 +210,9 @@ public class HouseAudioPanelTests : TestContext
   {
     IRenderedComponent<HouseAudioPanel> cut = Render(active: false);
 
-    // Bounded negative: starvation can only weaken this, and the activation below proves the
-    // instrument can see a poll.
-    _time.Advance(Interval);
-    _controller.Seen.Should().BeEmpty();
+    // Counted at creation: a poller started here would run on another thread, and could lose a race
+    // with a check of the requests.
+    _pollersCreated.Should().Be(0);
 
     cut.SetParametersAndRender(parameters => parameters.Add(panel => panel.IsActive, true));
     await PollsBegunAsync(1);
