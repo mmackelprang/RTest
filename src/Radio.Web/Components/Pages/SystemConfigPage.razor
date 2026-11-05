@@ -1,6 +1,7 @@
 @page "/system"
 @page "/diagnostics"
 @rendermode InteractiveServer
+@using Radio.Web.Components.Shared.HouseAudio
 @using Radio.Web.Models
 @inject SystemApiService SystemApi
 @inject ConfigurationApiService ConfigApi
@@ -89,7 +90,12 @@
       }
     </RadzenTabsItem>
 
-    <!-- Tab 2: Configuration Management -->
+    <!-- Tab 2: House Audio -->
+    <RadzenTabsItem Text="House Audio" Icon="speaker_group">
+      <HouseAudioPanel IsActive="@(_activeTab == HouseAudioTabIndex)" />
+    </RadzenTabsItem>
+
+    <!-- Tab 3: Configuration Management -->
     <RadzenTabsItem Text="Configuration" Icon="tune">
       <RadzenTabs Style="max-width: 900px;">
         <Tabs>
@@ -789,7 +795,7 @@
       </RadzenTabs>
     </RadzenTabsItem>
 
-    <!-- Tab 3: Log Viewer -->
+    <!-- Tab 4: Log Viewer -->
     <RadzenTabsItem Text="Logs" Icon="article">
       <div style="display:flex; flex-direction:row; gap:8px; margin-bottom:12px">
         <RadzenDropDown TValue="string" @bind-Value="_logLevel" Data="@_logLevelOptions"
@@ -847,7 +853,7 @@
       }
     </RadzenTabsItem>
 
-    <!-- Tab 4: Event Sources -->
+    <!-- Tab 5: Event Sources -->
     <RadzenTabsItem Text="Event Sources" Icon="event_note">
       <RadzenRow Gap="1rem">
         <!-- TTS Section -->
@@ -1010,7 +1016,7 @@
       </RadzenRow>
     </RadzenTabsItem>
 
-    <!-- Tab 5: Preferences -->
+    <!-- Tab 6: Preferences -->
     <RadzenTabsItem Text="Preferences" Icon="settings">
       <RadzenTabs>
         <Tabs>
@@ -1180,7 +1186,7 @@
       </RadzenTabs>
     </RadzenTabsItem>
 
-    <!-- Tab 6: Secrets -->
+    <!-- Tab 7: Secrets -->
     <RadzenTabsItem Text="Secrets" Icon="lock">
       <div style="max-width: 720px;">
       <RadzenAlert AlertStyle="AlertStyle.Warning" Size="AlertSize.Small" AllowClose="false" Style="margin-bottom:12px">
@@ -1295,7 +1301,7 @@
       </div>
     </RadzenTabsItem>
 
-    <!-- Tab 7: Store Management -->
+    <!-- Tab 8: Store Management -->
     <RadzenTabsItem Text="Store Management" Icon="storage">
       <div style="display:flex; flex-direction:column; gap:12px">
 
@@ -1437,7 +1443,7 @@
       </div>
     </RadzenTabsItem>
 
-    <!-- Tab 8: Integrations -->
+    <!-- Tab 9: Integrations -->
     <RadzenTabsItem Text="Integrations" Icon="extension">
       <RadzenTabs SelectedIndex="@_integrationsSubTab" Change="@OnIntegrationsSubTabChanged">
         <Tabs>
@@ -1913,7 +1919,7 @@
       </RadzenTabs>
     </RadzenTabsItem>
 
-    <!-- Tab 9: Diagnostics (UI-2 / D11) — what the top-level /metrics page used to be. -->
+    <!-- Tab 10: Diagnostics (UI-2 / D11) — what the top-level /metrics page used to be. -->
     <RadzenTabsItem Text="Diagnostics" Icon="monitor_heart">
       @* Mounted only while this tab is the showing tab: DiagnosticsPanel polls for as long as it
          exists, and the UI-2 load rule is that nothing polls the metrics DB unless someone is looking.
@@ -1934,16 +1940,17 @@
   // Where the Rotary Encoders panel lives, as a pair of tab indices. RadzenTabs identifies a tab by
   // its position, so inserting a tab above either of these moves the panel and both constants have to
   // move with it. They exist because the encoder poll is only allowed to run while that panel shows.
-  private const int IntegrationsTabIndex = 7;
+  private const int HouseAudioTabIndex = 1;
+  private const int IntegrationsTabIndex = 8;
   private const int RotaryEncoderSubTabIndex = 0;
 
   /// <summary>
   /// Position of the Diagnostics tab (UI-2). It is the LAST tab deliberately, so adding it moved
-  /// neither index above. <c>/diagnostics</c> — the route name D13 freed by deleting <c>/diagnostic</c>
+  /// neither index above; adding House Audio above it moved this one. <c>/diagnostics</c> — the route name D13 freed by deleting <c>/diagnostic</c>
   /// — opens this page with this tab selected; that is where the DevTray's "Fingerprint events" card
   /// lands.
   /// </summary>
-  internal const int DiagnosticsTabIndex = 8;
+  internal const int DiagnosticsTabIndex = 9;
   private int _integrationsSubTab = 0;
   /// <summary>Set in <see cref="Dispose"/>; gates the hub subscriptions against a teardown that
   /// beats them.</summary>

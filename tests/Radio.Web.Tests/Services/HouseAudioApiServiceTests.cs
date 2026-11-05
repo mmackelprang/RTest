@@ -131,6 +131,17 @@ public class HouseAudioApiServiceTests
   }
 
   [Fact]
+  public async Task GetZones_DropsANullEntry()
+  {
+    _controller.HasNullZoneEntry = true;
+
+    HouseAudioResult<IReadOnlyList<HouseZone>> result = await _api.GetZonesAsync(CancellationToken.None);
+
+    Assert.Equal(HouseAudioHealth.Ok, result.Health);
+    Assert.Equal(["Kitchen", "Den"], result.Value!.Select(zone => zone.Name));
+  }
+
+  [Fact]
   public async Task RenameController_WorksWhileTheAmpLinkIsDown()
   {
     _controller.AmpLinkDown = true;

@@ -56,7 +56,7 @@ public class HouseAudioApiService
     HouseAudioResult<IReadOnlyList<HouseZone>> result = await ReadAsync<IReadOnlyList<HouseZone>>("/zones", ct);
     return result.Value is null
       ? result
-      : result with { Value = result.Value.Where(zone => !string.IsNullOrEmpty(zone.Name)).ToList() };
+      : result with { Value = result.Value.Where(zone => !string.IsNullOrEmpty(zone?.Name)).ToList() };
   }
 
   public Task<HouseAudioResult<IReadOnlyList<HouseSource>>> GetSourcesAsync(CancellationToken ct = default) =>

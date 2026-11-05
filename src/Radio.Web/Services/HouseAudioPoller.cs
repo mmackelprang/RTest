@@ -57,7 +57,9 @@ public sealed class HouseAudioPoller : IAsyncDisposable
   /// Raised after each poll, except one discarded by a hold (see <see cref="HoldZone"/>), on a
   /// thread-pool thread and under this poller's lock, so a handler must be brief. A component
   /// marshals with <c>InvokeAsync</c>.
-  /// ⚠ A handler must not wait for <see cref="DisposeAsync"/>, which waits for the handler.
+  /// ⚠ A handler must not wait for <see cref="DisposeAsync"/>, which waits for the handler, and must
+  /// never block on the render thread (<c>.Wait()</c>, <c>.GetResult()</c>): the render thread can
+  /// itself be waiting for this lock, in <see cref="HoldZone"/> or a release.
   /// </summary>
   public event Action<HouseAudioSnapshot>? Updated;
 
@@ -80,8 +82,9 @@ public sealed class HouseAudioPoller : IAsyncDisposable
 
   /// <summary>
   /// Take this for the length of a command on the named zone, and dispose it when the command has
-  /// finished. While it is held, snapshots show the zone as it was before the hold, so the panel
-  /// keeps showing the value it commanded.
+  /// finished. While it is held, snapshots show the zone as it was before the hold, which is the value
+  /// from before the command. So the panel must keep its own commanded value, and ignore that zone's
+  /// entry in a snapshot until the hold has ended.
   /// </summary>
   /// <remarks>
   /// <para>
@@ -98,7 +101,8 @@ public sealed class HouseAudioPoller : IAsyncDisposable
   /// <para>
   /// ⚠ The contract is about when <see cref="Updated"/> fires. A handler that marshals with
   /// <c>InvokeAsync</c> can have a snapshot raised just before the release still queued, and see it
-  /// just after. The next poll corrects it.
+  /// just after. A handler that cares reads its own count of releases before it queues, as
+  /// <c>HouseAudioCommandLedger.Releases</c> does for the panel.
   /// </para>
   /// </remarks>
   public IDisposable HoldZone(string zoneName)

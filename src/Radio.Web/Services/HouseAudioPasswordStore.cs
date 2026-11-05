@@ -81,7 +81,7 @@ public sealed class HouseAudioPasswordStore
   /// <summary>
   /// Encrypts and saves the password. Returns false, keeping the previous one, if the password cannot
   /// travel in a header or the save fails. An unusable key ring is not handled here: encrypting then
-  /// throws, as does every page render in this process.
+  /// throws.
   /// </summary>
   public async Task<bool> SetAsync(string password, CancellationToken ct)
   {

@@ -26,6 +26,8 @@ public sealed class FakeHouseController
   private readonly object _sync = new();
   private readonly List<SeenRequest> _seen = [];
   private readonly Dictionary<string, int> _zoneVolumes = new() { ["Kitchen"] = 20, ["Den"] = 20 };
+  private readonly HashSet<string> _zonesOff = [];
+  private readonly HashSet<string> _zonesMuted = [];
 
   public FakeHouseController()
   {
@@ -51,6 +53,15 @@ public sealed class FakeHouseController
   /// <summary>Adds a zone the controller has no name for, which it reports as null.</summary>
   public bool HasUnnamedZone { get; set; }
 
+  /// <summary>Adds a null entry to the zone list, which is more than a zone with a null name.</summary>
+  public bool HasNullZoneEntry { get; set; }
+
+  /// <summary>When set, every request other than a GET answers with this status.</summary>
+  public HttpStatusCode? WriteStatus { get; set; }
+
+  /// <summary>When set, every request other than a GET waits on this after it is recorded.</summary>
+  public TaskCompletionSource? WriteGate { get; set; }
+
   /// <summary>When set, <c>GET /system</c> waits on this after it is recorded.</summary>
   public TaskCompletionSource? SystemGate { get; set; }
 
@@ -73,6 +84,36 @@ public sealed class FakeHouseController
     lock (_sync)
     {
       _zoneVolumes[zone] = volume;
+    }
+  }
+
+  public void SetPower(string zone, bool on)
+  {
+    lock (_sync)
+    {
+      if (on)
+      {
+        _zonesOff.Remove(zone);
+      }
+      else
+      {
+        _zonesOff.Add(zone);
+      }
+    }
+  }
+
+  public void SetMuted(string zone, bool muted)
+  {
+    lock (_sync)
+    {
+      if (muted)
+      {
+        _zonesMuted.Add(zone);
+      }
+      else
+      {
+        _zonesMuted.Remove(zone);
+      }
     }
   }
 
@@ -137,6 +178,11 @@ public sealed class FakeHouseController
       await zonesGate.Task.WaitAsync(ct);
     }
 
+    if (!isRead && WriteGate is { } writeGate)
+    {
+      await writeGate.Task.WaitAsync(ct);
+    }
+
     if (Failure is { } failure)
     {
       throw failure;
@@ -145,6 +191,11 @@ public sealed class FakeHouseController
     if (ForcedStatus is { } status)
     {
       return new HttpResponseMessage(status);
+    }
+
+    if (!isRead && WriteStatus is { } writeStatus)
+    {
+      return new HttpResponseMessage(writeStatus);
     }
 
     if (isRead && path == "/system")
@@ -179,7 +230,7 @@ public sealed class FakeHouseController
     };
   }
 
-  private object[] ZonesPayload()
+  private object?[] ZonesPayload()
   {
     lock (_sync)
     {
@@ -190,15 +241,15 @@ public sealed class FakeHouseController
         zones = zones.Append(new KeyValuePair<string?, int>(null, 0));
       }
 
-      return zones.Select(zone => (object)new
+      IEnumerable<object?> payload = zones.Select(zone => (object?)new
       {
         controllerID = 0,
         zoneID = zone.Key switch { "Kitchen" => 0, "Den" => 1, _ => 2 },
         name = zone.Key,
-        power = true,
+        power = zone.Key is null || !_zonesOff.Contains(zone.Key),
         volume = zone.Value,
         sourceID = 2,
-        muted = false,
+        muted = zone.Key is not null && _zonesMuted.Contains(zone.Key),
         maxVolume = 80,
         bass = -3,
         treble = 4,
@@ -207,7 +258,9 @@ public sealed class FakeHouseController
         turnOnVolume = 30,
         doNotDisturb = true,
         partyMode = 2
-      }).ToArray();
+      });
+
+      return (HasNullZoneEntry ? payload.Append(null) : payload).ToArray();
     }
   }
 

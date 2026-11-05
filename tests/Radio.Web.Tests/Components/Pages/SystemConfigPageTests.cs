@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Models;
+using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 using Radio.Web.Tests.TestHelpers;
@@ -21,6 +22,8 @@ public class SystemConfigPageTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
   private readonly RoutedApiHandler _metricsApi = new();
+  private readonly RecordingHandler _integrationsApi = new();
+  private readonly FakeHouseController _houseController = new();
 
   public SystemConfigPageTests()
   {
@@ -67,6 +70,16 @@ public class SystemConfigPageTests : TestContext
       new("fingerprint.identification_successes", "Counter", 3, 3, null, null, 1, DateTimeOffset.UtcNow, 1),
     });
     
+    // Recording, so a test can see which tab the encoder poll runs on.
+    Services.AddSingleton(_ => new IntegrationsApiService(
+      new HttpClient(_integrationsApi, disposeHandler: false) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+      NullLogger<IntegrationsApiService>.Instance));
+
+    HouseAudioApiService houseApi = _houseController.CreateClient(FakeHouseController.StoreWithPassword());
+    Services.AddSingleton(houseApi);
+    Services.AddSingleton<Func<HouseAudioPoller>>(
+      () => new HouseAudioPoller(houseApi, TimeProvider.System, TimeSpan.FromHours(1)));
+
     // Setup JSInterop for Radzen components
     JSInterop.Mode = JSRuntimeMode.Loose;
   }
@@ -691,6 +704,80 @@ public class SystemConfigPageTests : TestContext
     cut.FindAll("a[role='tab']").First(a => a.TextContent.Contains("System Stats")).Click();
 
     cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().BeEmpty());
+  }
+
+  // ─── House Audio: the second tab, which moved every index after it ─────────────────────────
+
+  private static bool IsEncoderPoll(HttpMethod method, string path) =>
+    method == HttpMethod.Get && path == "/api/integrations/encoder/provisioning";
+
+  private static IEnumerable<string> TabNames(IRenderedComponent<SystemConfigPage> cut) =>
+    cut.FindAll("a[role='tab']")
+      .Where(tab => tab.Closest(".rz-tabview-panels") is null)
+      .Select(tab => tab.TextContent.Trim());
+
+  private static void SelectTab(IRenderedComponent<SystemConfigPage> cut, string name) =>
+    cut.FindAll("a[role='tab']").First(tab => tab.TextContent.Contains(name)).Click();
+
+  [Fact]
+  public void Tab_IsSecond_AfterSystemStats()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+
+    TabNames(cut).ElementAt(0).Should().Contain("System Stats");
+    TabNames(cut).ElementAt(1).Should().Contain("House Audio");
+    TabNames(cut).ElementAt(1).Should().Contain("speaker_group");
+    TabNames(cut).ElementAt(2).Should().Contain("Configuration");
+    TabNames(cut).Last().Should().Contain("Diagnostics");
+  }
+
+  [Fact]
+  public void DiagnosticsRoute_StillOpensDiagnostics()
+  {
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().NavigateTo("/diagnostics");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().ContainSingle());
+    cut.Find("a[role='tab'][aria-selected='true']").TextContent.Should().Contain("Diagnostics");
+  }
+
+  /// <summary>
+  /// The Rotary Encoders panel is the one the toast at <c>MainLayout.razor:1643</c> sends the owner
+  /// to, though it lands on <c>/system</c>, one tap short: no route selects that tab. What
+  /// <c>IntegrationsTabIndex</c> decides is whether the panel works once reached, because the 2 Hz
+  /// poll that fills it runs only while that index is the showing tab.
+  /// </summary>
+  [Fact]
+  public async Task EncoderDeepLink_StillOpensIntegrations()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+    int before = _integrationsApi.Count(IsEncoderPoll);
+
+    // The tab at the old index. Bounded negative: the timer's first tick is immediate on a real
+    // start, and the positive half below proves this instrument can see one.
+    SelectTab(cut, "Store Management");
+    _integrationsApi.Count(IsEncoderPoll).Should().Be(before);
+
+    SelectTab(cut, "Integrations");
+    await _integrationsApi.WaitForAsync(IsEncoderPoll, before + 1);
+
+    SelectTab(cut, "System Stats");
+  }
+
+  [Fact]
+  public async Task HouseAudio_PollsOnlyWhileItsTabIsShowing()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+    _houseController.Seen.Should().BeEmpty("a hidden Radzen tab stays mounted, and an unopened one must cost nothing");
+
+    SelectTab(cut, "House Audio");
+    await _houseController.Handler.WaitForAsync((method, path) => path == "/system", 1);
+    cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
+
+    SelectTab(cut, "System Stats");
+
+    cut.WaitForAssertion(() => cut.Markup.Should().NotContain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
   }
 
   [Theory]
