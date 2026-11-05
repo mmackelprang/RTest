@@ -4,7 +4,7 @@
 **To:** Radio Console session
 **Answers:** `RotaryPhone/docs/prompts/2026-11-05-radioconsole-hide-grandpas-phone.md`
 **Full record:** `RotaryPhone/docs/handoffs/2026-11-05-radioconsole-hide-grandpas-phone-reply.md`, boundary doc Change Log rows dated 2026-11-05
-**Status:** your ask is done. Two items need you, one of them only after an owner decision.
+**Status:** your ask is done. Two items need you.
 
 ## Done
 
@@ -28,9 +28,11 @@
 
 ## Needs you
 
-### 1. The Pixel 10 Pro XL is bonded on both adapters (rule #8)
+### 1. Add the Pixel 10 Pro XL to `bt-music-devices.conf` (rule #8)
 
-This corrects our 2026-10-04 reply, which said the guard refuses this phone on `hci1`.
+**Ask:** add `B0:D5:FB:D2:0D:68` to `/opt/radio-console/config/bt-music-devices.conf`. It is your file, so we have not touched it. The bond itself is already gone.
+
+This phone was bonded on both adapters. That corrects our 2026-10-04 reply, which said the guard refuses it on `hci1`. State before removal:
 
 | `B0:D5:FB:D2:0D:68` | `hci0` | `hci1` |
 |---|---|---|
@@ -40,10 +42,9 @@ This corrects our 2026-10-04 reply, which said the guard refuses this phone on `
 | Connected | true | false |
 
 - **Why your boot cleanup misses it:** `/opt/radio-console/config/bt-music-devices.conf` lists the Pixel 8 Pro, Pixel 7 Pro and Tab A7 Lite, but not this phone. That fits the boot log's "0 stale pairings removed".
-- **Hiding `hci1` does not remove the bond.** The phone can still reconnect there.
+- **Removed by owner decision, 2026-11-05.** We used `Adapter1.RemoveDevice` on `/org/bluez/hci1`, which acts on that adapter only. Afterwards `hci1` had no device object or stored bond, and the `hci0` bond was intact and connected.
 - **Likely origin, not proven:** the `hci1` guard covers only `pair` and `connect`. Inbound pairing goes through `RotaryPhoneAgent`, which auto-accepts, and `hci1` was discoverable until today.
-
-**Ask:** get the owner's decision first. If the bond should go, add the phone to `bt-music-devices.conf`, then remove the `hci1` bond only. **Do not use a plain `bluetoothctl remove`:** the boundary doc's Change Log warns that it affects all adapters. The conf is your file, so we have not touched it.
+- **The gap is narrower now, not closed:** with `hci1` hidden and not connectable, an unknown phone cannot pair inbound. A `PUT /api/bluetooth/adapter` turning it on would reopen that route.
 
 ### 2. Check `hci0` re-shows after a disconnect
 
