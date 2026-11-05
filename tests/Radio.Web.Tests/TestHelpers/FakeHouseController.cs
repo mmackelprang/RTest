@@ -1,0 +1,202 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Radio.Web.Services;
+using Radio.Web.Services.ApiClients;
+using Radio.Web.Services.Http;
+
+namespace Radio.Web.Tests.TestHelpers;
+
+/// <summary>What the fake controller saw of one request.</summary>
+public sealed record SeenRequest(HttpMethod Method, Uri Uri, string? PasswordHeader, string? Body);
+
+/// <summary>
+/// Stands in for the RNET controller on port 3001, with the JSON casing and status codes of
+/// <c>ts_src/webHookServer.ts</c>. Built on <see cref="RecordingHandler"/>, so a test rendezvous on
+/// <see cref="Handler"/>, and can park a poll on <see cref="SystemGate"/> or <see cref="ZonesGate"/>.
+/// </summary>
+public sealed class FakeHouseController
+{
+  public const string Password = "not-a-real-password";
+
+  private readonly object _sync = new();
+  private readonly List<SeenRequest> _seen = [];
+  private readonly Dictionary<string, int> _zoneVolumes = new() { ["Kitchen"] = 20, ["Den"] = 20 };
+
+  public FakeHouseController()
+  {
+    Handler = new RecordingHandler(RespondAsync);
+  }
+
+  public RecordingHandler Handler { get; }
+
+  /// <summary>When set, every request answers with this status.</summary>
+  public HttpStatusCode? ForcedStatus { get; set; }
+
+  /// <summary>When set, every request throws this, as a failed connection does.</summary>
+  public Exception? Failure { get; set; }
+
+  /// <summary>Amp link down: <c>GET /system</c> answers, and everything else is 503.</summary>
+  public bool AmpLinkDown { get; set; }
+
+  /// <summary>When set, <c>GET /system</c> waits on this after it is recorded.</summary>
+  public TaskCompletionSource? SystemGate { get; set; }
+
+  /// <summary>When set, <c>GET /zones</c> waits on this after it is recorded.</summary>
+  public TaskCompletionSource? ZonesGate { get; set; }
+
+  public IReadOnlyList<SeenRequest> Seen
+  {
+    get
+    {
+      lock (_sync)
+      {
+        return _seen.ToList();
+      }
+    }
+  }
+
+  public void SetVolume(string zone, int volume)
+  {
+    lock (_sync)
+    {
+      _zoneVolumes[zone] = volume;
+    }
+  }
+
+  /// <summary>An API client wired as <c>Program.cs</c> wires it, ending in this fake.</summary>
+  public HouseAudioApiService CreateClient(HouseAudioPasswordStore passwords)
+  {
+    HttpClient client = new(new HouseAudioAuthHandler(passwords) { InnerHandler = Handler })
+    {
+      BaseAddress = new Uri("http://house.test:3001")
+    };
+    return new HouseAudioApiService(client, passwords, NullLogger<HouseAudioApiService>.Instance);
+  }
+
+  /// <summary>A password store that already holds <see cref="Password"/>.</summary>
+  public static HouseAudioPasswordStore StoreWithPassword()
+  {
+    IDataProtectionProvider provider = new EphemeralDataProtectionProvider();
+    string stored = provider.CreateProtector(HouseAudioPasswordStore.ProtectorPurpose).Protect(Password);
+    return CreateStore(provider, stored, new RecordingHandler());
+  }
+
+  /// <summary>A password store over the given stored value, posting saves to <paramref name="configApi"/>.</summary>
+  public static HouseAudioPasswordStore CreateStore(
+    IDataProtectionProvider provider, string? storedValue, HttpMessageHandler configApi)
+  {
+    IConfiguration configuration = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?> { [HouseAudioPasswordStore.ConfigKey] = storedValue })
+      .Build();
+
+    ServiceCollection services = new();
+    services.AddSingleton(new ConfigurationApiService(
+      new HttpClient(configApi) { BaseAddress = new Uri("http://api.test:5000") },
+      NullLogger<ConfigurationApiService>.Instance));
+
+    return new HouseAudioPasswordStore(
+      configuration,
+      provider,
+      services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+      NullLogger<HouseAudioPasswordStore>.Instance);
+  }
+
+  private async Task<HttpResponseMessage> RespondAsync(HttpRequestMessage request, CancellationToken ct)
+  {
+    string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
+    string? password = request.Headers.TryGetValues("X-RNet-Password", out IEnumerable<string>? values)
+      ? values.Single()
+      : null;
+    lock (_sync)
+    {
+      _seen.Add(new SeenRequest(request.Method, request.RequestUri!, password, body));
+    }
+
+    string path = request.RequestUri!.AbsolutePath;
+    bool isRead = request.Method == HttpMethod.Get;
+    if (isRead && path == "/system" && SystemGate is { } systemGate)
+    {
+      await systemGate.Task.WaitAsync(ct);
+    }
+
+    if (isRead && path == "/zones" && ZonesGate is { } zonesGate)
+    {
+      await zonesGate.Task.WaitAsync(ct);
+    }
+
+    if (Failure is { } failure)
+    {
+      throw failure;
+    }
+
+    if (ForcedStatus is { } status)
+    {
+      return new HttpResponseMessage(status);
+    }
+
+    if (isRead && path == "/system")
+    {
+      return Json(new
+      {
+        name = "Mackelhome Controller",
+        address = "192.168.86.49",
+        serialConnected = !AmpLinkDown,
+        version = "1.1.1"
+      });
+    }
+
+    if (AmpLinkDown)
+    {
+      return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+      {
+        Content = new StringContent("RNet not connected.", Encoding.UTF8, "text/plain")
+      };
+    }
+
+    return (isRead, path) switch
+    {
+      (true, "/zones") => Json(ZonesPayload()),
+      (true, "/sources") => Json(new[]
+      {
+        new { sourceID = 0, name = "Audiocast 1", type = 7 },
+        new { sourceID = 2, name = "Pi Audio", type = 11 }
+      }),
+      _ => new HttpResponseMessage(HttpStatusCode.OK)
+    };
+  }
+
+  private object[] ZonesPayload()
+  {
+    lock (_sync)
+    {
+      return _zoneVolumes.Select(zone => (object)new
+      {
+        controllerID = 0,
+        zoneID = zone.Key == "Kitchen" ? 0 : 1,
+        name = zone.Key,
+        power = true,
+        volume = zone.Value,
+        sourceID = 2,
+        muted = false,
+        maxVolume = 80,
+        bass = -3,
+        treble = 4,
+        loudness = true,
+        balance = -1,
+        turnOnVolume = 30,
+        doNotDisturb = true,
+        partyMode = 2
+      }).ToArray();
+    }
+  }
+
+  private static HttpResponseMessage Json(object payload) => new(HttpStatusCode.OK)
+  {
+    Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+  };
+}

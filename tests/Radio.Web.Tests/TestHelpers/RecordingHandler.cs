@@ -33,7 +33,14 @@ namespace Radio.Web.Tests.TestHelpers;
 /// is recorded).
 /// </para>
 /// </summary>
-public sealed class RecordingHandler : HttpMessageHandler
+/// <param name="respond">
+/// Optional response for each request, for a test that needs more than the default <c>200 {}</c>.
+/// It runs after the request is recorded and any waiter released, so a test can park a request here
+/// and rendezvous on it with <see cref="WaitForAsync"/>.
+/// </param>
+public sealed class RecordingHandler(
+  Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? respond = null)
+  : HttpMessageHandler
 {
   /// <summary>
   /// Deadlock guard, not a timing margin — the same role
@@ -212,6 +219,11 @@ public sealed class RecordingHandler : HttpMessageHandler
       {
         waiter.Signal.TrySetResult();
       }
+    }
+
+    if (respond is not null)
+    {
+      return respond(request, cancellationToken);
     }
 
     // "{}" satisfies both the PlaybackStateDto read on the volume call and the dictionary read the
