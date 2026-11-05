@@ -40,8 +40,16 @@ public sealed class FakeHouseController
   /// <summary>When set, every request throws this, as a failed connection does.</summary>
   public Exception? Failure { get; set; }
 
-  /// <summary>Amp link down: <c>GET /system</c> answers, and everything else is 503.</summary>
+  /// <summary>
+  /// Amp link down: <c>GET /system</c> and <c>PUT /system/name</c> answer, and everything else is 503.
+  /// </summary>
   public bool AmpLinkDown { get; set; }
+
+  /// <summary>What <c>GET /system</c> reports as the address. The controller can report null.</summary>
+  public string? Address { get; set; } = "192.168.86.49";
+
+  /// <summary>Adds a zone the controller has no name for, which it reports as null.</summary>
+  public bool HasUnnamedZone { get; set; }
 
   /// <summary>When set, <c>GET /system</c> waits on this after it is recorded.</summary>
   public TaskCompletionSource? SystemGate { get; set; }
@@ -144,13 +152,14 @@ public sealed class FakeHouseController
       return Json(new
       {
         name = "Mackelhome Controller",
-        address = "192.168.86.49",
+        address = Address,
         serialConnected = !AmpLinkDown,
         version = "1.1.1"
       });
     }
 
-    if (AmpLinkDown)
+    // Both system routes come before the controller's amp check.
+    if (AmpLinkDown && path != "/system/name")
     {
       return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
       {
@@ -174,10 +183,17 @@ public sealed class FakeHouseController
   {
     lock (_sync)
     {
-      return _zoneVolumes.Select(zone => (object)new
+      IEnumerable<KeyValuePair<string?, int>> zones = _zoneVolumes
+        .Select(zone => new KeyValuePair<string?, int>(zone.Key, zone.Value));
+      if (HasUnnamedZone)
+      {
+        zones = zones.Append(new KeyValuePair<string?, int>(null, 0));
+      }
+
+      return zones.Select(zone => (object)new
       {
         controllerID = 0,
-        zoneID = zone.Key == "Kitchen" ? 0 : 1,
+        zoneID = zone.Key switch { "Kitchen" => 0, "Den" => 1, _ => 2 },
         name = zone.Key,
         power = true,
         volume = zone.Value,

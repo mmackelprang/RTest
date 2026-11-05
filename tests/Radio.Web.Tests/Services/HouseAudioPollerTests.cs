@@ -42,6 +42,9 @@ public sealed class HouseAudioPollerTests : IAsyncLifetime
   private static bool IsZonesPoll(HttpMethod method, string path) =>
     method == HttpMethod.Get && path == "/zones";
 
+  private static bool IsSourcesPoll(HttpMethod method, string path) =>
+    method == HttpMethod.Get && path == "/sources";
+
   private static HouseZone Zone(HouseAudioSnapshot snapshot, string name) =>
     snapshot.Zones.Single(zone => zone.Name == name);
 
@@ -241,28 +244,87 @@ public sealed class HouseAudioPollerTests : IAsyncLifetime
     Assert.Equal(60, Zone(await NextSnapshotAsync(), "Kitchen").Volume);
   }
 
-  [Fact]
-  public async Task Poller_PollThatBeganDuringAHold_CannotOverwriteAfterTheRelease()
+  // The tests below park the second poll on /zones, change something, then let it finish. Reaching
+  // /sources proves that poll has read its zones, so a volume set after that rendezvous can only be
+  // seen by a later poll: the value in the next snapshot says which poll raised it.
+  private async Task<TaskCompletionSource> ParkSecondPollOnZonesAsync()
   {
-    // The answer to this request was built before the command landed, whenever it arrives.
-    _poller.Start();
-    await NextSnapshotAsync();
-
     TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    IDisposable hold = _poller.HoldZone("Kitchen");
     _controller.ZonesGate = gate;
-    _controller.SetVolume("Kitchen", 60);
     _time.Advance(Interval);
     await _controller.Handler.WaitForAsync(IsZonesPoll, 2);
+    _controller.ZonesGate = null;
+    return gate;
+  }
+
+  private async Task FinishParkedPollAsync(TaskCompletionSource gate)
+  {
+    gate.SetResult();
+    await _controller.Handler.WaitForAsync(IsSourcesPoll, 2);
+  }
+
+  [Fact]
+  public async Task Poller_SnapshotAfterARelease_ComesFromAPollThatBeganAfterIt()
+  {
+    _poller.Start();
+    await NextSnapshotAsync();
+    IDisposable hold = _poller.HoldZone("Kitchen");
+    TaskCompletionSource gate = await ParkSecondPollOnZonesAsync();
 
     hold.Dispose();
-    _controller.ZonesGate = null;
+    _controller.SetVolume("Kitchen", 30);
+    await FinishParkedPollAsync(gate);
+    _controller.SetVolume("Kitchen", 60);
+    _time.Advance(Interval);
+
+    // The poll that spanned the release read 30, and must not be reported at all.
+    Assert.Equal(60, Zone(await NextSnapshotAsync(), "Kitchen").Volume);
+  }
+
+  [Fact]
+  public async Task Poller_HoldTakenAndReleasedInsideOnePoll_DiscardsThatPoll()
+  {
+    _poller.Start();
+    await NextSnapshotAsync();
+    TaskCompletionSource gate = await ParkSecondPollOnZonesAsync();
+
+    _poller.HoldZone("Kitchen").Dispose();
+    _controller.SetVolume("Kitchen", 30);
+    await FinishParkedPollAsync(gate);
+    _controller.SetVolume("Kitchen", 60);
+    _time.Advance(Interval);
+
+    Assert.Equal(60, Zone(await NextSnapshotAsync(), "Kitchen").Volume);
+  }
+
+  [Fact]
+  public async Task Poller_FailedPollThatSpansARelease_IsStillRaised()
+  {
+    _poller.Start();
+    await NextSnapshotAsync();
+    IDisposable hold = _poller.HoldZone("Kitchen");
+    TaskCompletionSource gate = await ParkSecondPollOnZonesAsync();
+
+    hold.Dispose();
+    _controller.Failure = new HttpRequestException("connection refused");
     gate.SetResult();
 
-    Assert.Equal(20, Zone(await NextSnapshotAsync(), "Kitchen").Volume);
+    HouseAudioSnapshot failed = await NextSnapshotAsync();
+    Assert.Equal(HouseAudioHealth.Unreachable, failed.Health);
+    Assert.True(failed.Stale);
+  }
 
+  [Fact]
+  public async Task Poller_FailedPollDuringAHold_IsStillRaised()
+  {
+    _poller.Start();
+    await NextSnapshotAsync();
+    using IDisposable hold = _poller.HoldZone("Kitchen");
+
+    _controller.Failure = new HttpRequestException("connection refused");
     _time.Advance(Interval);
-    Assert.Equal(60, Zone(await NextSnapshotAsync(), "Kitchen").Volume);
+
+    Assert.Equal(HouseAudioHealth.Unreachable, (await NextSnapshotAsync()).Health);
   }
 
   [Fact]
@@ -301,6 +363,19 @@ public sealed class HouseAudioPollerTests : IAsyncLifetime
     second.Dispose();
     _time.Advance(Interval);
     Assert.Equal(60, Zone(await NextSnapshotAsync(), "Kitchen").Volume);
+  }
+
+  [Fact]
+  public async Task Poller_AZoneWithNoName_CannotBreakAHold()
+  {
+    _controller.HasUnnamedZone = true;
+    _poller.Start();
+    await NextSnapshotAsync();
+    using IDisposable hold = _poller.HoldZone("Kitchen");
+
+    _time.Advance(Interval);
+
+    Assert.Equal(2, (await NextSnapshotAsync()).Zones.Count);
   }
 
   [Fact]

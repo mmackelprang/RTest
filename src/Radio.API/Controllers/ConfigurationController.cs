@@ -271,7 +271,7 @@ public class ConfigurationController : ControllerBase
       // three-argument ConfigurationApiService.UpdateConfigurationAsync(section, key, value) reads
       // a whole section through this endpoint, edits one key, and posts all of it back - so a
       // resolved secret would be written into the store as plaintext, destroying the tag
-      // indirection for good. That helper is pointed only at "ui.*" sections today.
+      // indirection for good. That helper is pointed only at "ui.*" sections and "HouseAudio" today.
       var entries = await store.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
 
       // Filter entries that match the section prefix

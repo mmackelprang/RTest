@@ -47,8 +47,17 @@ public class HouseAudioApiService
   public Task<HouseAudioResult<HouseSystemInfo>> GetSystemAsync(CancellationToken ct = default) =>
     ReadAsync<HouseSystemInfo>("/system", ct);
 
-  public Task<HouseAudioResult<IReadOnlyList<HouseZone>>> GetZonesAsync(CancellationToken ct = default) =>
-    ReadAsync<IReadOnlyList<HouseZone>>("/zones", ct);
+  /// <summary>
+  /// The controller's zones, less any it has no name for: it reports those as null, and every zone
+  /// route and <see cref="HouseAudioPoller.HoldZone"/> go by name.
+  /// </summary>
+  public async Task<HouseAudioResult<IReadOnlyList<HouseZone>>> GetZonesAsync(CancellationToken ct = default)
+  {
+    HouseAudioResult<IReadOnlyList<HouseZone>> result = await ReadAsync<IReadOnlyList<HouseZone>>("/zones", ct);
+    return result.Value is null
+      ? result
+      : result with { Value = result.Value.Where(zone => !string.IsNullOrEmpty(zone.Name)).ToList() };
+  }
 
   public Task<HouseAudioResult<IReadOnlyList<HouseSource>>> GetSourcesAsync(CancellationToken ct = default) =>
     ReadAsync<IReadOnlyList<HouseSource>>("/sources", ct);
@@ -88,7 +97,7 @@ public class HouseAudioApiService
   public Task<HouseAudioResult<bool>> RenameControllerAsync(string name, CancellationToken ct = default) =>
     WriteAsync(HttpMethod.Put, "/system/name", new { name }, ct);
 
-  /// <summary>Adds a source on an empty input. A refusal is 409, the input being occupied.</summary>
+  /// <summary>Adds a source on an empty input. A refusal is 409, input occupied, or 400, bad value.</summary>
   public Task<HouseAudioResult<bool>> AddSourceAsync(
     int sourceId, string name, int type, CancellationToken ct = default) =>
     // "sourceID" is spelled as the controller reads it, case-sensitively.
@@ -98,7 +107,7 @@ public class HouseAudioApiService
     int sourceId, string name, int type, CancellationToken ct = default) =>
     WriteAsync(HttpMethod.Put, $"/sources/{sourceId}", new { name, type }, ct);
 
-  /// <summary>Deletes a source. A refusal is 409, a powered zone using it.</summary>
+  /// <summary>Deletes a source. A refusal is 409, a powered zone using it, or 404, no such source.</summary>
   public Task<HouseAudioResult<bool>> DeleteSourceAsync(int sourceId, CancellationToken ct = default) =>
     WriteAsync(HttpMethod.Delete, $"/sources/{sourceId}", null, ct);
 

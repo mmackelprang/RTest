@@ -27,13 +27,14 @@ public sealed class HouseAudioPoller : IAsyncDisposable
   private readonly ILogger<HouseAudioPoller>? _logger;
   private readonly CancellationTokenSource _stopping = new();
 
-  // Guards _timer, _loop, _disposed and _holds.
+  // Guards _timer, _loop, _disposed, _holds and _holdReleases.
   private readonly object _sync = new();
   private readonly Dictionary<string, int> _holds = new(StringComparer.Ordinal);
 
   private PeriodicTimer? _timer;
   private Task? _loop;
   private bool _disposed;
+  private int _holdReleases;
 
   // Written only by the loop.
   private HouseSystemInfo? _system;
@@ -53,7 +54,9 @@ public sealed class HouseAudioPoller : IAsyncDisposable
   }
 
   /// <summary>
-  /// Raised after each poll, on a thread-pool thread. A component marshals with <c>InvokeAsync</c>.
+  /// Raised after each poll, except one discarded by a hold (see <see cref="HoldZone"/>), on a
+  /// thread-pool thread and under this poller's lock, so a handler must be brief. A component
+  /// marshals with <c>InvokeAsync</c>.
   /// ⚠ A handler must not wait for <see cref="DisposeAsync"/>, which waits for the handler.
   /// </summary>
   public event Action<HouseAudioSnapshot>? Updated;
@@ -76,9 +79,28 @@ public sealed class HouseAudioPoller : IAsyncDisposable
   }
 
   /// <summary>
-  /// While this is held, polls leave the named zone as it was, so that an answer built before a
-  /// command landed cannot snap the control back. Dispose it when the command has finished.
+  /// Take this for the length of a command on the named zone, and dispose it when the command has
+  /// finished. While it is held, snapshots show the zone as it was before the hold, so the panel
+  /// keeps showing the value it commanded.
   /// </summary>
+  /// <remarks>
+  /// <para>
+  /// <b>The contract: every non-stale snapshot raised after a release comes from a poll that began
+  /// after that release.</b> A successful poll that spans any release is discarded, as its answer can predate
+  /// the command. So the panel keeps its commanded value until the first non-stale snapshot after
+  /// the release, which then carries the controller's true state.
+  /// </para>
+  /// <para>
+  /// A failed poll is always raised, so a dead controller shows even during holds. Such a snapshot
+  /// has <c>Stale</c> set and its zones are the last good ones, which can predate the command, so a
+  /// panel must not take a commanded value from it.
+  /// </para>
+  /// <para>
+  /// ⚠ The contract is about when <see cref="Updated"/> fires. A handler that marshals with
+  /// <c>InvokeAsync</c> can have a snapshot raised just before the release still queued, and see it
+  /// just after. The next poll corrects it.
+  /// </para>
+  /// </remarks>
   public IDisposable HoldZone(string zoneName)
   {
     lock (_sync)
@@ -132,9 +154,11 @@ public sealed class HouseAudioPoller : IAsyncDisposable
 
   private async Task PollAsync(CancellationToken ct)
   {
-    // Taken before the first request: an answer to a request sent during a hold can arrive after it
-    // ends, and that answer is as old as the hold.
-    HashSet<string> heldAtStart = HeldZones();
+    int holdReleasesAtStart;
+    lock (_sync)
+    {
+      holdReleasesAtStart = _holdReleases;
+    }
 
     HouseAudioResult<HouseSystemInfo> system = await _api.GetSystemAsync(ct).ConfigureAwait(false);
     _system = system.Value ?? _system;
@@ -157,39 +181,41 @@ public sealed class HouseAudioPoller : IAsyncDisposable
       sources = sourcesResult.Value;
     }
 
-    if (health == HouseAudioHealth.Ok)
-    {
-      heldAtStart.UnionWith(HeldZones());
-      _zones = KeepHeldZones(zones!, heldAtStart);
-      _sources = sources!;
-    }
-
     // Disposal is what cancels ct, and nothing is reported after it.
     ct.ThrowIfCancellationRequested();
-    Raise(new HouseAudioSnapshot(health, _system, _zones, _sources, Stale: health != HouseAudioHealth.Ok));
+
+    // Raised inside the lock, so a release cannot fall between this check and the raise.
+    lock (_sync)
+    {
+      if (health == HouseAudioHealth.Ok)
+      {
+        if (_holdReleases != holdReleasesAtStart)
+        {
+          return;
+        }
+
+        _zones = KeepHeldZones(zones!);
+        _sources = sources!;
+      }
+
+      Raise(new HouseAudioSnapshot(health, _system, _zones, _sources, Stale: health != HouseAudioHealth.Ok));
+    }
   }
 
-  private IReadOnlyList<HouseZone> KeepHeldZones(IReadOnlyList<HouseZone> polled, HashSet<string> held)
+  // Caller holds _sync.
+  private IReadOnlyList<HouseZone> KeepHeldZones(IReadOnlyList<HouseZone> polled)
   {
-    if (held.Count == 0)
+    if (_holds.Count == 0)
     {
       return polled;
     }
 
-    // Matched on the ids, which unlike names the controller cannot report twice or as null.
+    // Matched on the ids, because two zones can share a name.
     return polled
-      .Select(zone => !held.Contains(zone.Name)
+      .Select(zone => !_holds.ContainsKey(zone.Name)
         ? zone
         : _zones.FirstOrDefault(shown => shown.ControllerId == zone.ControllerId && shown.ZoneId == zone.ZoneId) ?? zone)
       .ToList();
-  }
-
-  private HashSet<string> HeldZones()
-  {
-    lock (_sync)
-    {
-      return new HashSet<string>(_holds.Keys, StringComparer.Ordinal);
-    }
   }
 
   private void Raise(HouseAudioSnapshot snapshot)
@@ -209,6 +235,7 @@ public sealed class HouseAudioPoller : IAsyncDisposable
   {
     lock (_sync)
     {
+      _holdReleases++;
       int remaining = _holds[zoneName] - 1;
       if (remaining == 0)
       {

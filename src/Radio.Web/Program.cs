@@ -425,9 +425,7 @@ builder.Services.AddTransient<Radio.Web.Services.Http.HouseAudioAuthHandler>();
 builder.Services.AddHttpClient<HouseAudioApiService>((services, client) =>
 {
   // Read here rather than beside the other base URLs: the SQLite bridge is added further down.
-  string houseAudioBaseUrl = services.GetRequiredService<IConfiguration>()["HouseAudio:BaseUrl"]
-    ?? "http://homeaudio.local:3001";
-  client.BaseAddress = new Uri(houseAudioBaseUrl);
+  client.BaseAddress = HouseAudioSettings.BaseUrl(services.GetRequiredService<IConfiguration>());
   client.Timeout = TimeSpan.FromSeconds(5);
 })
 .AddHttpMessageHandler<Radio.Web.Services.Http.HouseAudioAuthHandler>()
@@ -445,7 +443,7 @@ builder.Services.AddHttpClient<HouseAudioApiService>((services, client) =>
 builder.Services.AddScoped<Func<HouseAudioPoller>>(services => () => new HouseAudioPoller(
   services.GetRequiredService<HouseAudioApiService>(),
   TimeProvider.System,
-  TimeSpan.FromSeconds(services.GetRequiredService<IConfiguration>().GetValue("HouseAudio:PollSeconds", 3)),
+  HouseAudioSettings.PollInterval(services.GetRequiredService<IConfiguration>()),
   services.GetRequiredService<ILogger<HouseAudioPoller>>()));
 
 // Register SignalR hub services as singletons (Phase 1 Task 1.3, Phase 10)

@@ -2,8 +2,10 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
@@ -103,6 +105,39 @@ public class HouseAudioApiServiceTests
         HouseAudioHealth.Ok,
         new HouseSystemInfo("Mackelhome Controller", "192.168.86.49", true, "1.1.1")),
       result);
+  }
+
+  [Fact]
+  public async Task GetSystem_ReadsANullAddress()
+  {
+    _controller.Address = null;
+
+    HouseAudioResult<HouseSystemInfo> result = await _api.GetSystemAsync(CancellationToken.None);
+
+    Assert.Equal(HouseAudioHealth.Ok, result.Health);
+    Assert.Null(result.Value!.Address);
+  }
+
+  [Fact]
+  public async Task GetZones_DropsAZoneWithNoName()
+  {
+    // Every zone route is by name, so such a zone cannot be commanded, and a null breaks ZonePath.
+    _controller.HasUnnamedZone = true;
+
+    HouseAudioResult<IReadOnlyList<HouseZone>> result = await _api.GetZonesAsync(CancellationToken.None);
+
+    Assert.Equal(HouseAudioHealth.Ok, result.Health);
+    Assert.Equal(["Kitchen", "Den"], result.Value!.Select(zone => zone.Name));
+  }
+
+  [Fact]
+  public async Task RenameController_WorksWhileTheAmpLinkIsDown()
+  {
+    _controller.AmpLinkDown = true;
+
+    HouseAudioResult<bool> result = await _api.RenameControllerAsync("Den", CancellationToken.None);
+
+    Assert.Equal(new HouseAudioResult<bool>(HouseAudioHealth.Ok, true), result);
   }
 
   [Fact]
@@ -433,6 +468,55 @@ public class HouseAudioRegistrationTests(RadioWebFactory factory) : IClassFixtur
     // RadioWebFactory points the setting away from the live controller.
     Assert.Equal(new Uri("http://127.0.0.1:1"), client.BaseAddress);
     Assert.Equal(TimeSpan.FromSeconds(5), client.Timeout);
+  }
+
+  private static IConfiguration Settings(string key, string? value) => new ConfigurationBuilder()
+    .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+    .Build();
+
+  [Theory]
+  [InlineData("0", 3)]
+  [InlineData("-1", 3)]
+  [InlineData("soon", 3)]
+  [InlineData("", 3)]
+  [InlineData(null, 3)]
+  [InlineData("7", 7)]
+  public void PollInterval_FallsBack_WhenTheSettingIsUnusable(string? configured, int expectedSeconds)
+  {
+    TimeSpan interval = HouseAudioSettings.PollInterval(Settings("HouseAudio:PollSeconds", configured));
+
+    Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), interval);
+  }
+
+  [Theory]
+  [InlineData("", "http://homeaudio.local:3001/")]
+  [InlineData("   ", "http://homeaudio.local:3001/")]
+  [InlineData("not a url", "http://homeaudio.local:3001/")]
+  [InlineData(null, "http://homeaudio.local:3001/")]
+  [InlineData("http://192.168.86.49:3001", "http://192.168.86.49:3001/")]
+  public void BaseUrl_FallsBack_WhenTheSettingIsUnusable(string? configured, string expected)
+  {
+    Uri baseUrl = HouseAudioSettings.BaseUrl(Settings("HouseAudio:BaseUrl", configured));
+
+    Assert.Equal(new Uri(expected), baseUrl);
+  }
+
+  [Fact]
+  public async Task BadSettings_DoNotThrow_WhereThePanelCreatesThePoller()
+  {
+    await using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder =>
+      builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+        new Dictionary<string, string?>
+        {
+          ["HouseAudio:PollSeconds"] = "0",
+          ["HouseAudio:BaseUrl"] = ""
+        })));
+    using IServiceScope circuit = host.Services.CreateScope();
+
+    await using HouseAudioPoller poller = circuit.ServiceProvider.GetRequiredService<Func<HouseAudioPoller>>()();
+
+    // Start is where a zero interval would throw. No password is stored, so this sends nothing.
+    poller.Start();
   }
 
   [Fact]
