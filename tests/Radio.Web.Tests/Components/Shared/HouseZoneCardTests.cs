@@ -203,13 +203,29 @@ public class HouseZoneCardTests : TestContext
     cut.Find(".seek-bar-fill").GetAttribute("style").Should().Contain("20%");
   }
 
+  [Fact]
+  public void Card_SourcePicker_ThatWasOpen_StaysClosed_WhenTheRoomComesBackOn()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone());
+    cut.Find("[data-testid='house-zone-source']").Click();
+
+    cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(power: false)));
+    cut.FindAll("[data-testid='house-source-option']").Should().BeEmpty();
+
+    cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(power: true)));
+
+    cut.FindAll("[data-testid='house-source-option']").Should().BeEmpty("nobody asked for it this time");
+    cut.FindAll("[data-testid='house-source-away']").Should().BeEmpty();
+  }
+
   [Theory]
-  [InlineData(0.47, 46)]    // the controller floors to even, so what the card shows is what lands
-  [InlineData(0.90, 80)]    // and clamps to the room's maximum
-  public async Task Card_Volume_IsWhatTheControllerWouldKeep(double fraction, int expected)
+  [InlineData(0.47, 80, 46)]    // the controller floors to even, so what the card shows is what lands
+  [InlineData(0.90, 80, 80)]    // and clamps to the room's maximum
+  [InlineData(0.90, 81, 80)]    // and an odd maximum floors too, as the route does
+  public async Task Card_Volume_IsWhatTheControllerWouldKeep(double fraction, int maxVolume, int expected)
   {
     List<int> committed = [];
-    IRenderedComponent<HouseZoneCard> cut = Render(Zone(maxVolume: 80), onVolume: committed.Add);
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(maxVolume: maxVolume), onVolume: committed.Add);
     SeekBar bar = cut.FindComponent<SeekBar>().Instance;
 
     await cut.InvokeAsync(() => bar.OnDragMove(fraction));

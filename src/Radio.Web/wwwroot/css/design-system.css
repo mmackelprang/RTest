@@ -8491,6 +8491,7 @@ body:has(.icb-scrim) .encoder-selector-overlay {
 }
 
 .house-audio-status {
+  display: block;
   font-size: 14px;
   line-height: 1.25;
   color: var(--signal-amber);
@@ -8676,6 +8677,7 @@ body:has(.icb-scrim) .encoder-selector-overlay {
   position: fixed;
   inset: 0;
   z-index: 99;
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 

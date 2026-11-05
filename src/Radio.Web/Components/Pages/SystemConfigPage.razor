@@ -92,7 +92,9 @@
 
     <!-- Tab 2: House Audio -->
     <RadzenTabsItem Text="House Audio" Icon="speaker_group">
-      <HouseAudioPanel IsActive="@(_activeTab == HouseAudioTabIndex)" />
+      @* Mounted only while this tab shows, as RadzenTabs renders only the selected tab's body. That
+         is what limits its polling to someone looking at it. *@
+      <HouseAudioPanel />
     </RadzenTabsItem>
 
     <!-- Tab 3: Configuration Management -->
@@ -1940,7 +1942,6 @@
   // Where the Rotary Encoders panel lives, as a pair of tab indices. RadzenTabs identifies a tab by
   // its position, so inserting a tab above either of these moves the panel and both constants have to
   // move with it. They exist because the encoder poll is only allowed to run while that panel shows.
-  private const int HouseAudioTabIndex = 1;
   private const int IntegrationsTabIndex = 8;
   private const int RotaryEncoderSubTabIndex = 0;
 

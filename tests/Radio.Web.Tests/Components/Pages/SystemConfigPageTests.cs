@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Models;
@@ -21,9 +22,12 @@ namespace Radio.Web.Tests.Components.Pages;
 public class SystemConfigPageTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
+  private static readonly TimeSpan HousePollInterval = TimeSpan.FromSeconds(3);
+
   private readonly RoutedApiHandler _metricsApi = new();
   private readonly RecordingHandler _integrationsApi = new();
   private readonly FakeHouseController _houseController = new();
+  private readonly FakeTimeProvider _houseTime = new();
   private int _housePollersCreated;
 
   public SystemConfigPageTests()
@@ -81,7 +85,7 @@ public class SystemConfigPageTests : TestContext
     Services.AddSingleton<Func<HouseAudioPoller>>(() =>
     {
       _housePollersCreated++;
-      return new HouseAudioPoller(houseApi, TimeProvider.System, TimeSpan.FromHours(1));
+      return new HouseAudioPoller(houseApi, _houseTime, HousePollInterval);
     });
 
     // Setup JSInterop for Radzen components
@@ -747,13 +751,12 @@ public class SystemConfigPageTests : TestContext
   }
 
   /// <summary>
-  /// The Rotary Encoders panel is the one the toast at <c>MainLayout.razor:1643</c> sends the owner
-  /// to, though it lands on <c>/system</c>, one tap short: no route selects that tab. What
-  /// <c>IntegrationsTabIndex</c> decides is whether the panel works once reached, because the 2 Hz
-  /// poll that fills it runs only while that index is the showing tab.
+  /// <c>IntegrationsTabIndex</c> decides when the encoder poll runs, so a stale value leaves the Rotary
+  /// Encoders panel unfilled. No route selects this tab: the toast at <c>MainLayout.razor:1643</c>
+  /// lands on <c>/system</c>.
   /// </summary>
   [Fact]
-  public async Task EncoderDeepLink_StillOpensIntegrations()
+  public async Task IntegrationsTab_StartsTheEncoderPoll()
   {
     var cut = RenderComponent<SystemConfigPage>();
     int before = _integrationsApi.Count(IsEncoderPoll);
@@ -766,19 +769,40 @@ public class SystemConfigPageTests : TestContext
     SelectTab(cut, "System Stats");
   }
 
+  /// <summary>
+  /// RadzenTabs renders only the selected tab's body, so the panel exists only while its tab shows.
+  /// This holds that end to end: nothing before the tab is opened, and leaving it ends the poller.
+  /// </summary>
   [Fact]
   public async Task HouseAudio_PollsOnlyWhileItsTabIsShowing()
   {
+    static bool IsSystemPoll(HttpMethod method, string path) => method == HttpMethod.Get && path == "/system";
+
     var cut = RenderComponent<SystemConfigPage>();
-    _housePollersCreated.Should().Be(0, "a hidden Radzen tab stays mounted, and an unopened one must cost nothing");
+    _housePollersCreated.Should().Be(0, "an unopened tab has no panel, and must cost the box nothing");
 
     SelectTab(cut, "House Audio");
-    await _houseController.Handler.WaitForAsync((method, path) => path == "/system", 1);
     cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
+    _housePollersCreated.Should().Be(1);
+
+    // Parks a poll in flight. Only the poller's disposal can cancel it, so this waits on the fact
+    // rather than on a silence that a slow machine would also produce.
+    int polls = _houseController.Handler.Count(IsSystemPoll);
+    _houseController.SystemGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    _houseTime.Advance(HousePollInterval);
+    await _houseController.Handler.WaitForAsync(IsSystemPoll, polls + 1);
 
     SelectTab(cut, "System Stats");
 
-    cut.WaitForAssertion(() => cut.Markup.Should().NotContain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
+    await _houseController.RequestCancelled.Task.WaitAsync(RecordingHandler.RendezvousTimeout);
+    cut.Markup.Should().NotContain("Mackelhome Controller");
+
+    // Coming back is a new panel with its own poller, never a shared or reused one.
+    _houseController.SystemGate = null;
+    SelectTab(cut, "House Audio");
+
+    cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
+    _housePollersCreated.Should().Be(2);
   }
 
   [Theory]

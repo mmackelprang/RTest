@@ -24,23 +24,18 @@ public class HouseAudioPanelTests : TestContext
   private readonly FakeTimeProvider _time = new();
   private readonly FakeHouseController _controller = new();
   private HouseAudioPasswordStore _passwords = FakeHouseController.StoreWithPassword();
-  private int _pollersCreated;
 
   public HouseAudioPanelTests()
   {
     JSInterop.Mode = JSRuntimeMode.Loose;
   }
 
-  private IRenderedComponent<HouseAudioPanel> Render(bool active = true)
+  private IRenderedComponent<HouseAudioPanel> Render()
   {
     HouseAudioApiService api = _controller.CreateClient(_passwords);
     Services.AddSingleton(api);
-    Services.AddSingleton<Func<HouseAudioPoller>>(() =>
-    {
-      _pollersCreated++;
-      return new HouseAudioPoller(api, _time, Interval);
-    });
-    return RenderComponent<HouseAudioPanel>(parameters => parameters.Add(panel => panel.IsActive, active));
+    Services.AddSingleton<Func<HouseAudioPoller>>(() => new HouseAudioPoller(api, _time, Interval));
+    return RenderComponent<HouseAudioPanel>();
   }
 
   private static bool IsSystemPoll(HttpMethod method, string path) => method == HttpMethod.Get && path == "/system";
@@ -149,6 +144,7 @@ public class HouseAudioPanelTests : TestContext
     _controller.Failure = new HttpRequestException("connection refused");
     IRenderedComponent<HouseAudioPanel> cut = Render();
     WaitForMarkup(cut, "reach the controller");
+    cut.FindAll("[data-testid='house-audio-empty']").Should().BeEmpty("the status line already says what is wrong");
 
     _controller.Failure = null;
     _time.Advance(Interval);
@@ -176,7 +172,7 @@ public class HouseAudioPanelTests : TestContext
 
     WaitForMarkup(cut, "refused the password");
     cut.Find("[data-testid='house-audio-status']").TextContent.Should().Contain("Controller settings");
-    cut.Find("[data-testid='house-controller-settings']").Should().NotBeNull();
+    cut.Find("[data-testid='house-controller-settings']").TextContent.Should().Contain("Controller settings");
   }
 
   [Fact]
@@ -206,41 +202,39 @@ public class HouseAudioPanelTests : TestContext
   }
 
   [Fact]
-  public async Task Panel_StartsPolling_OnlyWhenItsTabIsActive()
-  {
-    IRenderedComponent<HouseAudioPanel> cut = Render(active: false);
-
-    // Counted at creation: a poller started here would run on another thread, and could lose a race
-    // with a check of the requests.
-    _pollersCreated.Should().Be(0);
-
-    cut.SetParametersAndRender(parameters => parameters.Add(panel => panel.IsActive, true));
-    await PollsBegunAsync(1);
-    WaitForMarkup(cut, "Kitchen");
-
-    cut.SetParametersAndRender(parameters => parameters.Add(panel => panel.IsActive, false));
-    int seenWhenLeft = _controller.Seen.Count;
-    _time.Advance(Interval);
-
-    _controller.Seen.Should().HaveCount(seenWhenLeft, "the poller is disposed, and awaited, on leaving the tab");
-    cut.Markup.Should().NotContain("Kitchen");
-
-    cut.SetParametersAndRender(parameters => parameters.Add(panel => panel.IsActive, true));
-    await PollsBegunAsync(2);
-    WaitForMarkup(cut, "Kitchen");
-  }
-
-  [Fact]
-  public void Panel_WhenDisposed_StopsPolling()
+  public async Task Panel_WhenDisposed_StopsPolling()
   {
     IRenderedComponent<HouseAudioPanel> cut = Render();
     WaitForMarkup(cut, "Kitchen");
+    _controller.SystemGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    await NextPollAsync();
 
     DisposeComponents();
-    int seenWhenDisposed = _controller.Seen.Count;
-    _time.Advance(Interval);
 
-    _controller.Seen.Should().HaveCount(seenWhenDisposed);
+    // Only the poller's disposal can cancel that request, so this cannot pass by being quick.
+    await _controller.RequestCancelled.Task.WaitAsync(Patience);
+  }
+
+  [Fact]
+  public async Task Panel_MutedRoom_ReportingVolumeZero_StillShowsThatItIsMuted()
+  {
+    _controller.SetVolume("Kitchen", 50);
+    _controller.SetMuted("Kitchen", true);
+
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForLevel(cut, "Kitchen", "0");
+
+    Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("true");
+    Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-source']")!.TextContent.Should().Contain("muted");
+
+    // Unmuting shows at once, and the room's own volume comes back with the next report.
+    Tap(cut, "Kitchen", "house-zone-mute");
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+    _controller.SetMuted("Kitchen", false);
+    await NextPollAsync();
+
+    WaitForLevel(cut, "Kitchen", "50");
+    Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("false");
   }
 
   [Fact]
@@ -253,13 +247,54 @@ public class HouseAudioPanelTests : TestContext
     await SetVolumeAsync(cut, "Kitchen", 0.6);
 
     WaitForLevel(cut, "Kitchen", "20");
-    cut.Find("[data-testid='house-audio-status']").TextContent.Should().Contain("Kitchen").And.Contain("refused");
+    cut.Find("[data-testid='house-audio-command-error']").TextContent.Should().Contain("Kitchen").And.Contain("refused");
+  }
 
-    // The next command clears it.
+  [Fact]
+  public async Task Panel_FailedCommand_ClearsAtTheNextHealthySnapshot()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "Kitchen");
+    _controller.WriteStatus = HttpStatusCode.Conflict;
+    await SetVolumeAsync(cut, "Kitchen", 0.6);
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-command-error']").Should().ContainSingle(), Patience);
+
+    await NextPollAsync();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-command-error']").Should().BeEmpty(), Patience);
+  }
+
+  [Fact]
+  public async Task Panel_FailedCommand_ThenAHealthChange_ShowsBoth()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "Kitchen");
+    _controller.WriteStatus = HttpStatusCode.Conflict;
+    await SetVolumeAsync(cut, "Kitchen", 0.6);
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-command-error']").Should().ContainSingle(), Patience);
+
+    _controller.AmpLinkDown = true;
+    await NextPollAsync();
+
+    cut.WaitForAssertion(
+      () => cut.Find("[data-testid='house-audio-status']").TextContent.Should().Contain("reach the amp"), Patience);
+    cut.Find("[data-testid='house-audio-command-error']").TextContent.Should().Contain("Kitchen",
+      "a stale snapshot says nothing about the command, so the failure stays");
+  }
+
+  [Fact]
+  public async Task Panel_NextCommand_ClearsAFailure()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "Kitchen");
+    _controller.WriteStatus = HttpStatusCode.Conflict;
+    await SetVolumeAsync(cut, "Kitchen", 0.6);
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-command-error']").Should().ContainSingle(), Patience);
+
     _controller.WriteStatus = null;
     await SetVolumeAsync(cut, "Kitchen", 0.3);
 
-    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-status']").Should().BeEmpty(), Patience);
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-command-error']").Should().BeEmpty(), Patience);
   }
 
   [Fact]
@@ -297,7 +332,7 @@ public class HouseAudioPanelTests : TestContext
 
     cut.Find("[data-testid='house-all-off']").Click();
 
-    cut.WaitForAssertion(() => cut.Find("[data-testid='house-audio-status']").TextContent.Should().Contain("amp"), Patience);
+    cut.WaitForAssertion(() => cut.Find("[data-testid='house-audio-command-error']").TextContent.Should().Contain("amp"), Patience);
     cut.FindAll("[data-testid='house-zone-power']").Should()
       .OnlyContain(button => button.GetAttribute("aria-pressed") == "true");
   }

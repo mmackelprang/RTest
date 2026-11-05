@@ -50,8 +50,8 @@
   </div>
 
   <button type="button" class="house-zone-source" data-testid="house-zone-source"
-          aria-haspopup="listbox" aria-expanded="@AriaBool(PickerOpen)"
-          disabled="@(!Zone.Power)" @onclick="@(() => _pickerRequested = !_pickerRequested)">
+          aria-haspopup="listbox" aria-expanded="@AriaBool(_pickerOpen)"
+          disabled="@(!Zone.Power)" @onclick="@(() => _pickerOpen = !_pickerOpen)">
     <span class="house-zone-source-name">@SourceText</span>
     @if (Zone.Power)
     {
@@ -59,11 +59,13 @@
     }
   </button>
 
-  @if (PickerOpen)
+  @if (_pickerOpen)
   {
+    @* preventDefault stops the browser turning this touch into a click, which could land on whatever
+       is under the layer once it has gone. *@
     <div class="house-source-away" data-testid="house-source-away"
          @onclick="ClosePicker" @onclick:stopPropagation="true"
-         @ontouchend="ClosePicker" @ontouchend:stopPropagation="true"></div>
+         @ontouchend="ClosePicker" @ontouchend:stopPropagation="true" @ontouchend:preventDefault="true"></div>
     <div class="house-source-list" role="listbox" aria-label="@($"{Zone.Name} source")">
       @foreach (HouseSource source in Sources)
       {
@@ -101,10 +103,7 @@
   // The volume under the finger, from the first move until the commit has finished.
   private int? _scrubVolume;
 
-  private bool _pickerRequested;
-
-  // A room turned off from elsewhere closes its list, as it has nothing to pick for.
-  private bool PickerOpen => _pickerRequested && Zone.Power;
+  private bool _pickerOpen;
 
   private int ShownVolume => _scrubVolume ?? Zone.Volume;
 
@@ -129,6 +128,16 @@
     }
   }
 
+  // A room turned off from elsewhere closes its list, as it has nothing to pick for, and the list
+  // does not come back with the room.
+  protected override void OnParametersSet()
+  {
+    if (!Zone.Power)
+    {
+      _pickerOpen = false;
+    }
+  }
+
   private static string AriaBool(bool value) => value ? "true" : "false";
 
   /// <summary>
@@ -138,7 +147,7 @@
   private int VolumeAt(double fraction)
   {
     int percent = (int)Math.Round(fraction * 100);
-    return Math.Min(percent / 2 * 2, Zone.MaxVolume);
+    return Math.Min(percent, Zone.MaxVolume) / 2 * 2;
   }
 
   private void HandleScrub(double? fraction) =>
@@ -146,7 +155,7 @@
 
   private Task HandleSeekAsync(double fraction) => OnVolumeCommitted.InvokeAsync(VolumeAt(fraction));
 
-  private void ClosePicker() => _pickerRequested = false;
+  private void ClosePicker() => _pickerOpen = false;
 
   private async Task PickSourceAsync(HouseSource source)
   {

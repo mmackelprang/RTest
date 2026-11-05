@@ -62,6 +62,9 @@ public sealed class FakeHouseController
   /// <summary>When set, every request other than a GET waits on this after it is recorded.</summary>
   public TaskCompletionSource? WriteGate { get; set; }
 
+  /// <summary>Completes when a request parked on a gate is cancelled, as a poller's disposal does.</summary>
+  public TaskCompletionSource RequestCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
   /// <summary>When set, <c>GET /system</c> waits on this after it is recorded.</summary>
   public TaskCompletionSource? SystemGate { get; set; }
 
@@ -170,17 +173,17 @@ public sealed class FakeHouseController
     bool isRead = request.Method == HttpMethod.Get;
     if (isRead && path == "/system" && SystemGate is { } systemGate)
     {
-      await systemGate.Task.WaitAsync(ct);
+      await ParkAsync(systemGate, ct);
     }
 
     if (isRead && path == "/zones" && ZonesGate is { } zonesGate)
     {
-      await zonesGate.Task.WaitAsync(ct);
+      await ParkAsync(zonesGate, ct);
     }
 
     if (!isRead && WriteGate is { } writeGate)
     {
-      await writeGate.Task.WaitAsync(ct);
+      await ParkAsync(writeGate, ct);
     }
 
     if (Failure is { } failure)
@@ -230,6 +233,19 @@ public sealed class FakeHouseController
     };
   }
 
+  private async Task ParkAsync(TaskCompletionSource gate, CancellationToken ct)
+  {
+    try
+    {
+      await gate.Task.WaitAsync(ct);
+    }
+    catch (OperationCanceledException)
+    {
+      RequestCancelled.TrySetResult();
+      throw;
+    }
+  }
+
   private object?[] ZonesPayload()
   {
     lock (_sync)
@@ -247,7 +263,8 @@ public sealed class FakeHouseController
         zoneID = zone.Key switch { "Kitchen" => 0, "Den" => 1, _ => 2 },
         name = zone.Key,
         power = zone.Key is null || !_zonesOff.Contains(zone.Key),
-        volume = zone.Value,
+        // Zone.setMute takes the volume to 0 and keeps the old one aside, so a muted room reports 0.
+        volume = zone.Key is not null && _zonesMuted.Contains(zone.Key) ? 0 : zone.Value,
         sourceID = 2,
         muted = zone.Key is not null && _zonesMuted.Contains(zone.Key),
         maxVolume = 80,

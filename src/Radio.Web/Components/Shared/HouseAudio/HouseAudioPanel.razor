@@ -2,16 +2,17 @@
 @inject Func<HouseAudioPoller> CreatePoller
 @inject HouseAudioApiService Api
 
-@* The House Audio tab: the controller's rooms, as cards. RadzenTabs keeps hidden tabs mounted, so
-   polling follows IsActive rather than this component's lifetime: an unopened tab costs the box
-   nothing, and leaving the tab stops the poll.
+@* The House Audio tab: the controller's rooms, as cards. SystemConfigPage's RadzenTabs is in its default
+   Server render mode, which renders only the selected tab's body, so this component exists only while
+   its tab shows. Polling follows its lifetime: an unopened tab costs the box nothing, and leaving the
+   tab disposes the poller.
 
    Commands apply immediately and the card shows them at once. HouseAudioCommandLedger decides what
    each card shows after that, and its tests state the rules. RNET traffic stays in this process, off
    the audio path. Nothing here logs: a room name is not for the journal (CLAUDE.md, radio-web). *@
 
 @{
-  IReadOnlyList<HouseZone> zones = _ledger?.Zones ?? [];
+  IReadOnlyList<HouseZone> zones = _ledger.Zones;
   IReadOnlyList<HouseZone> powered = zones.Where(zone => zone.Power).ToList();
   bool allMuted = powered.Count > 0 && powered.All(zone => zone.Muted);
   bool stale = _snapshot?.Stale ?? false;
@@ -21,9 +22,13 @@
   <header class="house-audio-header">
     <span class="house-audio-name">@(_snapshot?.System?.Name ?? "House Audio")</span>
     <span class="house-audio-status-slot">
-      @if (StatusText is { } status)
+      @if (HealthText is { } health)
       {
-        <span class="house-audio-status" role="alert" data-testid="house-audio-status">@status</span>
+        <span class="house-audio-status" role="alert" data-testid="house-audio-status">@health</span>
+      }
+      @if (_commandError is { } error)
+      {
+        <span class="house-audio-status" role="alert" data-testid="house-audio-command-error">@error</span>
       }
     </span>
     <button type="button" class="house-audio-action" data-testid="house-mute-all"
@@ -56,24 +61,29 @@
       }
     </div>
   }
-  else
+  else if (EmptyText is { } empty)
   {
-    <div class="house-audio-empty">@(_snapshot is null ? "Connecting to the controller." : "No rooms to show.")</div>
+    <div class="house-audio-empty" data-testid="house-audio-empty">@empty</div>
   }
 </section>
 
 @code {
-  /// <summary>True while this panel's tab is the showing tab. Polling runs only then.</summary>
-  [Parameter] public bool IsActive { get; set; }
-
-  private HouseAudioPoller? _poller;
-  private HouseAudioCommandLedger? _ledger;
+  private readonly HouseAudioCommandLedger _ledger = new();
+  private HouseAudioPoller _poller = default!;
   private HouseAudioSnapshot? _snapshot;
+
+  // Shown beside the health line, never instead of it. Clears at the next command or the next
+  // non-stale snapshot, which comes from a poll begun after the command ended.
   private string? _commandError;
   private bool _disposed;
 
-  // A failed command says so until the next command, or until the tab is left.
-  private string? StatusText => _commandError ?? HealthText;
+  // With no rooms and a failed poll, the health line already says what is wrong.
+  private string? EmptyText => _snapshot?.Health switch
+  {
+    null => "Connecting to the controller.",
+    HouseAudioHealth.Ok => "No rooms to show.",
+    _ => null
+  };
 
   private string? HealthText => _snapshot?.Health switch
   {
@@ -91,58 +101,35 @@
     _ => "Can't reach the controller."
   };
 
-  protected override async Task OnParametersSetAsync()
+  protected override void OnInitialized()
   {
-    if (IsActive && _poller is null)
-    {
-      StartPolling();
-    }
-    else if (!IsActive && _poller is not null)
-    {
-      await StopPollingAsync();
-    }
-  }
-
-  private void StartPolling()
-  {
-    HouseAudioCommandLedger ledger = new();
-    HouseAudioPoller poller = CreatePoller();
-    poller.Updated += snapshot =>
+    _poller = CreatePoller();
+    _poller.Updated += snapshot =>
     {
       // Runs under the poller's lock, so this read cannot pass a release. It must be here, not in the
       // queued work, or a snapshot raised before a release and handled after it would pass for new.
-      long releases = ledger.Releases;
-      _ = InvokeAsync(() => ShowSnapshot(ledger, snapshot, releases));
+      long releases = _ledger.Releases;
+      _ = InvokeAsync(() => ShowSnapshot(snapshot, releases));
     };
 
-    _ledger = ledger;
-    _poller = poller;
-    poller.Start();
+    _poller.Start();
   }
 
-  private async Task StopPollingAsync()
+  private void ShowSnapshot(HouseAudioSnapshot snapshot, long releases)
   {
-    HouseAudioPoller poller = _poller!;
-    _poller = null;
-    _ledger = null;
-    _snapshot = null;
-    _commandError = null;
-    await poller.DisposeAsync();
-  }
-
-  private void ShowSnapshot(HouseAudioCommandLedger ledger, HouseAudioSnapshot snapshot, long releases)
-  {
-    // Queued before the tab was left, or before this component was disposed.
-    if (!ReferenceEquals(ledger, _ledger) || _disposed)
+    // Queued before this component was disposed.
+    if (_disposed || !_ledger.Accept(snapshot, releases))
     {
       return;
     }
 
-    if (ledger.Accept(snapshot, releases))
+    _snapshot = snapshot;
+    if (!snapshot.Stale)
     {
-      _snapshot = snapshot;
-      StateHasChanged();
+      _commandError = null;
     }
+
+    StateHasChanged();
   }
 
   private Task SetPowerAsync(HouseZone zone)
@@ -187,14 +174,9 @@
     string failure,
     Func<Task<HouseAudioResult<bool>>> send)
   {
-    if (_poller is not { } poller || _ledger is not { } ledger)
-    {
-      return;
-    }
-
     _commandError = null;
-    HouseAudioCommand command = ledger.Begin(zoneNames, change);
-    List<IDisposable> holds = zoneNames.Select(poller.HoldZone).ToList();
+    HouseAudioCommand command = _ledger.Begin(zoneNames, change);
+    List<IDisposable> holds = zoneNames.Select(_poller.HoldZone).ToList();
 
     HouseAudioResult<bool> result;
     try
@@ -204,7 +186,7 @@
     finally
     {
       holds.ForEach(hold => hold.Dispose());
-      ledger.Release(command);
+      _ledger.Release(command);
     }
 
     if (result is { Health: HouseAudioHealth.Ok, Value: true })
@@ -212,8 +194,8 @@
       return;
     }
 
-    ledger.Fail(command);
-    if (ReferenceEquals(ledger, _ledger) && !_disposed)
+    _ledger.Fail(command);
+    if (!_disposed)
     {
       _commandError = $"{failure} {Reason(result.Health)}";
       StateHasChanged();
@@ -223,9 +205,6 @@
   public async ValueTask DisposeAsync()
   {
     _disposed = true;
-    if (_poller is not null)
-    {
-      await StopPollingAsync();
-    }
+    await _poller.DisposeAsync();
   }
 }
