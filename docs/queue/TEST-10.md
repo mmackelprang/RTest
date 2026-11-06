@@ -2,6 +2,8 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+✅ **Fixed 2026-11-05 on `fix/bt-autoswitch-probe-and-race`: the tests rendezvous on the service's deferred and abandoned metrics and on the last unsubscribe. 200/200 under CPU saturation (32 cores, Linux). Bounded negative checks remain, and starvation can only weaken them.**
+
 🟡 **P2.** Filed 2026-09-09 when it failed a full-suite run under load during `UX-1`'s merge gate.
 
 ## What fails
