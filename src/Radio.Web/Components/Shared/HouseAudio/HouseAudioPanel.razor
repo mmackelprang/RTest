@@ -251,12 +251,24 @@
   // Unmuting returns the room to its volume, so the card does not drop to the 0 the mute left.
   private HouseZone WithMuted(HouseZone shown, bool muted) => muted
     ? shown with { Muted = true }
-    : shown with { Muted = false, Volume = _ledger.UnmutedVolume(shown) ?? shown.Volume };
+    : shown with
+    {
+      Muted = false,
+      Volume = _ledger.UnmutedVolume(shown) is { } unmuted ? Math.Min(unmuted, shown.MaxVolume) : shown.Volume
+    };
 
-  // The controller ends a mute when a volume is set, unless that volume is the 0 the room is already at.
-  private Task SetVolumeAsync(HouseZone zone, int volume) =>
-    RunAsync([zone.Name], shown => shown with { Volume = volume, Muted = shown.Muted && volume == 0 },
+  // The controller ends a mute when a volume is set, unless that volume is the 0 the room is already
+  // at. In that one case the room stays muted, and the volume it returns to has not changed.
+  private async Task SetVolumeAsync(HouseZone zone, int volume)
+  {
+    bool accepted = await RunAsync([zone.Name], shown => shown with { Volume = volume, Muted = shown.Muted && volume == 0 },
       $"{zone.Name} volume was not changed.", () => Api.SetVolumeAsync(zone.Name, volume));
+
+    if (accepted && !(zone.Muted && volume == 0))
+    {
+      _ledger.RememberUnmutedVolume(zone, volume);
+    }
+  }
 
   private Task SetSourceAsync(HouseZone zone, int sourceId) =>
     RunAsync([zone.Name], shown => shown with { SourceId = sourceId }, $"{zone.Name} source was not changed.",

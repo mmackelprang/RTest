@@ -47,8 +47,37 @@ public class HouseAudioCommandLedgerTests
     HouseAudioCommand command = SetVolume(0);
     Assert.Equal(40, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
 
+    // A report while the command is held: the room shows 0, and only the reported 40 may be remembered.
+    Report(false, Zone("Kitchen", 40));
+    Assert.Equal(40, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
+
     _ledger.Fail(command);
     Assert.Equal(40, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
+  }
+
+  [Fact]
+  public void UnmutedVolume_ForAnotherRoomsCommand_IsStillOnlyTheReportedVolume()
+  {
+    Report(false, Zone("Kitchen", 40), Zone("Den", 20));
+    HouseAudioCommand command = SetVolume(0, "Kitchen");
+    _ledger.Release(command);
+
+    Report(false, Zone("Kitchen", 44), Zone("Den", 24));
+
+    Assert.Equal(44, _ledger.UnmutedVolume(Zone("Kitchen", 44)));
+    Assert.Equal(24, _ledger.UnmutedVolume(Zone("Den", 24)));
+  }
+
+  [Fact]
+  public void RememberUnmutedVolume_StandsUntilTheNextReport()
+  {
+    Report(false, Zone("Kitchen", 40));
+
+    _ledger.RememberUnmutedVolume(Zone("Kitchen", 40), 60);
+    Assert.Equal(60, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
+
+    Report(false, Zone("Kitchen", 0, muted: true));
+    Assert.Equal(60, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
   }
 
   [Fact]

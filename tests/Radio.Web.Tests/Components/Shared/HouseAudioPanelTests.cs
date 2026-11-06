@@ -386,6 +386,60 @@ public class HouseAudioPanelTests : TestContext
   }
 
   [Fact]
+  public async Task Panel_Unmute_NeverShowsMoreThanTheMaximum()
+  {
+    // The fake's maximum is 80, and a room can be above a maximum lowered after it was last set.
+    IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(90);
+    Level(cut, "Kitchen").Should().Be("80");
+
+    await cut.InvokeAsync(() => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.ClickAsync(new MouseEventArgs()));
+
+    Level(cut, "Kitchen").Should().Be("80");
+  }
+
+  [Fact]
+  public async Task Panel_MuteAll_Unmute_KeepsEachRoomsVolume()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(50);
+    _controller.SetMuted("Den", true);
+    await NextPollAsync();
+    WaitForMarkup(cut, "Unmute all");
+
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-mute-all']").Click());
+
+    Level(cut, "Kitchen").Should().Be("50");
+    Level(cut, "Den").Should().Be("20");
+  }
+
+  [Fact]
+  public async Task Panel_DragThenMuteBeforeThePoll_RemembersTheDraggedVolume()
+  {
+    _controller.SetVolume("Kitchen", 50);
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForLevel(cut, "Kitchen", "50");
+
+    await SetVolumeAsync(cut, "Kitchen", 0.6);
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+    await cut.InvokeAsync(() => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.ClickAsync(new MouseEventArgs()));
+
+    cut.WaitForAssertion(() => Level(cut, "Kitchen").Should().Be("60"), Patience);
+  }
+
+  [Fact]
+  public async Task Panel_DragToZeroOnAMutedRoom_StaysMuted_AtItsReturnVolume()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(50);
+
+    await SetVolumeAsync(cut, "Kitchen", 0);
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+
+    cut.WaitForAssertion(
+      () => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("true"),
+      Patience);
+    Level(cut, "Kitchen").Should().Be("50");
+  }
+
+  [Fact]
   public async Task Panel_FailedUnmute_ReturnsToMuted_AtTheSameVolume()
   {
     IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(50);
