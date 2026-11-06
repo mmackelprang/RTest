@@ -1482,6 +1482,19 @@ Both keys live in `Radio.Web`'s configuration, not `Radio.API`'s.
 | `HouseAudio:BaseUrl` | `http://homeaudio.local:3001` | The controller's web hook port. Not a valid absolute URL: the default is used |
 | `HouseAudio:PollSeconds` | `3` | How often an open tab polls. Unusable values fall back to the default |
 
+**To override one on the box, add it to `/opt/radio-console/web/appsettings.Production.json`,** alongside what the
+file already holds, and restart `radio-web`:
+
+```json
+"HouseAudio": { "BaseUrl": "http://192.168.86.49:3001" }
+```
+
+- **Not `appsettings.json`:** every deploy overwrites it. The deploy's `rsync` excludes the Production file, so an
+  edit there survives.
+- **Not `/opt/radio-console/`,** the service's working directory: the files load from its content root,
+  `ASPNETCORE_CONTENTROOT=/opt/radio-console/web`.
+- ⚠ **The SQLite configuration store outranks both files.** A `HouseAudio:BaseUrl` row there wins over this edit.
+
 Polling runs only while the tab is open, one poller per open panel. **Live push does not exist on that port.** All
 RNET traffic is server-side, in `Radio.Web`, off the audio path. The browser never talks to the controller.
 
@@ -1501,6 +1514,9 @@ refused, because that is where it gets entered, and a saved password takes effec
 - **Travels in the `X-RNet-Password` header, never a URL.** The controller also accepts `?pass=`, which this
   client does not use, because `Radio.Web` logs at Information to the journal.
 - **ASCII only.** It has to travel in a header: printable ASCII, with no control characters.
+- ⚠ **The on-screen keyboard types less than that.** It has letters, digits, space and `- _ / \ : . @ $ #`, and Shift
+  changes only the letters, so `! % & + = ' ( ) ,` and ASCII's other symbols cannot be typed on the panel. A password
+  that uses them has to be entered from a browser on another device, at `http://radio:5002/system`.
 
 ### Routes used
 
@@ -1547,9 +1563,11 @@ panel checks and words that rule itself. A delete refused with 409 means a power
 
 ## Web UI Management
 
-All three integrations can be monitored and configured from the Web UI at:
+The rotary encoders, phone integration and notifications can be monitored and configured from the Web UI at:
 
-**System Config → Integrations** (8th tab)
+**System Config → Integrations** (9th tab)
+
+House Audio has its own tab, second on the same page ([§ 4](#4-house-audio-rnet-controller)).
 
 The Integrations tab has three sub-tabs:
 
