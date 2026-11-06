@@ -31,12 +31,12 @@ public class HouseAudioCommandLedgerTests
   public void UnmutedVolume_ComesFromReports_AndSurvivesAMute()
   {
     HouseZone kitchen = Zone("Kitchen", 40);
-    _ledger.UnmutedVolume(kitchen).Should().BeNull("no report has been seen");
+    Assert.Null(_ledger.UnmutedVolume(kitchen));
 
     Report(false, kitchen);
     Report(false, Zone("Kitchen", 0, muted: true));
 
-    _ledger.UnmutedVolume(kitchen).Should().Be(40);
+    Assert.Equal(40, _ledger.UnmutedVolume(kitchen));
   }
 
   [Fact]
@@ -45,10 +45,10 @@ public class HouseAudioCommandLedgerTests
     Report(false, Zone("Kitchen", 40));
 
     HouseAudioCommand command = SetVolume(0);
-    _ledger.UnmutedVolume(Zone("Kitchen", 40)).Should().Be(40);
+    Assert.Equal(40, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
 
     _ledger.Fail(command);
-    _ledger.UnmutedVolume(Zone("Kitchen", 40)).Should().Be(40);
+    Assert.Equal(40, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
   }
 
   [Fact]
@@ -56,7 +56,7 @@ public class HouseAudioCommandLedgerTests
   {
     Report(false, Zone("Kitchen", 0, muted: true));
 
-    _ledger.UnmutedVolume(Zone("Kitchen", 0, muted: true)).Should().BeNull();
+    Assert.Null(_ledger.UnmutedVolume(Zone("Kitchen", 0, muted: true)));
   }
 
   [Fact]
