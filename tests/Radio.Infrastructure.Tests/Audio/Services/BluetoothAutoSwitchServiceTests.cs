@@ -744,6 +744,33 @@ public class BluetoothAutoSwitchServiceTests
   }
 
   [Fact]
+  public async Task NodeThatArrivedByEventAndCouldNotBeBound_WaitsForTheNextOne_RatherThanSearchingAgain()
+  {
+    // Here the first node came by event, so that signal is spent. Waiting on it again would return at
+    // once and turn a failed bind into 20 s searches back to back for as long as the phone stays.
+    var bt = new FakeBluetoothService();
+    bt.CaptureHandler = _ => Task.FromResult(bt.CaptureRequests == 1 ? null : new object());
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+
+    // Bounded negative check: starvation can only weaken it (CLAUDE.md § Test Timing).
+    await Task.Delay(100);
+    Assert.Equal(1, bt.CaptureRequests);
+    Assert.Equal(0, counters.SwitchCount);
+
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(2, bt.CaptureRequests);
+  }
+
+  [Fact]
   public async Task DeviceDisconnectsDuringTheBind_CancelsIt_AndDoesNotSwitch()
   {
     // The bind can sit in a 20 s search. A phone that leaves meanwhile must end it, not stop the radio.

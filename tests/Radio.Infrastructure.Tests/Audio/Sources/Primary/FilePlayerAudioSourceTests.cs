@@ -530,6 +530,30 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   [Fact]
+  public async Task TakeoverStop_ThenPrevious_StartsThatFileFromTheTop()
+  {
+    // Previous changes the file without going through a load, so this is the route on which only
+    // the kept place's own record of its file stops it landing on the wrong track.
+    var source = CreateSource();
+    CreateTestFile("one.mp3");
+    CreateTestFile("two.mp3");
+    await source.LoadFileAsync("one.mp3");
+    await source.AddToQueueAsync("two.mp3");
+    await source.PlayAsync();
+    await source.NextAsync();
+    Assert.Contains("two.mp3", source.CurrentFile);
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    await source.PreviousAsync();
+    Assert.Contains("one.mp3", source.CurrentFile);
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
   public async Task TakeoverStop_ThenPickingTheSameFileAgain_StartsItFromTheTop()
   {
     // Only a plain Play resumes. Choosing the file is asking for it from the start.
