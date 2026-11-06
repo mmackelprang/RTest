@@ -4239,6 +4239,10 @@
     }
 
     _tabRestored = true;
+
+    // Explicit, because the base class already rendered at the await above and won't again until
+    // OnInitializedAsync ends. Without this the tabs stay hidden for the whole data load.
+    StateHasChanged();
   }
 
   private async Task RememberTabAsync(int index)

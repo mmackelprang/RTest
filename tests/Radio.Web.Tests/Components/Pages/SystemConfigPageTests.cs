@@ -804,6 +804,31 @@ public class SystemConfigPageTests : TestContext
     cut.WaitForAssertion(() => SelectedTab(cut).Should().Contain("House Audio"));
   }
 
+  /// <summary>
+  /// The tabs wait for the memory, and only for that. ComponentBase renders at the first await and then
+  /// not again until OnInitializedAsync ends, so with the tabs held past that first await they stayed
+  /// hidden for the whole data load: 5.4 s on the box. The fake API here never answers, so the load
+  /// cannot end and only an explicit render can show them.
+  /// </summary>
+  [Fact]
+  public void TheTabs_ShowWhileThePageDataIsStillLoading()
+  {
+    using HttpClient neverAnswers = new(new NeverAnswers()) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
+    Services.AddSingleton(new SystemApiService(neverAnswers, NullLogger<SystemApiService>.Instance));
+    JSRuntimeInvocationHandler<string?> read = JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey);
+
+    var cut = RenderComponent<SystemConfigPage>();
+    read.SetResult("1");
+
+    cut.WaitForAssertion(() => SelectedTab(cut).Should().Contain("House Audio"));
+  }
+
+  private sealed class NeverAnswers : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+      new TaskCompletionSource<HttpResponseMessage>().Task;
+  }
+
   [Theory]
   [InlineData(null)]
   [InlineData("")]
