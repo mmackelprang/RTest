@@ -218,6 +218,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceDisconnected += OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered += OnCaptureStreamRecovered;
     _bluetoothService.CaptureStreamStalled += OnCaptureStreamStalled;
+    _bluetoothService.CaptureNodeAvailable += OnCaptureNodeAvailable;
 
     if (_playbackService != null)
     {
@@ -363,8 +364,21 @@ public class BluetoothAudioSource : USBAudioSourceBase
     TryPromoteToPlayingFromLastAvrcpStatus();
   }
 
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Separate from <see cref="StopCoreAsync"/> because stall recovery calls that directly, and a
+  /// recovery is not anyone asking for silence. See <see cref="_stopRequested"/>.
+  /// </remarks>
+  public override async Task StopAsync(CancellationToken cancellationToken = default)
+  {
+    _stopRequested = true;
+    await base.StopAsync(cancellationToken);
+  }
+
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
+    _stopRequested = false;
+
     // Platform manages audio routing — nothing to start locally
     if (_bluetoothService.IsAudioManagedByPlatform)
     {
@@ -381,6 +395,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       // Capture device available — route through mixer
       await RouteCaptureThroughMixerAsync();
+    }
+    else if (_bluetoothService.ConnectedDevice == null)
+    {
+      // No phone, so there is nothing to retry: every attempt would only log a Warning into
+      // journald, 12 times, 10 s apart. Measured on the box 2026-11-06 with Bluetooth restored as
+      // the persisted source. OnDeviceConnected acquires when a phone does connect.
+      Logger.LogInformation("BluetoothAudioSource: PlayCoreAsync — no device connected, waiting for one");
     }
     else
     {
@@ -410,6 +431,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
   // demote this source out of Paused, and the console's Play would go to PlayAsync — which does
   // not ask the phone to play — instead of ResumeAsync, which does.
   private volatile bool _pausedByConsole;
+
+  // True from a stop until the next play or the end of the device session. Stop on the console
+  // leaves this source active and the phone connected, so without this a pause and resume on the
+  // phone would bring the audio back: OnCaptureNodeAvailable would see an active source with no
+  // capture, which is exactly what it binds.
+  private volatile bool _stopRequested;
 
   protected override async Task PauseCoreAsync(CancellationToken cancellationToken)
   {
@@ -514,6 +541,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceDisconnected -= OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered -= OnCaptureStreamRecovered;
     _bluetoothService.CaptureStreamStalled -= OnCaptureStreamStalled;
+    _bluetoothService.CaptureNodeAvailable -= OnCaptureNodeAvailable;
 
     if (_playbackService != null)
     {
@@ -550,7 +578,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     var connected = _bluetoothService.ConnectedDevice;
     var connectedName = connected?.Name ?? DefaultDeviceName;
-    MetadataInternal[StandardMetadataKeys.Title] = connectedName;
+
+    // A placeholder for when no title is showing. A takeover's first acquisition lands here with the
+    // phone's track already shown, and the phone sends Track only when it changes.
+    var shownTitle = MetadataInternal.GetValueOrDefault(StandardMetadataKeys.Title) as string;
+    if (string.IsNullOrEmpty(shownTitle) || shownTitle == DefaultTitle)
+    {
+      MetadataInternal[StandardMetadataKeys.Title] = connectedName;
+    }
     MetadataInternal["Device"] = connectedName;
     if (!string.IsNullOrWhiteSpace(connected?.Address))
     {
@@ -579,6 +614,29 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // until the service restarts.
     NeedsFingerprintingLookup = true;
     _ = TryAcquireAudioCaptureAsync();
+  }
+
+  /// <summary>
+  /// H1: binds a node that appears when this source is active and holds no capture. The search on
+  /// connect gives up after about 20 s, and an idle phone has no node until it plays, so without this
+  /// the node of a phone played later was bound by nothing and the phone dropped it after about 4 s
+  /// (AUD-10). The 30 s pipeline monitor is too slow for that, and stops after three attempts.
+  /// </summary>
+  /// <remarks>
+  /// <see cref="TryAcquireAudioCaptureAsync"/> decides the two cases that are not this one. A capture
+  /// parked by a pause: this source still holds that generator, so it returns, and
+  /// LinuxBluetoothService re-binds it (AUD-10). An inactive source: it returns, and
+  /// BluetoothAutoSwitchService binds the node ahead of the switch.
+  /// </remarks>
+  private void OnCaptureNodeAvailable(object? sender, CaptureNodeAvailableEventArgs e)
+  {
+    if (_stopRequested)
+    {
+      return;
+    }
+
+    // Off the PipeWire registry thread: acquisition tears down the old capture synchronously.
+    _ = Task.Run(TryAcquireAudioCaptureAsync);
   }
 
   /// <summary>
@@ -727,7 +785,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private void TryPromoteToPlayingFromLastAvrcpStatus(
     [System.Runtime.CompilerServices.CallerMemberName] string? via = null)
   {
-    if (State != AudioSourceState.Ready || !_avrcpReportsPlaying)
+    // Not while another source is active, for the reason on the Playing arm of
+    // OnPlaybackStatusChanged: the switch does not start a source that already reads Playing.
+    if (State != AudioSourceState.Ready || !_avrcpReportsPlaying || !IsActiveSource)
     {
       return;
     }
@@ -758,6 +818,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
         return;
       }
 
+      // M7: while another source is active, this path acquires nothing. Capture reaches the mixer
+      // when this source is started: by the auto-switch, or by the owner selecting it.
+      if (!IsActiveSource)
+      {
+        Logger.LogDebug("BluetoothAudioSource: not the active source, leaving capture to the switch");
+        return;
+      }
+
       if (_captureDevice != null || SoundComponent != null)
       {
         Logger.LogDebug("BluetoothAudioSource: capture device already acquired, skipping");
@@ -771,9 +839,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
         ApplyDeferredCaptureState();
         Logger.LogInformation("BluetoothAudioSource: audio capture device acquired after device connected");
 
-        // Route unconditionally — the capture must reach the mixer whether the
-        // source was already Playing (activated before the phone connected) or
-        // has only just become Ready.
+        // Route whether the source was already Playing (activated before the phone
+        // connected) or has only just become Ready.
         await RouteCaptureThroughMixerAsync();
       }
       else if (capture is SoundComponent soundComponent)
@@ -782,9 +849,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
         ApplyDeferredCaptureState();
         Logger.LogInformation("BluetoothAudioSource: PipeWire capture generator acquired after device connected");
 
-        // Route unconditionally — the capture must reach the mixer whether the
-        // source was already Playing (activated before the phone connected) or
-        // has only just become Ready.
+        // Route whether the source was already Playing (activated before the phone
+        // connected) or has only just become Ready.
         await RouteCaptureThroughMixerAsync();
       }
       else
@@ -805,6 +871,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// </summary>
   private async Task RouteCaptureThroughMixerAsync()
   {
+    // M7: every route starts here, so an inactive source starts none, including stall recovery,
+    // which reaches this through PlayCoreAsync. Inactive sources can still hold a capture (prewarm,
+    // stall recovery), and the next PlayCoreAsync routes it. ⚠ This is a check at the start, not a
+    // guarantee for the whole route: a switch-away during PlayComponentAsync is not covered.
+    if (!IsActiveSource)
+    {
+      Logger.LogDebug("BluetoothAudioSource: not the active source, keeping capture out of the mixer");
+      return;
+    }
+
     // Serialize routing to prevent duplicate generators in the mixer.
     // Both TryAcquireAudioCaptureAsync (DeviceConnected event) and PlayCoreAsync
     // can race into this method before _playbackId is set by the first caller.
@@ -862,6 +938,19 @@ public class BluetoothAudioSource : USBAudioSourceBase
       {
         // PipeWire/WASAPI capture path: register generator directly with mixer
         // Use the audio source ID so AudioManager.SetSourceGain can apply the gain offset.
+        //
+        // Nothing has read this generator yet, and a capture bound ahead of a takeover has been
+        // filling it for as long as the old source took to stop. Played from the oldest sample,
+        // that backlog would stay as seconds of latency, so it is dropped. The same two arms as the
+        // AUD-10 re-bind: with priming off, the 0.5 s silence cushion is that mode's only margin.
+        if (generator.IsPrimingEnabled)
+        {
+          generator.RearmPriming();
+        }
+        else
+        {
+          generator.ResetWithSilence(0.5f);
+        }
         _playbackId = Id;
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, generator, Volume, CancellationToken.None);
@@ -1020,6 +1109,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
       // placement was chosen for. Recorded, deliberately, rather than half-fixed.
       _avrcpReportsPlaying = false;
       _pausedByConsole = false;
+      _stopRequested = false;
 
       SetPositionAnchor(TimeSpan.Zero);
       _btDuration = null;
@@ -1631,9 +1721,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
         //
         // C-174 — now queue row AUD-14 — records the BlueZ watcher leak that makes the
         // unsafe provenance reachable rather than theoretical.
-        if (State == AudioSourceState.Ready
-            || State == AudioSourceState.Paused
-            || (State == AudioSourceState.Stopped && HasCapturePath))
+        //
+        // ⛔ M7: never while another source is active. AudioManager.SwitchSourceAsync only starts
+        // a source whose State is not Playing, so a source promoted here would be skipped by the
+        // switch and never routed: the takeover would silence the radio and play nothing. The
+        // edge is not lost: it is recorded in _avrcpReportsPlaying above, and the switch's own
+        // PlayAsync lands the source in Playing regardless.
+        if (IsActiveSource
+            && (State == AudioSourceState.Ready
+                || State == AudioSourceState.Paused
+                || (State == AudioSourceState.Stopped && HasCapturePath)))
         {
           State = AudioSourceState.Playing;
         }

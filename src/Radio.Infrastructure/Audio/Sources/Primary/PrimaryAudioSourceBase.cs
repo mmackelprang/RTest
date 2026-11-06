@@ -84,6 +84,14 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
     return ticks == 0 ? null : new DateTime(ticks, DateTimeKind.Utc);
   }
 
+  /// <summary>
+  /// Asks this source to keep its place through its next stop, because something is taking over
+  /// rather than the owner stopping it. A no-op for a source with no place to keep.
+  /// </summary>
+  internal virtual void KeepPlaceOnNextStop()
+  {
+  }
+
   /// <inheritdoc/>
   public override AudioSourceCategory Category => AudioSourceCategory.Primary;
 

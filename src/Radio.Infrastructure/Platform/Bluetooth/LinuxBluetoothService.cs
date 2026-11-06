@@ -1544,7 +1544,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     BluetoothDeviceInfo connected, CancellationToken cancellationToken)
   {
     // A fresh acquisition supersedes any parked capture (AUD-10): it builds a NEW generator, and
-    // whoever asked for it is the one who will route that generator — the parked one is abandoned.
+    // the parked one is abandoned. The asker routes the new one, except for BluetoothAutoSwitchService's
+    // bind ahead of a switch: there it is read from here by the source that switch starts, provided that
+    // source holds no older capture of its own.
     _parkedCapture = null;
 
     // Cleanup previous capture
@@ -1906,9 +1908,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
   /// <summary>
   /// Handler for <see cref="PipeWireRegistryListener.NodeAppeared"/>. Surfaces
-  /// the appearance as <see cref="CaptureNodeAvailable"/> for the existing
-  /// downstream consumers (Plan B autoswitch gate), then queues the AUD-10 re-bind
-  /// of a parked capture.
+  /// the appearance as <see cref="CaptureNodeAvailable"/> for its consumers (the Plan B
+  /// autoswitch gate, and BluetoothAudioSource when it is active with no capture),
+  /// then queues the AUD-10 re-bind of a parked capture.
   /// </summary>
   /// <remarks>
   /// ⚠ AUD-10 §1.2: this used to publish the registry global id as <c>PipeWireSerial</c>, under a

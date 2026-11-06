@@ -1203,4 +1203,35 @@ is why it is the case the harness leads with.
 
 ---
 
+## ADR-036: A connected phone takes over when it has audio, however late, and once per connection
+
+**Date:** 2026-11-06
+**Status:** Accepted. The trigger is open to the owner (below).
+**Context:** The auto-switch gave up 60 s after a connect, so a phone connected idle and played later
+never took over. Asked whether a late switch should replace a source picked by hand, the owner ruled:
+*"Yes - bluetooth should pause the current stream whenever it connects."*
+
+**Decision:** `AutoSwitchMaxWaitMs` is gone. A connected device waits until its capture node appears
+or it disconnects. The trigger stays the node, not the connect. Each connection takes over once.
+
+**Alternatives considered:**
+- **Silence the current source at the connect.** One reading of "whenever it connects". Rejected for
+  now: a phone coming into range with nothing playing would silence the radio with no audio to replace
+  it. Open to the owner.
+- **Take over on every node.** Rejected: the node comes and goes with every pause on the phone
+  (AUD-10), so a source picked after a takeover would be replaced at the next resume.
+
+**Consequences:**
+- Any audio from an idle connected phone, a notification sound included, can now take over at any
+  time, not only in the first 60 s. It happens once per connection. The capture is bound before the old
+  source stops, so a node that goes before it can be bound leaves the old source playing.
+- A takeover persists Bluetooth as the current source, so a restart with the phone away comes up on
+  Bluetooth, silent, reporting Playing. `AudioManager` persists every switch alike; unchanged here.
+- ⚠ The wait depends on the node event. After a PipeWire restart the registry listener stops
+  delivering (`H6`), and the wait then ends only at a disconnect.
+- A switch still stops the old source; there is no pause in `AudioManager`. A file keeps its place for
+  the next press of Play, on this path only. Nothing resumes when the phone disconnects.
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
