@@ -106,6 +106,11 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _frequencyStep = Frequency.FromMegahertz(options.DefaultFMStepMHz);
     _deviceVolume = options.DefaultDeviceVolume;
 
+    // The receiver applies these to the device when it starts. They are read once, so a change on
+    // the panel lasts until the next restart.
+    _radioReceiver.Gain = options.TunerGainDb;
+    _radioReceiver.AutoGainEnabled = options.AutoGain;
+
     // Subscribe to RTLSDRCore events and translate to Radio.Core events
     _radioReceiver.FrequencyChanged += OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated += OnRTLSDRSignalStrengthUpdated;

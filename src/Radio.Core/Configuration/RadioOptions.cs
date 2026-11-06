@@ -65,4 +65,24 @@ public class RadioOptions
   /// Gets or sets the default device volume (0-100).
   /// </summary>
   public int DefaultDeviceVolume { get; set; } = 50;
+
+  /// <summary>
+  /// Gets or sets whether the SDR tuner starts on automatic gain.
+  /// </summary>
+  /// <remarks>
+  /// False, because automatic gain overloaded the device's converter on strong FM stations on the
+  /// appliance. A switch on the panel changes the gain until the next restart. Applies to every
+  /// band that uses the tuner; AM and Shortwave use direct sampling and bypass it.
+  /// </remarks>
+  public bool AutoGain { get; set; }
+
+  /// <summary>
+  /// Gets or sets the SDR tuner's gain in dB, used when <see cref="AutoGain"/> is false.
+  /// </summary>
+  /// <remarks>
+  /// 30 was measured on the appliance: the overload clears on 97.7 MHz, and stereo and RDS hold. It
+  /// suits that antenna and those stations. Signal readings scale with it, so a change here moves
+  /// every station against <see cref="ScanStopThreshold"/>.
+  /// </remarks>
+  public float TunerGainDb { get; set; } = 30f;
 }
