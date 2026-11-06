@@ -5,7 +5,7 @@
    parent's row to lay out. Used for a room's volume, and for its Turn On Volume and Maximum Volume.
 
    ⚠ Owner ruling: a tap must not jump a level, so the bar moves only by the finger's travel. SeekBar
-   shows the finger, not Value, from the first move until the commit has finished, so an incoming poll
+   shows the finger, not Value, from the first move past the slop until the commit has finished, so an incoming poll
    cannot move it, and one value goes out on release. *@
 
 <SeekBar Class="@Class"
@@ -29,7 +29,7 @@
   [Parameter] public bool Disabled { get; set; }
 
   /// <summary>How far a finger travels before it counts as a drag, as a fraction of this bar.</summary>
-  [Parameter] public double TapSlop { get; set; }
+  [Parameter, EditorRequired] public double TapSlop { get; set; }
 
   [Parameter] public string? AriaLabel { get; set; }
 
@@ -40,14 +40,15 @@
   /// <summary>Raised once per gesture, on release. Nothing reaches it during a drag, or for a tap.</summary>
   [Parameter] public EventCallback<int> OnCommitted { get; set; }
 
-  // The level under the finger, from the first move until the commit has finished.
+  // The level under the finger, from the first move past the slop until the commit has finished.
   private int? _scrub;
 
   private int Shown => _scrub ?? Value;
 
   /// <summary>
-  /// The level a fraction of the bar comes to, as the amp would keep it: it holds levels in steps of
-  /// two. So the number shown is the number that lands.
+  /// The level a fraction of the bar comes to, in steps of two. The amp holds a room's volume and its
+  /// Turn On Volume in those steps, so the number shown is the number that lands. The controller
+  /// itself would keep an odd Maximum Volume; that slider steps by two just to share this code.
   /// </summary>
   private int LevelAt(double fraction)
   {

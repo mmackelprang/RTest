@@ -194,7 +194,10 @@
   // The card stays until a poll reports the room gone, as the controller is the record of what exists.
   private async Task DeleteZoneAsync(HouseZone zone)
   {
-    if (await RunAsync([zone.Name], shown => shown, $"{zone.Name} was not deleted.", () => Api.DeleteZoneAsync(zone.Name)))
+    bool deleted = await RunAsync([zone.Name], shown => shown, $"{zone.Name} was not deleted.", () => Api.DeleteZoneAsync(zone.Name));
+
+    // Another room's settings may have been opened while this was in flight.
+    if (deleted && IsTuned(zone))
     {
       _tunedZone = null;
     }

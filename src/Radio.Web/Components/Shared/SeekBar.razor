@@ -40,7 +40,10 @@
   /// <summary>Playback position as a fraction in [0, 1]. Ignored while a drag or its commit is in flight.</summary>
   [Parameter] public double Fraction { get; set; }
 
-  /// <summary>When true the gesture is ignored (the JS reads aria-disabled at pointerdown) and no thumb renders.</summary>
+  /// <summary>
+  /// When true the gesture is ignored (the JS reads aria-disabled at pointerdown) and no thumb renders.
+  /// A drag already under way when this turns true ends without a seek.
+  /// </summary>
   [Parameter] public bool Disabled { get; set; }
 
   /// <summary>Fraction under the finger while dragging; null when the drag ends. Display only — never seek from it.</summary>
@@ -79,7 +82,8 @@
   private double? _dragFraction;
 
   // Relative drag only: where the finger pressed, and where the bar was once the finger passed the slop.
-  // A null start means it has not, so this is still a tap, and the bar is still following Fraction.
+  // A null start means it has not, so this is still a tap, and the press has changed nothing the bar
+  // shows: Fraction, or an earlier drag's value while its commit is in flight.
   private double _pressFraction;
   private double? _dragStartFraction;
 
@@ -171,9 +175,10 @@
 
     _dragging = false;
 
-    // Still a tap. A commit from an earlier drag may still be showing, and its finally left that here
-    // because this press had started, so this has to end it.
-    if (RelativeDragSlop is not null && _dragStartFraction is null)
+    // Disabled under the finger, as a room turned off mid-drag is: nothing to send it. Otherwise still
+    // a tap. Either way a commit from an earlier drag may still be showing, and its finally left that
+    // here because this press had started, so this has to end it.
+    if (Disabled || (RelativeDragSlop is not null && _dragStartFraction is null))
     {
       await EndHoldAsync();
       return;

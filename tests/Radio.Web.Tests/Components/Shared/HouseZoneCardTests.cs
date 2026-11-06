@@ -301,6 +301,26 @@ public class HouseZoneCardTests : TestContext
   }
 
   [Fact]
+  public async Task Card_RoomGoingOffDuringADrag_SendsNothingOnRelease()
+  {
+    List<int> committed = [];
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40), onVolume: committed.Add);
+    SeekBar bar = cut.FindComponent<SeekBar>().Instance;
+    await PressThumbAsync(cut, bar, 0.4);
+    await cut.InvokeAsync(() => bar.OnDragMove(0.6));
+
+    cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(power: false, volume: 40)));
+    await cut.InvokeAsync(() => bar.OnDragEnd(0.6));
+
+    committed.Should().BeEmpty("a volume must not reach a room that went off under the finger");
+
+    // Nothing of the drag is left when the room comes back.
+    cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(volume: 40)));
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Contain("40");
+    cut.Find(".seek-bar").ClassList.Should().NotContain("is-dragging");
+  }
+
+  [Fact]
   public void Card_BeingTuned_IsMarked()
   {
     Render(Zone()).Find("[data-testid='house-zone-card']").ClassList.Should().NotContain("is-tuned");

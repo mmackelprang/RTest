@@ -241,6 +241,23 @@ public class SeekBarTests : TestContext
     await commit;
   }
 
+  [Theory]
+  [InlineData(null)]
+  [InlineData(0.03)]
+  public async Task DisabledDuringADrag_DoesNotSeekOnRelease(double? slop)
+  {
+    var cut = Render(fraction: 0.4, slop: slop);
+    await cut.Instance.OnDragMove(0.4);
+    await cut.Instance.OnDragMove(0.6);
+
+    cut.SetParametersAndRender(p => p.Add(x => x.Disabled, true));
+    await cut.Instance.OnDragEnd(0.6);
+
+    Assert.Empty(_seeks);
+    Assert.Null(_scrubs[^1]);
+    Assert.DoesNotContain("is-dragging", cut.Find(".seek-bar").ClassName);
+  }
+
   [Fact]
   public void FirstRender_AttachesTheGestureModule()
   {

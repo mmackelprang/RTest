@@ -443,7 +443,7 @@ public class HouseAudioRegistrationTests(RadioWebFactory factory) : IClassFixtur
   {
     FakeHouseController controller = new();
     CapturingLoggerFactory logs = new();
-    await using WebApplicationFactory<Program> host = Host(controller.Handler, logs);
+    await using WebApplicationFactory<Program> host = Host(controller.Transport, logs);
 
     using IServiceScope scope = host.Services.CreateScope();
     HouseAudioPasswordStore store = scope.ServiceProvider.GetRequiredService<HouseAudioPasswordStore>();

@@ -19,6 +19,12 @@ public sealed record SeenRequest(HttpMethod Method, Uri Uri, string? PasswordHea
 /// <c>ts_src/webHookServer.ts</c>. Built on <see cref="RecordingHandler"/>, so a test rendezvous on
 /// <see cref="Handler"/>, and can park a poll on <see cref="SystemGate"/> or <see cref="ZonesGate"/>.
 /// </summary>
+/// <remarks>
+/// ⚠ Requests reach this through <see cref="Transport"/>, not <see cref="Handler"/>. The handler
+/// releases a waiter before it produces a response, so anything written while responding lags the
+/// rendezvous. <see cref="Seen"/> is written ahead of the handler instead, so a wait on
+/// <see cref="Handler"/> always means the request is in <see cref="Seen"/> too.
+/// </remarks>
 public sealed class FakeHouseController
 {
   public const string Password = "not-a-real-password";
@@ -33,9 +39,13 @@ public sealed class FakeHouseController
   public FakeHouseController()
   {
     Handler = new RecordingHandler(RespondAsync);
+    Transport = new RecordFirst(this);
   }
 
   public RecordingHandler Handler { get; }
+
+  /// <summary>What a client sends through: <see cref="Seen"/>, then <see cref="Handler"/>.</summary>
+  public HttpMessageHandler Transport { get; }
 
   /// <summary>When set, every request answers with this status.</summary>
   public HttpStatusCode? ForcedStatus { get; set; }
@@ -141,7 +151,7 @@ public sealed class FakeHouseController
   /// <summary>An API client wired as <c>Program.cs</c> wires it, ending in this fake.</summary>
   public HouseAudioApiService CreateClient(HouseAudioPasswordStore passwords)
   {
-    HttpClient client = new(new HouseAudioAuthHandler(passwords) { InnerHandler = Handler })
+    HttpClient client = new(new HouseAudioAuthHandler(passwords) { InnerHandler = Transport })
     {
       BaseAddress = new Uri("http://house.test:3001")
     };
@@ -176,7 +186,7 @@ public sealed class FakeHouseController
       NullLogger<HouseAudioPasswordStore>.Instance);
   }
 
-  private async Task<HttpResponseMessage> RespondAsync(HttpRequestMessage request, CancellationToken ct)
+  private async Task RecordAsync(HttpRequestMessage request, CancellationToken ct)
   {
     string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
     string? password = request.Headers.TryGetValues("X-RNet-Password", out IEnumerable<string>? values)
@@ -186,7 +196,10 @@ public sealed class FakeHouseController
     {
       _seen.Add(new SeenRequest(request.Method, request.RequestUri!, password, body));
     }
+  }
 
+  private async Task<HttpResponseMessage> RespondAsync(HttpRequestMessage request, CancellationToken ct)
+  {
     string path = request.RequestUri!.AbsolutePath;
     bool isRead = request.Method == HttpMethod.Get;
     if (isRead && path == "/system" && SystemGate is { } systemGate)
@@ -304,4 +317,13 @@ public sealed class FakeHouseController
   {
     Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
   };
+
+  private sealed class RecordFirst(FakeHouseController controller) : DelegatingHandler(controller.Handler)
+  {
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+      await controller.RecordAsync(request, ct);
+      return await base.SendAsync(request, ct);
+    }
+  }
 }
