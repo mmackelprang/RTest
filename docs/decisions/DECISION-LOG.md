@@ -1252,8 +1252,8 @@ says what a device can do, not which profile connected, so an HFP-only link from
 
 **The same connection:** a phone back within `AutoSwitchSameConnectionWindowMs` (60 s) of its takeover
 or its last disconnect does not take over again. A PBAP sync can drop the link and reconnect it 3 s
-later, reporting `LocalHost`, and a flap reports a timeout. A disconnect made on the console or on the
-phone (`Remote`) ends the connection at once.
+later, expected to report `LocalHost`, not measured, and a flap reports a timeout. A disconnect made on
+the console or by the phone ending the link (`Remote`) ends the connection at once.
 
 **Capture:** for an idle phone the node does not exist yet, and the Bluetooth source binds it from the
 node event once it is active. For a phone already streaming the settle has passed, so its node can
@@ -1269,7 +1269,8 @@ switch lock, on what is now every connect. A node event skips the probe, because
 - ⚠ **H6 is worse under this ruling.** If the registry listener has stopped delivering, a takeover now
   stops the radio at the connect and then waits for an event that will not come, where FM used to
   keep playing. What remains is the source's 12 probes over 2 minutes and the monitor's 30 s probe, both
-  of which only catch a node alive at that moment. Restarting `radio-api` restores the listener.
+  of which only catch a node alive at that moment, and the monitor stands down after a hand switch away
+  until the next disconnect. Restarting `radio-api` restores the listener.
 - A failed connect that outlasts the settle leaves the radio stopped. Nothing goes back to it.
 
 ### Ruling 3, 2026-11-06: a restart with no phone

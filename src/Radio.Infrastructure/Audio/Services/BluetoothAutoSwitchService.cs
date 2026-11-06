@@ -136,6 +136,7 @@ public class BluetoothAutoSwitchService : IDisposable
   {
     var address = e.Device.Address;
     CancellationTokenSource? waiter = null;
+    var settled = false;
     try
     {
       if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
@@ -178,7 +179,7 @@ public class BluetoothAutoSwitchService : IDisposable
       {
         _settled[address] = _timeProvider.GetUtcNow();
       }
-      _metricsCollector?.Increment("bluetooth.autoswitch_takeover_total");
+      settled = true;
     }
     catch (OperationCanceledException) when (waiter?.IsCancellationRequested == true)
     {
@@ -204,6 +205,13 @@ public class BluetoothAutoSwitchService : IDisposable
         waiter.Dispose();
       }
     }
+
+    // After the finally: this says the connection is fully settled, waiter included. It counts
+    // connections that settled with nothing to switch as well.
+    if (settled)
+    {
+      _metricsCollector?.Increment("bluetooth.autoswitch_settled_total");
+    }
   }
 
   /// <summary>
@@ -228,8 +236,8 @@ public class BluetoothAutoSwitchService : IDisposable
   }
 
   /// <summary>
-  /// Switches for a phone the connect has decided on. Nothing here can call that off, so a bind that
-  /// fails does not leave the old source playing, as it does on the node path.
+  /// Switches for a phone the connect has decided on. A bind that fails does not leave the old source
+  /// playing, as it does on the node path.
   /// </summary>
   /// <remarks>
   /// The phone may already be streaming: the settle has passed, so its node can exist, and the old
@@ -239,6 +247,13 @@ public class BluetoothAutoSwitchService : IDisposable
   /// </remarks>
   private async Task TakeOverAtTheConnectAsync(string address, CancellationToken deviceLeft)
   {
+    // Before the bind: with no switch to follow, a stream started here would hold the node with
+    // nothing to route it. An active Bluetooth source binds its own.
+    if (!IsSwitchStillNeeded(address))
+    {
+      return;
+    }
+
     EventHandler<CaptureNodeAvailableEventArgs> bindOnNode = (_, evt) =>
     {
       if (string.Equals(evt.DeviceAddress, address, StringComparison.OrdinalIgnoreCase))
@@ -292,8 +307,9 @@ public class BluetoothAutoSwitchService : IDisposable
   /// <summary>
   /// A device that has gone cannot take over: ends its wait, and cancels a probe in flight. One that
   /// already settled starts the window in which it counts as the same connection, unless the user
-  /// disconnected it, on the console or on the phone, which ends the connection whatever follows.
-  /// PBAP's teardown reports LocalHost and a flap a timeout, so neither is taken for the user.
+  /// disconnected it, on the console or by the phone ending the link (<c>Remote</c>), which ends the
+  /// connection whatever follows. A flap reports a timeout. PBAP's teardown is expected to report
+  /// LocalHost, which is not measured: if a phone ends that link itself, it reads as Remote.
   /// </summary>
   private void OnBluetoothDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
   {
@@ -451,18 +467,8 @@ public class BluetoothAutoSwitchService : IDisposable
   /// <returns>False when no capture could be bound, so the current source was left playing.</returns>
   private async Task<bool> SwitchIfStillNeededAsync(string address, CancellationToken deviceLeft, bool bindFirst)
   {
-    if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
+    if (!IsSwitchStillNeeded(address))
     {
-      _logger.LogInformation("BT auto-switch: nothing to do for {Address}, auto-switch is now off", address);
-      return true;
-    }
-
-    var audioManager = _getAudioManager();
-    if (audioManager.ActiveSource?.Type == AudioSourceType.Bluetooth)
-    {
-      _logger.LogInformation(
-        "BT auto-switch: nothing to do for {Address}, Bluetooth is already the active source",
-        address);
       return true;
     }
 
@@ -473,8 +479,28 @@ public class BluetoothAutoSwitchService : IDisposable
     deviceLeft.ThrowIfCancellationRequested();
 
     _logger.LogInformation("BT auto-switch: switching to Bluetooth for {Address}", address);
+    var audioManager = _getAudioManager();
     (audioManager.ActiveSource as PrimaryAudioSourceBase)?.KeepPlaceOnNextStop();
     await audioManager.GetOrCreateSourceAsync(AudioSourceType.Bluetooth, switchToSource: true);
+    return true;
+  }
+
+  private bool IsSwitchStillNeeded(string address)
+  {
+    if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
+    {
+      _logger.LogInformation("BT auto-switch: nothing to do for {Address}, auto-switch is now off", address);
+      return false;
+    }
+
+    if (_getAudioManager().ActiveSource?.Type == AudioSourceType.Bluetooth)
+    {
+      _logger.LogInformation(
+        "BT auto-switch: nothing to do for {Address}, Bluetooth is already the active source",
+        address);
+      return false;
+    }
+
     return true;
   }
 

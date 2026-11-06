@@ -1116,6 +1116,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       // removes its generator from the mixer on this same event.
       _parkedCapture = null;
       _captureTargetLost = false;
+      // A stop on purpose belonged to that session too. The next one may start with no node to
+      // acquire, and acquiring was the only other thing that cleared this.
+      _captureIntentionallyStopped = false;
       StopCaptureSubprocess();
       StopRescanLoop();
       // Clean up media transport on disconnect

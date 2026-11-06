@@ -836,6 +836,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
       var capture = nodeSeen
         ? await _bluetoothService.GetAudioCaptureDeviceAsync()
         : await AcquireCaptureIfNodeExistsAsync(CancellationToken.None);
+
+      // That search can run for 20 s, and the owner can have pressed Stop or picked a source in it.
+      if (nodeSeen && capture != null && (_stopRequested || !IsActiveSource))
+      {
+        Logger.LogDebug("BluetoothAudioSource: no longer wanted, releasing the capture just bound");
+        _bluetoothService.StopAudioCapture();
+        return;
+      }
+
       if (capture is AudioCaptureDevice audioCapture)
       {
         _captureDevice = audioCapture;

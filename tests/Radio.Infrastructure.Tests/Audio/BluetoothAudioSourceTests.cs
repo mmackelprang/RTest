@@ -2032,6 +2032,35 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   // --- A takeover at the connect: the phone is there and it has no node yet --------------------
 
   [Fact]
+  public async Task NodeBoundAfterTheOwnerPressedStop_IsReleased_NotRouted()
+  {
+    // A node event's search can run for 20 s, and the owner can press Stop or pick a source in it.
+    var capture = NewSoundComponentMock();
+    var searching = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var found = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var btMock = BuildBtMock(capture: null, new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+    btMock.Setup(b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()))
+      .Returns(() =>
+      {
+        searching.TrySetResult();
+        return found.Task;
+      });
+
+    RaiseCaptureNode(btMock);
+    await searching.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    await source.StopAsync(CancellationToken.None);
+    var stopsSoFar = btMock.Invocations.Count(i => i.Method.Name == "StopAudioCapture");
+
+    found.SetResult(capture);
+
+    await WaitForAsync(() => btMock.Invocations.Count(i => i.Method.Name == "StopAudioCapture") > stopsSoFar);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+    Assert.Throws<InvalidOperationException>(() => source.GetSoundComponent());
+  }
+
+  [Fact]
   public async Task Play_WithThePhoneConnectedAndNoNode_DoesNotSearch()
   {
     // The takeover now reaches PlayCoreAsync on every connect, with the phone idle. A search there

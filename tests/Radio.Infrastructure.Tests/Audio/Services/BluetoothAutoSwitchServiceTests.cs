@@ -240,7 +240,7 @@ public class BluetoothAutoSwitchServiceTests
           {
             Abandoned.TrySetResult();
           }
-          else if (key == "bluetooth.autoswitch_takeover_total")
+          else if (key == "bluetooth.autoswitch_settled_total")
           {
             TookOver.TrySetResult();
           }
@@ -1091,7 +1091,7 @@ public class BluetoothAutoSwitchServiceTests
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
     await metrics.TookOver.Task.WaitAsync(Rendezvous);
 
-    // PBAP's teardown reports LocalHost.
+    // PBAP's teardown is expected to report LocalHost.
     bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF", reason: BluetoothDisconnectReason.LocalHost);
     time.Advance(TimeSpan.FromSeconds(59));
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
@@ -1225,6 +1225,24 @@ public class BluetoothAutoSwitchServiceTests
     await bound.Task.WaitAsync(Rendezvous);
 
     stopping.SetResult(null);
+  }
+
+  [Fact]
+  public async Task BluetoothAlreadyActive_BindsNothing_AtTheConnect()
+  {
+    // Nothing would route a capture bound here. The active source binds its own from the node event,
+    // and a stream started behind its back would hold the node with the room silent.
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = true, IsCaptureNodeAvailable = true };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters, AudioSourceType.Bluetooth);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.TookOver.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(0, bt.CaptureRequests);
+    Assert.Equal(0, counters.SwitchCount);
   }
 
   [Fact]

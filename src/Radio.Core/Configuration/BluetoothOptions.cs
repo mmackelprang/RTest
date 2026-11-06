@@ -109,9 +109,9 @@ public class BluetoothOptions
   public int AutoSwitchConnectSettleMs { get; set; } = 1500;
 
   /// <summary>
-  /// How long after a disconnect the same phone coming back counts as the same connection
-  /// (milliseconds), so that a PBAP sync dropping the link or a flap does not take over again from
-  /// a source picked since. A disconnect made on the console or on the phone ends the connection.
+  /// How long after its takeover or its last disconnect the same phone coming back counts as the same
+  /// connection (milliseconds), so that a PBAP sync dropping the link or a flap does not take over again
+  /// from a source picked since. A disconnect made on the console or on the phone ends the connection.
   /// </summary>
   public int AutoSwitchSameConnectionWindowMs { get; set; } = 60000;
 
