@@ -39,6 +39,9 @@ public class BluetoothAutoSwitchServiceTests
     /// <summary>How many times something asked for the capture to be bound.</summary>
     public int CaptureRequests { get; private set; }
 
+    /// <summary>Replaces the default answer, a capture bound at once.</summary>
+    public Func<CancellationToken, Task<object?>>? CaptureHandler { get; set; }
+
     /// <summary>
     /// Replaces the canned <see cref="IsCaptureNodeAvailable"/> answer, so a test can make the
     /// probe do what the real one does: stay inside a <c>pw-cli</c> read, and throw when its
@@ -119,7 +122,7 @@ public class BluetoothAutoSwitchServiceTests
     public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
     {
       CaptureRequests++;
-      return Task.FromResult<object?>(null);
+      return CaptureHandler?.Invoke(cancellationToken) ?? Task.FromResult<object?>(new object());
     }
     public void StopAudioCapture() { }
     public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
@@ -473,7 +476,8 @@ public class BluetoothAutoSwitchServiceTests
     await metrics.Deferred.Task.WaitAsync(Rendezvous);
 
     // Bounded on purpose, and safe under load: starvation can only make it a weaker check, never a
-    // failing one (CLAUDE.md § Test Timing). Before the ruling the wait gave up inside this delay.
+    // failing one (CLAUDE.md § Test Timing). It catches a short deadline, not a long one: what stops
+    // a 60 s timer coming back is that the wait in the service takes no timeout at all.
     await Task.Delay(300);
     Assert.False(metrics.Abandoned.Task.IsCompleted, "A connected phone must not be given up on");
     Assert.Equal(1, bt.CaptureNodeAvailableSubscriberCount);
@@ -703,6 +707,86 @@ public class BluetoothAutoSwitchServiceTests
     await counters.Switched.Task.WaitAsync(Rendezvous);
 
     Assert.Equal(1, requestsAtSwitch);
+  }
+
+  [Fact]
+  public async Task NodeGoneBeforeItCouldBeBound_LeavesTheRadio_AndTheNextNodeSwitches()
+  {
+    // A notification sound: the node appears and goes before anything binds it. Stopping the radio
+    // then would leave silence with no audio to replace it, against what the trigger is for.
+    var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
+    var bindAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    bt.CaptureHandler = _ =>
+    {
+      if (bt.CaptureRequests == 1)
+      {
+        bindAttempted.TrySetResult();
+        return Task.FromResult<object?>(null);
+      }
+      return Task.FromResult<object?>(new object());
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock, probeMs: 60000);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await bindAttempted.Task.WaitAsync(Rendezvous);
+
+    // Bounded negative check: starvation can only weaken it (CLAUDE.md § Test Timing).
+    await Task.Delay(100);
+    Assert.Equal(0, counters.SwitchCount);
+    Assert.Equal(1, bt.CaptureNodeAvailableSubscriberCount);
+
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(1, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task DeviceDisconnectsDuringTheBind_CancelsIt_AndDoesNotSwitch()
+  {
+    // The bind can sit in a 20 s search. A phone that leaves meanwhile must end it, not stop the radio.
+    var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
+    var binding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    bt.CaptureHandler = async ct =>
+    {
+      binding.TrySetResult();
+      await Task.Delay(Timeout.Infinite, ct);
+      return new object();
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 60000, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await binding.Task.WaitAsync(Rendezvous);
+
+    bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Abandoned.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(0, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task DeviceDisconnectsAsTheBindReturns_DoesNotSwitch()
+  {
+    var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
+    bt.CaptureHandler = _ =>
+    {
+      bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF");
+      return Task.FromResult<object?>(new object());
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 60000, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Abandoned.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(0, counters.SwitchCount);
   }
 
   [Fact]

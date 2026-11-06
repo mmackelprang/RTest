@@ -1933,6 +1933,62 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await WaitForAsync(() => probe.Calls > calls);
   }
 
+  // --- What the takeover's bind-ahead leaves for the switch to pick up --------------------------
+
+  [Fact]
+  public async Task Play_KeepsTheTrackTitle_WhenTheCaptureArrivesThroughInitialize()
+  {
+    // The auto-switch binds before the switch, so a takeover reaches PlayCoreAsync holding no capture
+    // and goes through InitializeAsync. The phone sends Track only on a change, so a title replaced
+    // with the device name here would stay wrong until the next song.
+    var btMock = BuildBtMock(NewSoundComponentMock(), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    btMock.Raise(b => b.MetadataChanged += null, btMock.Object,
+      new BluetoothPlaybackMetadata { Title = "Just What I Needed", Artist = "The Cars" });
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.Equal("Just What I Needed", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Test Phone", source.Metadata["Device"]);
+  }
+
+  [Fact]
+  public async Task Play_WithNoTrackYet_ShowsTheDeviceName()
+  {
+    var btMock = BuildBtMock(NewSoundComponentMock(), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.Equal("Test Phone", source.Metadata[StandardMetadataKeys.Title]);
+  }
+
+  [Fact]
+  public async Task Route_DropsAudioBufferedBeforeIt()
+  {
+    // The bound stream feeds a generator nothing reads until this route, which can be seconds: as
+    // long as the old source takes to stop. Played from the oldest sample, that backlog is latency
+    // the drift controller takes well over an hour to remove, so the phone's pause is heard seconds
+    // late for the rest of the session.
+    var format = new global::SoundFlow.Structs.AudioFormat
+    {
+      SampleRate = 48000, Channels = 2, Format = global::SoundFlow.Enums.SampleFormat.F32
+    };
+    var generator = new Radio.Infrastructure.Audio.SoundFlow.BufferedSoundGenerator<float>(
+      null!, format, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+    generator.AddSamples(new float[96000]);
+    Assert.True(generator.GetDiagnostics().BufferCount > 0);
+    var btMock = BuildBtMock(generator, new CaptureAcquisitionProbe());
+    using var playback = Radio.Infrastructure.Tests.Audio.SoundFlow.DeviceFreePlaybackService.Create();
+    IAudioSource? active = null;
+    await using var source = BuildSourceWithActive(btMock, () => active, playback);
+    active = source;
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.Equal(0, generator.GetDiagnostics().BufferCount);
+  }
+
   // --- Bluetooth restored at startup with no phone ---------------------------------------------
   //
   // Measured on the box 2026-11-06: the persisted source came up as Bluetooth with the phone away,

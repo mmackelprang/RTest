@@ -1222,8 +1222,11 @@ or it disconnects. The trigger stays the node, not the connect. Each connection 
   (AUD-10), so a source picked after a takeover would be replaced at the next resume.
 
 **Consequences:**
-- Any audio from an idle connected phone, a notification sound included, now takes over at any time,
-  not only in the first 60 s. It happens once per connection.
+- Any audio from an idle connected phone, a notification sound included, can now take over at any
+  time, not only in the first 60 s. It happens once per connection. The capture is bound before the old
+  source stops, so a node that goes before it can be bound leaves the old source playing.
+- A takeover persists Bluetooth as the current source, so a restart with the phone away comes up on
+  Bluetooth, silent, reporting Playing. `AudioManager` persists every switch alike; unchanged here.
 - ⚠ The wait depends on the node event. After a PipeWire restart the registry listener stops
   delivering (`H6`), and the wait then ends only at a disconnect.
 - A switch still stops the old source; there is no pause in `AudioManager`. A file keeps its place for

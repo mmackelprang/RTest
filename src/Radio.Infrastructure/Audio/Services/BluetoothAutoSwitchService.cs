@@ -184,15 +184,17 @@ public class BluetoothAutoSwitchService : IDisposable
   /// <see cref="OperationCanceledException"/>.</param>
   private async Task SwitchWhenNodeIsReadyAsync(string address, CancellationToken deviceLeft)
   {
-    // RunContinuationsAsynchronously, so neither the PipeWire registry thread raising the node
-    // event nor the D-Bus thread raising the disconnect runs the switch or the cleanup below.
-    var nodeArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    using var leaving = deviceLeft.Register(() => nodeArrived.TrySetCanceled(deviceLeft));
+    // RunContinuationsAsynchronously, so the PipeWire registry thread raising the node event does
+    // not run the switch.
+    static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    var nodeArrived = NewSignal();
+    using var leaving = deviceLeft.Register(() => Volatile.Read(ref nodeArrived).TrySetCanceled(deviceLeft));
     EventHandler<CaptureNodeAvailableEventArgs> handler = (_, evt) =>
     {
       if (string.Equals(evt.DeviceAddress, address, StringComparison.OrdinalIgnoreCase))
       {
-        nodeArrived.TrySetResult();
+        Volatile.Read(ref nodeArrived).TrySetResult();
       }
     };
 
@@ -215,7 +217,17 @@ public class BluetoothAutoSwitchService : IDisposable
         await nodeArrived.Task;
       }
 
-      await SwitchIfStillNeededAsync(address);
+      while (!await SwitchIfStillNeededAsync(address, deviceLeft))
+      {
+        // Only the next node event ends this, not another probe: a node the bind could not take
+        // while it was present must not turn into a search that repeats for as long as it stays.
+        _logger.LogInformation(
+          "BT auto-switch: no capture could be bound for {Address}; leaving the current source and waiting for its next node",
+          address);
+        Volatile.Write(ref nodeArrived, NewSignal());
+        deviceLeft.ThrowIfCancellationRequested();
+        await nodeArrived.Task;
+      }
     }
     finally
     {
@@ -254,12 +266,13 @@ public class BluetoothAutoSwitchService : IDisposable
   /// case is skipped: another source selected meanwhile is still replaced. The option is read again
   /// here because the wait can outlast it being turned off.
   /// </summary>
-  private async Task SwitchIfStillNeededAsync(string address)
+  /// <returns>False when no capture could be bound, so the current source was left playing.</returns>
+  private async Task<bool> SwitchIfStillNeededAsync(string address, CancellationToken deviceLeft)
   {
     if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
     {
       _logger.LogInformation("BT auto-switch: PW node ready for {Address}, but auto-switch is now off", address);
-      return;
+      return true;
     }
 
     var audioManager = _getAudioManager();
@@ -268,42 +281,39 @@ public class BluetoothAutoSwitchService : IDisposable
       _logger.LogInformation(
         "BT auto-switch: PW node ready for {Address}; Bluetooth is already the active source",
         address);
-      return;
+      return true;
     }
 
-    await BindCaptureBeforeTheSwitchAsync(address);
+    if (!await BindCaptureBeforeTheSwitchAsync(deviceLeft))
+    {
+      return false;
+    }
+    deviceLeft.ThrowIfCancellationRequested();
 
     _logger.LogInformation("BT auto-switch: PW node ready, switching to Bluetooth for {Address}", address);
     (audioManager.ActiveSource as PrimaryAudioSourceBase)?.KeepPlaceOnNextStop();
     await audioManager.GetOrCreateSourceAsync(AudioSourceType.Bluetooth, switchToSource: true);
+    return true;
   }
 
   /// <summary>
-  /// Binds the node before the switch stops the old source, because the switch's own stop can
-  /// outlive the node otherwise. The phone gives up on an unbound A2DP node after about 4 s (AUD-10),
-  /// and stopping FM can block for about that long by itself: RadioReceiver.Shutdown joins its
-  /// processing thread for up to 2 s, then RtlSdrDevice.StopStreaming waits for up to 2 s more.
+  /// Binds the node before the switch stops the old source. This is the point of no return for the
+  /// old source, for two reasons. A node that went before it could be bound (a notification sound, or
+  /// a phone that left) means there is no audio to replace it with, so the switch does not happen.
+  /// And the switch's own stop can outlive the node: the phone gives up on an unbound A2DP node after
+  /// about 4 s (AUD-10), and stopping FM can block for about that long by itself, because
+  /// RadioReceiver.Shutdown joins its processing thread for up to 2 s and then
+  /// RtlSdrDevice.StopStreaming waits for up to 2 s more.
   /// </summary>
   /// <remarks>
   /// This does not put anything in the mixer. The stream feeds a generator that nothing plays until
-  /// the switch starts the Bluetooth source, which picks up this same capture and routes it. A failure
-  /// here is not a reason to skip the switch, which retries the capture itself.
+  /// the switch starts the Bluetooth source, which picks up this same capture and routes it.
   /// </remarks>
-  private async Task BindCaptureBeforeTheSwitchAsync(string address)
+  /// <returns>Whether a capture is bound, or the platform routes the audio itself.</returns>
+  private async Task<bool> BindCaptureBeforeTheSwitchAsync(CancellationToken deviceLeft)
   {
-    if (_bluetoothService.IsAudioManagedByPlatform)
-    {
-      return;
-    }
-
-    try
-    {
-      await _bluetoothService.GetAudioCaptureDeviceAsync();
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "BT auto-switch: could not bind capture ahead of the switch for {Address}", address);
-    }
+    return _bluetoothService.IsAudioManagedByPlatform
+      || await _bluetoothService.GetAudioCaptureDeviceAsync(deviceLeft) != null;
   }
 
   public void Dispose()

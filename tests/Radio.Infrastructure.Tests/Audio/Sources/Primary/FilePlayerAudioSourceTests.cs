@@ -530,6 +530,49 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   [Fact]
+  public async Task TakeoverStop_ThenPickingTheSameFileAgain_StartsItFromTheTop()
+  {
+    // Only a plain Play resumes. Choosing the file is asking for it from the start.
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task TakeoverStop_ThenTappingTheCurrentTrackInTheQueue_StartsItFromTheTop(bool fullPlaylist)
+  {
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    if (fullPlaylist)
+    {
+      await source.JumpToFullPlaylistIndexAsync(0);
+    }
+    else
+    {
+      await source.JumpToIndexAsync(0);
+    }
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
   public async Task KeepPlace_AppliesToOneStopOnly_EvenWhenThatStopHadNothingLive()
   {
     // A stop with nothing playing has no place to keep, and must not leave the request armed for

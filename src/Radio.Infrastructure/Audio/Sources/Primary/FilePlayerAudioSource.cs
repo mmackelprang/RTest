@@ -1078,7 +1078,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   /// <summary>
   /// Moves a just-started file to the place a takeover kept, once, if that file is still the current
-  /// one. A file the owner chose instead starts from the top.
+  /// one and only Play was pressed: choosing a track, the same one included, clears the place through
+  /// <see cref="ForgetKeptPlace"/> and starts it from the top.
   /// </summary>
   /// <remarks>
   /// ⛔ AUD-24 — OWNER'S RULING, 2026-09-10. InitializeAsync still does not assign _pendingSeekMs, so
@@ -1092,8 +1093,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     long seekMs = _pendingSeekMs;
     string? seekFile = _pendingSeekFile;
-    _pendingSeekMs = 0;
-    _pendingSeekFile = null;
+    ForgetKeptPlace();
 
     if (seekMs <= 0 || seekFile != _currentFile)
     {
@@ -1111,6 +1111,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       Logger.LogWarning(ex, "Failed to seek to the kept position {Ms}ms", seekMs);
     }
+  }
+
+  private void ForgetKeptPlace()
+  {
+    _pendingSeekMs = 0;
+    _pendingSeekFile = null;
   }
 
   private async Task MonitorPlaybackAsync(CancellationToken cancellationToken)
@@ -1211,7 +1217,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // branch with _position == 0 and overwrite a good resume point with zero.
     var hadLivePlayback = _playbackId != null;
 
-    // Read and cleared on every stop: the request covers this stop, live or not.
+    // Read and cleared here, whether or not this stop had anything live: the request covers one stop.
     var keepPlace = _keepPlaceOnNextStop;
     _keepPlaceOnNextStop = false;
 
@@ -1444,6 +1450,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public async Task JumpToFullPlaylistIndexAsync(int index, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
+    ForgetKeptPlace();
 
     var fullList = GetFullPlaylistInOrder();
     if (index < 0 || index >= fullList.Count)
@@ -1754,6 +1761,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public async Task JumpToIndexAsync(int index, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
+    ForgetKeptPlace();
 
     var allTracks = GetAllTracksInOrder();
 
@@ -2449,6 +2457,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   private async Task LoadCurrentFileAsync(CancellationToken cancellationToken)
   {
+    ForgetKeptPlace();
+
     string? fileToLoad;
     lock (_playlistLock)
     {

@@ -578,7 +578,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     var connected = _bluetoothService.ConnectedDevice;
     var connectedName = connected?.Name ?? DefaultDeviceName;
-    MetadataInternal[StandardMetadataKeys.Title] = connectedName;
+
+    // A placeholder for when there is no track. A takeover's first acquisition lands here with the
+    // phone's track already shown, and the phone sends Track only when it changes.
+    if (_currentTrackKey == null)
+    {
+      MetadataInternal[StandardMetadataKeys.Title] = connectedName;
+    }
     MetadataInternal["Device"] = connectedName;
     if (!string.IsNullOrWhiteSpace(connected?.Address))
     {
@@ -811,8 +817,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
         return;
       }
 
-      // M7: while another source is active this source takes no capture. The switch starts it,
-      // and that does the acquiring, so the phone is never heard over the source on the display.
+      // M7: while another source is active, this path acquires nothing. The auto-switch binds the
+      // node and the switch starts this source, and only then is the capture routed.
       if (!IsActiveSource)
       {
         Logger.LogDebug("BluetoothAudioSource: not the active source, leaving capture to the switch");
@@ -864,9 +870,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// </summary>
   private async Task RouteCaptureThroughMixerAsync()
   {
-    // M7: the one door into the mixer, so the one-audible-source rule is enforced here and every
-    // caller gets it, including stall recovery, which reaches this through PlayCoreAsync with the
-    // source inactive. The capture stays held, and the next PlayCoreAsync routes it.
+    // M7: every route starts here, so an inactive source starts none, including stall recovery,
+    // which reaches this through PlayCoreAsync. Inactive sources can still hold a capture (prewarm,
+    // stall recovery), and the next PlayCoreAsync routes it. ⚠ This is a check at the start, not a
+    // guarantee for the whole route: a switch-away during PlayComponentAsync is not covered.
     if (!IsActiveSource)
     {
       Logger.LogDebug("BluetoothAudioSource: not the active source, keeping capture out of the mixer");
@@ -930,6 +937,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
       {
         // PipeWire/WASAPI capture path: register generator directly with mixer
         // Use the audio source ID so AudioManager.SetSourceGain can apply the gain offset.
+        //
+        // Nothing has read this generator yet, and a capture bound ahead of a takeover has been
+        // filling it for as long as the old source took to stop. Played from the oldest sample,
+        // that backlog would stay as seconds of latency, so start from the phone's present.
+        generator.RearmPriming();
         _playbackId = Id;
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, generator, Volume, CancellationToken.None);
