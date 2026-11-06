@@ -213,7 +213,7 @@
   private const int MaxNameBytes = 252;
 
   private const string PasswordNotSaved =
-    "The password wasn't saved. It can only use plain keyboard characters, and the console has to be able to store it.";
+    "The password wasn't saved. It can't contain accented letters or other non-ASCII characters, and the console has to be able to store it.";
 
   // The SHA, not the version: nothing sets <Version>, so that reads 1.0.0 on every build.
   private static readonly string ConsoleBuild =

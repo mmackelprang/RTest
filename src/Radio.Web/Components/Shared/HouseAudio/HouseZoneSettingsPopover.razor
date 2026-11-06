@@ -127,7 +127,7 @@
 
   [Parameter] public EventCallback<HouseZoneSetting> OnSetting { get; set; }
 
-  /// <summary>Raised once per gesture, on release. Maximum Volume has its own route.</summary>
+  /// <summary>Raised at most once per gesture, on release, and not for a tap. Maximum Volume has its own route.</summary>
   [Parameter] public EventCallback<int> OnMaxVolume { get; set; }
 
   /// <summary>Raised only after the question has been answered.</summary>

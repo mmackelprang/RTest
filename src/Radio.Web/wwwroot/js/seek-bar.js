@@ -5,13 +5,15 @@
 //
 //   OnDragMove(fraction)  — pointer went down, or moved while down. The component moves the thumb and
 //                           tells its parent so the time readout can follow the finger. NOT a seek.
-//   OnDragEnd(fraction)   — pointer released. The component commits exactly one seek.
+//   OnDragEnd(fraction)   — pointer released. The component commits at most one seek: none for a tap on
+//                           a RelativeDragSlop bar, and none if the bar turned disabled during the drag.
 //   OnDragCancel()        — the browser took the pointer away (pointercancel / lost capture without a
 //                           pointerup). No seek.
 //
 // A tap is a pointerdown followed by a pointerup, so it arrives as one OnDragMove and one OnDragEnd:
-// tap-to-seek and drag-to-seek are the same path, and a tap still seeks exactly once. A SeekBar with
-// RelativeDragSlop set tells them apart itself, from these same calls, and a tap there does nothing.
+// tap-to-seek and drag-to-seek are the same path, and a tap seeks once unless the bar turned disabled
+// under it. A SeekBar with RelativeDragSlop set tells them apart itself, from these same calls, and a tap
+// there does nothing.
 //
 // Moves are coalesced to at most one invoke per animation frame. The final OnDragEnd carries the
 // release position itself, so a coalesced (dropped) move can never lose the position that is committed.
