@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
+using Radio.Core.Utilities;
 using Radio.Web.Components.Shared.HouseAudio;
 using Radio.Web.Models;
 using Radio.Web.Services;
@@ -236,6 +237,19 @@ public class HouseControllerSettingsPanelTests : TestContext
     write.Body.Should().Contain("\"sourceID\":3").And.Contain("\"name\":\"Turntable\"").And.Contain("\"type\":13");
     cut.FindAll(Entry).Should().BeEmpty();
     _saved.Should().ContainSingle().Which(Snapshot()).Sources.Select(source => source.SourceId).Should().Equal(0, 1, 2, 3);
+  }
+
+  [Fact]
+  public async Task AddSource_AlreadyReportedByAPoll_ShowsOneRow()
+  {
+    IRenderedComponent<HouseControllerSettingsPanel> cut = Render();
+    await TapAsync(cut, "house-source-add");
+    TypeName(cut, "Turntable");
+
+    await TapAsync(cut, "house-entry-save");
+
+    HouseAudioSnapshot polledFirst = Snapshot([.. ThreeSources, new HouseSource(3, "Turntable", 0)]);
+    _saved.Should().ContainSingle().Which(polledFirst).Sources.Select(source => source.SourceId).Should().Equal(0, 1, 2, 3);
   }
 
   [Fact]
@@ -636,7 +650,9 @@ public class HouseControllerSettingsPanelTests : TestContext
 
     Test(cut, "house-about-address").TextContent.Should().Contain("192.168.86.49");
     Test(cut, "house-about-connection").TextContent.Should().Contain("Connected");
-    Test(cut, "house-about-versions").TextContent.Should().Contain("/ 1.1.1");
+    Test(cut, "house-about-build").TextContent.Should().Contain("Console build")
+      .And.Contain(AssemblyBuildInfo.For(typeof(HouseControllerSettingsPanel).Assembly).GitShaShort);
+    Test(cut, "house-about-controller-version").TextContent.Should().Contain("Controller version").And.Contain("1.1.1");
   }
 
   [Fact]

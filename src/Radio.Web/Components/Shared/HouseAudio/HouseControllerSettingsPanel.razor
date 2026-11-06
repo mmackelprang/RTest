@@ -22,8 +22,9 @@
 
    ⚠ The password is not bound. It stays in the browser's field until Save reads it into a local of
    SavePasswordAsync, so it is in no field of this component, and a failed save leaves the typed text
-   in the box to be saved again. The panel never reads it back: the row reports only what the last poll
-   found. Styles: design-system.css § House Audio. *@
+   in the box to be saved again. The panel never reads it back: the row reports what the last poll found,
+   or "Saved. Checking it." from a save made here, until the next poll. Styles: design-system.css
+   § House Audio. *@
 
 <div class="house-settings-away" data-testid="house-controller-away"
      @onclick="OnClose" @onclick:stopPropagation="true"
@@ -68,9 +69,13 @@
         <span>Connection to amp</span>
         <span class="@(System is { SerialConnected: false } ? "is-down" : null)">@ConnectionText</span>
       </div>
-      <div class="house-controller-fact" data-testid="house-about-versions">
-        <span>Application / controller version</span>
-        <span>@AppVersion / @(System?.Version ?? "?")</span>
+      <div class="house-controller-fact" data-testid="house-about-build">
+        <span>Console build</span>
+        <span>@ConsoleBuild</span>
+      </div>
+      <div class="house-controller-fact" data-testid="house-about-controller-version">
+        <span>Controller version</span>
+        <span>@(System?.Version ?? "Not known yet")</span>
       </div>
     </div>
 
@@ -210,8 +215,9 @@
   private const string PasswordNotSaved =
     "The password wasn't saved. It can only use plain keyboard characters, and the console has to be able to store it.";
 
-  private static readonly string AppVersion =
-    AssemblyBuildInfo.For(typeof(HouseControllerSettingsPanel).Assembly).InformationalVersion.Split('+')[0];
+  // The SHA, not the version: nothing sets <Version>, so that reads 1.0.0 on every build.
+  private static readonly string ConsoleBuild =
+    AssemblyBuildInfo.For(typeof(HouseControllerSettingsPanel).Assembly).GitShaShort;
 
   private enum EntryKind
   {
@@ -426,8 +432,9 @@
         return;
       }
 
-      // 409. A 404 reads the same, but only a delete from elsewhere within one poll can cause it, and
-      // that poll then takes the row away.
+      // 409, as a rule. A 404 reads the same here, and means the source went from elsewhere after this
+      // row was last read, which an open dialog can put any distance back. The words are then wrong,
+      // though the next good poll takes the row away.
       _confirmingDelete = false;
       _error = Failure(result,
         $"{_name} wasn't deleted: a room that's on is using it. Switch that room to another source or turn it off, then try again.");
@@ -477,7 +484,9 @@
 
     await OnSaved.InvokeAsync(snapshot => snapshot with
     {
-      Sources = snapshot.Sources.Append(added).OrderBy(source => source.SourceId).ToList()
+      // A poll can have reported the source already, while this save was finishing.
+      Sources = snapshot.Sources.Where(source => source.SourceId != added.SourceId)
+        .Append(added).OrderBy(source => source.SourceId).ToList()
     });
     return null;
   }

@@ -320,7 +320,8 @@ public class HouseAudioPanelTests : TestContext
     _controller.SystemGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     await NextPollAsync();
 
-    DisposeComponents();
+    // On the dispatcher, as a busy one would otherwise run bUnit's detach after it has cleared its roots.
+    await cut.InvokeAsync(DisposeComponents);
 
     // Only the poller's disposal can cancel that request, so this cannot pass by being quick.
     await _controller.RequestCancelled.Task.WaitAsync(Patience);
@@ -661,7 +662,7 @@ public class HouseAudioPanelTests : TestContext
     Task clicked = TapSettingAsync(cut, "house-delete-confirm");
     await _controller.Handler.WaitForAsync(IsWrite, 1);
 
-    DisposeComponents();
+    await cut.InvokeAsync(DisposeComponents);
     _controller.WriteGate.SetResult();
 
     await clicked;
