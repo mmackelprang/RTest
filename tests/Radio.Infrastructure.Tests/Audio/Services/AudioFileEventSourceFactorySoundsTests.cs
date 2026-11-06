@@ -1,7 +1,10 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Configuration;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.Sources.Events;
+using Radio.Infrastructure.DependencyInjection;
 using Radio.Infrastructure.Tests.External;
 using Xunit;
 
@@ -68,6 +71,29 @@ public sealed class AudioFileEventSourceFactorySoundsTests : IDisposable
   [Fact]
   public void WithNoOptionsSupplied_TheMusicRootIsStillNotUsed()
   {
-    Assert.Empty(Factory(sounds: null).GetAvailableNotificationSounds());
+    IReadOnlyList<string> files = Factory(sounds: null).GetAvailableNotificationSounds();
+
+    Assert.DoesNotContain(files, file => file.StartsWith(_music, StringComparison.Ordinal));
+  }
+
+  // The original bug was a configuration key nothing read, so this goes through real binding.
+  [Fact]
+  public void TheConfigurationKey_ReachesTheFactory()
+  {
+    IConfiguration configuration = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>
+      {
+        ["NotificationSounds:Directory"] = _sounds,
+        ["FilePlayer:RootDirectory"] = _music
+      })
+      .Build();
+    ServiceCollection services = new();
+    services.AddLogging();
+    services.AddEventAudioSources(configuration);
+    using ServiceProvider provider = services.BuildServiceProvider();
+
+    AudioFileEventSourceFactory factory = provider.GetRequiredService<AudioFileEventSourceFactory>();
+
+    Assert.Equal([Path.Combine(_sounds, "chime.wav")], factory.GetAvailableNotificationSounds());
   }
 }

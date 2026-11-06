@@ -210,7 +210,7 @@ public class AudioFileEventSourceFactory
     return files.AsReadOnly();
   }
 
-  // Never FilePlayer:RootDirectory: on the appliance that is a NAS automount, and an unreachable NAS
+  // Not FilePlayer:RootDirectory: on the appliance that is a NAS automount, and an unreachable NAS
   // blocks each access for seconds, on a request thread.
   private string NotificationSoundsRoot =>
     _notificationSounds?.CurrentValue.Directory ?? new NotificationSoundsOptions().Directory;

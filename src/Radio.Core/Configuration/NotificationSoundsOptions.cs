@@ -18,5 +18,5 @@ public class NotificationSoundsOptions
   /// Gets or sets the directory holding the sounds. A relative path resolves against the process's
   /// working directory.
   /// </summary>
-  public string Directory { get; set; } = "media/sounds";
+  public string Directory { get; set; } = "media/audio/notify";
 }
