@@ -34,7 +34,7 @@
       <RadzenIcon Icon="@(Zone.Muted ? "volume_off" : "volume_up")" />
     </button>
     <HouseLevelSlider Class="house-zone-slider"
-                      Value="@Zone.Volume"
+                      Value="@ShownVolume"
                       Ceiling="@Zone.MaxVolume"
                       Disabled="@(!Zone.Power)"
                       TapSlop="@SliderTapSlop"
@@ -102,6 +102,12 @@
 
   private bool _pickerOpen;
 
+  // The controller mutes a room by taking its volume to 0, and does not report the volume it will
+  // return to. So this is the last one seen unmuted, and there is none if the page opened on a muted room.
+  private int? _unmutedVolume;
+
+  private int ShownVolume => Zone.Muted ? _unmutedVolume ?? Zone.Volume : Zone.Volume;
+
   private string CssClass =>
     "house-zone-card"
     + (Zone.Power ? string.Empty : " is-off")
@@ -123,6 +129,11 @@
   // does not come back with the room.
   protected override void OnParametersSet()
   {
+    if (!Zone.Muted)
+    {
+      _unmutedVolume = Zone.Volume;
+    }
+
     if (!Zone.Power)
     {
       _pickerOpen = false;

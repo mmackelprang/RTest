@@ -81,6 +81,36 @@ public class HouseZoneCardTests : TestContext
     presses.Should().Be(1);
   }
 
+  // The controller reports volume 0 for a muted room. The card keeps the volume it will return to.
+  [Fact]
+  public void Card_MutedRoom_KeepsShowingTheVolumeItWillReturnTo()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40));
+
+    cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(muted: true, volume: 0)));
+
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Be("40");
+  }
+
+  [Fact]
+  public void Card_UnmutedRoom_ShowsWhatTheControllerReports()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40));
+    cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(muted: true, volume: 0)));
+
+    cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(volume: 24)));
+
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Be("24");
+  }
+
+  [Fact]
+  public void Card_FirstSeenMuted_HasNothingToRemember_SoShowsWhatTheControllerReports()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(muted: true, volume: 0));
+
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Be("0");
+  }
+
   [Fact]
   public void Card_RoomThatIsOff_StillOffersItsPowerButton_AndNothingElse()
   {
