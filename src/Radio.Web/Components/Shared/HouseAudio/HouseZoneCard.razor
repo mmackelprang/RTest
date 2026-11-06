@@ -100,13 +100,13 @@
   /// <summary>True while this room's settings are open.</summary>
   [Parameter] public bool Tuned { get; set; }
 
+  /// <summary>The last volume reported for this room unmuted, if there has been one since the panel opened.</summary>
+  [Parameter] public int? UnmutedVolume { get; set; }
+
   private bool _pickerOpen;
 
-  // The controller mutes a room by taking its volume to 0, and does not report the volume it will
-  // return to. So this is the last one seen unmuted, and there is none if the page opened on a muted room.
-  private int? _unmutedVolume;
-
-  private int ShownVolume => Zone.Muted ? _unmutedVolume ?? Zone.Volume : Zone.Volume;
+  // A muted room reports volume 0. The controller clamps to the maximum on the way back, so this does too.
+  private int ShownVolume => Zone.Muted ? Math.Min(UnmutedVolume ?? Zone.Volume, Zone.MaxVolume) : Zone.Volume;
 
   private string CssClass =>
     "house-zone-card"
@@ -129,11 +129,6 @@
   // does not come back with the room.
   protected override void OnParametersSet()
   {
-    if (!Zone.Muted)
-    {
-      _unmutedVolume = Zone.Volume;
-    }
-
     if (!Zone.Power)
     {
       _pickerOpen = false;

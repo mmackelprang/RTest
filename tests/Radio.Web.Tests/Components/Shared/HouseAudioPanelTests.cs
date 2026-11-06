@@ -353,6 +353,64 @@ public class HouseAudioPanelTests : TestContext
     WaitForLevel(cut, "Kitchen", "50");
   }
 
+  private async Task<IRenderedComponent<HouseAudioPanel>> RenderMutedAfterSeenAtAsync(int volume)
+  {
+    _controller.SetVolume("Kitchen", volume);
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForLevel(cut, "Kitchen", volume.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    _controller.SetMuted("Kitchen", true);
+    await NextPollAsync();
+    cut.WaitForAssertion(
+      () => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("true"),
+      Patience);
+    return cut;
+  }
+
+  [Fact]
+  public async Task Panel_MutedRoom_ThatWasSeenUnmuted_KeepsShowingThatVolume()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(50);
+
+    Level(cut, "Kitchen").Should().Be("50");
+  }
+
+  [Fact]
+  public async Task Panel_Unmute_KeepsTheNumberUp_RatherThanDroppingToZeroUntilThePoll()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(50);
+
+    await cut.InvokeAsync(() => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.ClickAsync(new MouseEventArgs()));
+
+    Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("false");
+    Level(cut, "Kitchen").Should().Be("50");
+  }
+
+  [Fact]
+  public async Task Panel_FailedUnmute_ReturnsToMuted_AtTheSameVolume()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(50);
+    _controller.WriteStatus = HttpStatusCode.Conflict;
+
+    await cut.InvokeAsync(() => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.ClickAsync(new MouseEventArgs()));
+
+    cut.WaitForAssertion(
+      () => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("true"),
+      Patience);
+    Level(cut, "Kitchen").Should().Be("50");
+  }
+
+  [Fact]
+  public async Task Panel_DragOnAMutedRoom_ShowsTheDraggedVolume_WithoutSnappingBack()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await RenderMutedAfterSeenAtAsync(50);
+
+    await SetVolumeAsync(cut, "Kitchen", 0.6);
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+
+    cut.WaitForAssertion(() => Level(cut, "Kitchen").Should().Be("60"), Patience);
+    Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("false");
+  }
+
   [Fact]
   public async Task Panel_FailedCommand_ReturnsToReportedState_AndShowsIt()
   {

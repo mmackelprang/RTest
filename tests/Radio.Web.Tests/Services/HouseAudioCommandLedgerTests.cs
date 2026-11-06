@@ -28,6 +28,38 @@ public class HouseAudioCommandLedgerTests
     _ledger.Begin([name], zone => zone with { Volume = volume });
 
   [Fact]
+  public void UnmutedVolume_ComesFromReports_AndSurvivesAMute()
+  {
+    HouseZone kitchen = Zone("Kitchen", 40);
+    _ledger.UnmutedVolume(kitchen).Should().BeNull("no report has been seen");
+
+    Report(false, kitchen);
+    Report(false, Zone("Kitchen", 0, muted: true));
+
+    _ledger.UnmutedVolume(kitchen).Should().Be(40);
+  }
+
+  [Fact]
+  public void UnmutedVolume_IsNotSetByACommand_SoACommandThatFailsCannotDisturbIt()
+  {
+    Report(false, Zone("Kitchen", 40));
+
+    HouseAudioCommand command = SetVolume(0);
+    _ledger.UnmutedVolume(Zone("Kitchen", 40)).Should().Be(40);
+
+    _ledger.Fail(command);
+    _ledger.UnmutedVolume(Zone("Kitchen", 40)).Should().Be(40);
+  }
+
+  [Fact]
+  public void UnmutedVolume_IsNothingForARoomOnlyEverSeenMuted()
+  {
+    Report(false, Zone("Kitchen", 0, muted: true));
+
+    _ledger.UnmutedVolume(Zone("Kitchen", 0, muted: true)).Should().BeNull();
+  }
+
+  [Fact]
   public void NewCommand_ShowsAtOnce()
   {
     Report(false, Zone("Kitchen", 20));

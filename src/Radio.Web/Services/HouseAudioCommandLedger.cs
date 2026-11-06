@@ -33,6 +33,7 @@ internal sealed class HouseAudioCommandLedger
   }
 
   private readonly Dictionary<string, ZoneCommands> _commands = new(StringComparer.Ordinal);
+  private readonly Dictionary<(int ControllerId, int ZoneId), int> _unmutedVolumes = [];
   private IReadOnlyList<HouseZone> _reported = [];
   private long _releases;
 
@@ -45,6 +46,15 @@ internal sealed class HouseAudioCommandLedger
 
   /// <summary>Every room as the panel should show it.</summary>
   public IReadOnlyList<HouseZone> Zones => _reported.Select(Shown).ToList();
+
+  /// <summary>
+  /// The last volume reported for an unmuted room, or null if none has been since this panel opened.
+  /// The controller mutes a room by taking its volume to 0 and does not report the volume it will
+  /// return to, so this is a remembered value. Taken only from reports, never from a command, so a
+  /// command that fails cannot disturb it.
+  /// </summary>
+  public int? UnmutedVolume(HouseZone zone) =>
+    _unmutedVolumes.TryGetValue((zone.ControllerId, zone.ZoneId), out int volume) ? volume : null;
 
   /// <summary>Starts a command, which shows at once, and holds its rooms until <see cref="Release"/>.</summary>
   public HouseAudioCommand Begin(IReadOnlyList<string> zoneNames, Func<HouseZone, HouseZone> change)
@@ -115,6 +125,11 @@ internal sealed class HouseAudioCommandLedger
         ? zone
         : _reported.FirstOrDefault(shown => shown.ControllerId == zone.ControllerId && shown.ZoneId == zone.ZoneId) ?? zone)
       .ToList();
+
+    foreach (HouseZone zone in _reported.Where(zone => !zone.Muted))
+    {
+      _unmutedVolumes[(zone.ControllerId, zone.ZoneId)] = zone.Volume;
+    }
 
     if (!snapshot.Stale)
     {
