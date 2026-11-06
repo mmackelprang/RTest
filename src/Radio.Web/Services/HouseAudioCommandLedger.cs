@@ -133,7 +133,9 @@ internal sealed class HouseAudioCommandLedger
         : _reported.FirstOrDefault(shown => shown.ControllerId == zone.ControllerId && shown.ZoneId == zone.ZoneId) ?? zone)
       .ToList();
 
-    foreach (HouseZone zone in _reported.Where(zone => !zone.Muted))
+    // Only a fresh report of a room no command is holding. A stale snapshot repeats old zones and a held
+    // room keeps its old entry, and either could be older than a volume the controller has since accepted.
+    foreach (HouseZone zone in snapshot.Zones.Where(zone => !snapshot.Stale && !zone.Muted && !IsHeld(zone.Name)))
     {
       _unmutedVolumes[(zone.ControllerId, zone.ZoneId)] = zone.Volume;
     }

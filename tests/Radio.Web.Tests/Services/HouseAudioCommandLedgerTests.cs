@@ -69,7 +69,7 @@ public class HouseAudioCommandLedgerTests
   }
 
   [Fact]
-  public void RememberUnmutedVolume_StandsUntilTheNextReport()
+  public void RememberUnmutedVolume_SurvivesAMutedReport()
   {
     Report(false, Zone("Kitchen", 40));
 
@@ -78,6 +78,41 @@ public class HouseAudioCommandLedgerTests
 
     Report(false, Zone("Kitchen", 0, muted: true));
     Assert.Equal(60, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
+  }
+
+  [Fact]
+  public void RememberUnmutedVolume_SurvivesAReportOfAHeldRoom()
+  {
+    Report(false, Zone("Kitchen", 40));
+    _ledger.RememberUnmutedVolume(Zone("Kitchen", 40), 60);
+
+    // A mute is in flight, so the room is held, and this report still says 40.
+    _ledger.Begin(["Kitchen"], zone => zone with { Muted = true });
+    Report(false, Zone("Kitchen", 40));
+
+    Assert.Equal(60, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
+  }
+
+  [Fact]
+  public void RememberUnmutedVolume_SurvivesAStaleReport()
+  {
+    Report(false, Zone("Kitchen", 40));
+    _ledger.RememberUnmutedVolume(Zone("Kitchen", 40), 60);
+
+    Report(true, Zone("Kitchen", 40));
+
+    Assert.Equal(60, _ledger.UnmutedVolume(Zone("Kitchen", 40)));
+  }
+
+  [Fact]
+  public void RememberUnmutedVolume_GivesWayToAFreshReport()
+  {
+    Report(false, Zone("Kitchen", 40));
+    _ledger.RememberUnmutedVolume(Zone("Kitchen", 40), 60);
+
+    Report(false, Zone("Kitchen", 44));
+
+    Assert.Equal(44, _ledger.UnmutedVolume(Zone("Kitchen", 44)));
   }
 
   [Fact]
