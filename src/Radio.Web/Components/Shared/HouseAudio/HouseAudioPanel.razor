@@ -60,6 +60,7 @@
       {
         <HouseZoneCard @key="@((zone.ControllerId, zone.ZoneId))"
                        Zone="@zone"
+                       UnmutedVolume="@_ledger.UnmutedVolume(zone)"
                        Sources="@(_snapshot?.Sources ?? [])"
                        Stale="@stale"
                        Tuned="@IsTuned(zone)"
@@ -243,13 +244,31 @@
   private Task SetMutedAsync(HouseZone zone)
   {
     bool muted = !zone.Muted;
-    return RunAsync([zone.Name], shown => shown with { Muted = muted }, $"{zone.Name} mute was not changed.",
+    return RunAsync([zone.Name], shown => WithMuted(shown, muted), $"{zone.Name} mute was not changed.",
       () => Api.SetMuteAsync(zone.Name, muted));
   }
 
-  private Task SetVolumeAsync(HouseZone zone, int volume) =>
-    RunAsync([zone.Name], shown => shown with { Volume = volume }, $"{zone.Name} volume was not changed.",
-      () => Api.SetVolumeAsync(zone.Name, volume));
+  // Unmuting returns the room to its volume, so the card does not drop to the 0 the mute left.
+  private HouseZone WithMuted(HouseZone shown, bool muted) => muted
+    ? shown with { Muted = true }
+    : shown with
+    {
+      Muted = false,
+      Volume = _ledger.UnmutedVolume(shown) is { } unmuted ? Math.Min(unmuted, shown.MaxVolume) : shown.Volume
+    };
+
+  // The controller ends a mute when a volume is set, unless that volume is the 0 the room is already
+  // at. In that one case the room stays muted, and the volume it returns to has not changed.
+  private async Task SetVolumeAsync(HouseZone zone, int volume)
+  {
+    bool accepted = await RunAsync([zone.Name], shown => shown with { Volume = volume, Muted = shown.Muted && volume == 0 },
+      $"{zone.Name} volume was not changed.", () => Api.SetVolumeAsync(zone.Name, volume));
+
+    if (accepted && !(zone.Muted && volume == 0))
+    {
+      _ledger.RememberUnmutedVolume(zone, volume);
+    }
+  }
 
   private Task SetSourceAsync(HouseZone zone, int sourceId) =>
     RunAsync([zone.Name], shown => shown with { SourceId = sourceId }, $"{zone.Name} source was not changed.",
@@ -298,7 +317,7 @@
 
   // The controller's all-room mute acts only on powered rooms, so that is what is held and shown.
   private Task SetAllMutedAsync(IReadOnlyList<HouseZone> powered, bool muted) =>
-    RunAsync(powered.Select(zone => zone.Name).ToList(), shown => shown with { Muted = muted },
+    RunAsync(powered.Select(zone => zone.Name).ToList(), shown => WithMuted(shown, muted),
       $"The rooms were not {(muted ? "muted" : "unmuted")}.", () => Api.SetAllMuteAsync(muted));
 
   private Task TurnAllOffAsync(IReadOnlyList<HouseZone> zones) =>

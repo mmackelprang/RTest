@@ -3226,7 +3226,9 @@ the amp.
 `HouseAudioApiService` treats a 2xx as accepted. So a failed command means a failed HTTP call: the card then
 returns to the true state and says so. A command the controller accepted and the amp lost shows as a success.
 `HouseAudioCommandLedger` keeps the commanded value until the first non-stale snapshot after the command, and
-from then on the card shows what the controller reports.
+from then on the card shows what the controller reports. A muted room is the one exception: the controller
+reports volume 0 and not the volume it will return to, so the card shows the last volume reported while the room
+was unmuted, held by the ledger. That memory lasts as long as the panel, so reopening the tab on a muted room shows 0.
 
 ### What is needed
 

@@ -32,9 +32,11 @@ public class HouseZoneCardTests : TestContext
     Action<int>? onVolume = null,
     Action<int>? onSource = null,
     Action? onTune = null,
-    bool stale = false) =>
+    bool stale = false,
+    int? unmutedVolume = null) =>
     RenderComponent<HouseZoneCard>(parameters => parameters
       .Add(card => card.Zone, zone)
+      .Add(card => card.UnmutedVolume, unmutedVolume)
       .Add(card => card.Sources, Sources)
       .Add(card => card.Stale, stale)
       .Add(card => card.OnPower, EventCallback.Factory.Create(this, onPower ?? (() => { })))
@@ -79,6 +81,39 @@ public class HouseZoneCardTests : TestContext
     button.Click();
 
     presses.Should().Be(1);
+  }
+
+  // The controller reports volume 0 for a muted room, so the card shows the last unmuted volume.
+  [Fact]
+  public void Card_MutedRoom_ShowsItsLastUnmutedVolume()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(muted: true, volume: 0), unmutedVolume: 40);
+
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Be("40");
+  }
+
+  [Fact]
+  public void Card_MutedRoom_NeverShowsMoreThanItsMaximum()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(muted: true, volume: 0, maxVolume: 30), unmutedVolume: 40);
+
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Be("30");
+  }
+
+  [Fact]
+  public void Card_UnmutedRoom_ShowsWhatTheControllerReports_NotTheRememberedVolume()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 24), unmutedVolume: 40);
+
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Be("24");
+  }
+
+  [Fact]
+  public void Card_MutedRoom_WithNothingRemembered_ShowsWhatTheControllerReports()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(muted: true, volume: 6));
+
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Be("6");
   }
 
   [Fact]

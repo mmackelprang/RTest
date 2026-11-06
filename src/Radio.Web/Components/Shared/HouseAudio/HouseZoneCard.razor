@@ -34,7 +34,7 @@
       <RadzenIcon Icon="@(Zone.Muted ? "volume_off" : "volume_up")" />
     </button>
     <HouseLevelSlider Class="house-zone-slider"
-                      Value="@Zone.Volume"
+                      Value="@ShownVolume"
                       Ceiling="@Zone.MaxVolume"
                       Disabled="@(!Zone.Power)"
                       TapSlop="@SliderTapSlop"
@@ -100,7 +100,13 @@
   /// <summary>True while this room's settings are open.</summary>
   [Parameter] public bool Tuned { get; set; }
 
+  /// <summary>The last volume reported for this room unmuted, if there has been one since the panel opened.</summary>
+  [Parameter] public int? UnmutedVolume { get; set; }
+
   private bool _pickerOpen;
+
+  // A muted room reports volume 0. The controller clamps to the maximum on the way back, so this does too.
+  private int ShownVolume => Zone.Muted ? Math.Min(UnmutedVolume ?? Zone.Volume, Zone.MaxVolume) : Zone.Volume;
 
   private string CssClass =>
     "house-zone-card"
