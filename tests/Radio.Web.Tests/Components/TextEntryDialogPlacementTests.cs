@@ -79,6 +79,16 @@ public class TextEntryDialogPlacementTests : TestContext
   }
 
   [Fact]
+  public void Css_TheControllerPanelLiftsTheTransform_SoItsEntryCardCanReachTheTop()
+  {
+    var css = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Radio.Web", "wwwroot", "css", "design-system.css"));
+
+    // Under the transform the overlay is bounded by the content area, the card starts at y = 144, and
+    // the source form's field and buttons no longer all clear the keyboard at y = 348.
+    css.Should().MatchRegex(@"\.page-transition > :has\(\.house-controller-panel\)\s*\{\s*transform: none;");
+  }
+
+  [Fact]
   public void Css_TheDeadMudBlazorKeyboardShiftIsGone()
   {
     // The old answer to this bug shifted `.mud-overlay .mud-paper` while the keyboard was up. Nothing

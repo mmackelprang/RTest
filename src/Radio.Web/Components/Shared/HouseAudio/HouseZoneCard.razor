@@ -89,7 +89,7 @@
 
   [Parameter] public EventCallback OnMute { get; set; }
 
-  /// <summary>Raised once per gesture, on release. Nothing reaches it during a drag.</summary>
+  /// <summary>Raised at most once per gesture, on release. Nothing reaches it during a drag, or if the room goes off mid-drag.</summary>
   [Parameter] public EventCallback<int> OnVolumeCommitted { get; set; }
 
   /// <summary>Raised with the <c>SourceId</c> picked, and not for the source already playing.</summary>

@@ -40,6 +40,41 @@ public record HouseZoneSetting(HouseZoneParameter Parameter, int Value);
 public record HouseSource(int SourceId, string Name, int Type);
 
 /// <summary>
+/// The controller's source types: the index is the <c>Source.TYPE_*</c> value, and the labels are the
+/// ones the rnet-pi web page shows (<c>SOURCE_TYPE_LABELS</c> in <c>web/app.js</c>).
+/// </summary>
+public static class HouseSourceTypes
+{
+  public static IReadOnlyList<string> Labels { get; } =
+  [
+    "Generic",
+    "AirPlay",
+    "Blu-ray",
+    "Cable",
+    "CD",
+    "Computer",
+    "DVD",
+    "Google Cast",
+    "Internet Radio",
+    "iPod",
+    "Media Server",
+    "MP3",
+    "Over the Air",
+    "Phono",
+    "Radio",
+    "Satellite",
+    "Satellite Radio",
+    "Sonos",
+    "Tape",
+    "VCR"
+  ];
+
+  /// <summary>The type's label. A value outside the table is named by its number, as the web page does.</summary>
+  public static string Label(int type) =>
+    type >= 0 && type < Labels.Count ? Labels[type] : $"Type {type}";
+}
+
+/// <summary>
 /// The controller itself, as <c>GET /system</c> reports it. <c>Address</c> is its first non-internal
 /// IPv4 address, or null if it has none.
 /// </summary>

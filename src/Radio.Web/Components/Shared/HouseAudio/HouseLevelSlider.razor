@@ -37,7 +37,7 @@
 
   [Parameter] public string? LevelTestId { get; set; }
 
-  /// <summary>Raised once per gesture, on release. Nothing reaches it during a drag, or for a tap.</summary>
+  /// <summary>Raised at most once per gesture, on release. Nothing reaches it during a drag, for a tap, or for a drag during which it was disabled.</summary>
   [Parameter] public EventCallback<int> OnCommitted { get; set; }
 
   // The level under the finger, from the first move past the slop until the commit has finished.

@@ -35,6 +35,7 @@ public class HouseAudioPanelTests : TestContext
   {
     HouseAudioApiService api = _controller.CreateClient(_passwords);
     Services.AddSingleton(api);
+    Services.AddSingleton(_passwords);
     Services.AddSingleton<Func<HouseAudioPoller>>(() => new HouseAudioPoller(api, _time, Interval));
     return RenderComponent<HouseAudioPanel>();
   }
@@ -222,6 +223,79 @@ public class HouseAudioPanelTests : TestContext
     WaitForMarkup(cut, "No controller password");
     cut.Find("[data-testid='house-audio-status']").TextContent.Should().Contain("Controller settings");
     _controller.Seen.Should().BeEmpty();
+  }
+
+  [Fact]
+  public async Task Panel_ControllerSettings_OpensAndCloses()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "Kitchen");
+
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-settings']").ClickAsync(new MouseEventArgs()));
+    cut.FindAll("[data-testid='house-controller-panel']").Should().ContainSingle();
+
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-away']").ClickAsync(new MouseEventArgs()));
+    cut.FindAll("[data-testid='house-controller-panel']").Should().BeEmpty();
+  }
+
+  [Fact]
+  public async Task Panel_NoPassword_SavingOne_TakesEffectOnTheNextPoll()
+  {
+    _passwords = FakeHouseController.CreateStore(new EphemeralDataProtectionProvider(), null, new RecordingHandler());
+    JSInterop.Setup<string>("Reflect.get", _ => true).SetResult(FakeHouseController.Password);
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "No controller password");
+
+    cut.Find("[data-testid='house-controller-settings']").HasAttribute("disabled").Should().BeFalse("this is where the password is entered");
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-settings']").ClickAsync(new MouseEventArgs()));
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-password']").ClickAsync(new MouseEventArgs()));
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-entry-save']").ClickAsync(new MouseEventArgs()));
+    _controller.Seen.Should().BeEmpty();
+
+    _time.Advance(Interval);
+
+    await PollsBegunAsync(1);
+    WaitForMarkup(cut, "Kitchen");
+    cut.FindAll("[data-testid='house-audio-status']").Should().BeEmpty();
+    _controller.Seen.Should().OnlyContain(request => request.PasswordHeader == FakeHouseController.Password);
+  }
+
+  [Fact]
+  public async Task Panel_WrongPassword_ReplacingIt_TakesEffectOnTheNextPoll()
+  {
+    _controller.ForcedStatus = HttpStatusCode.Unauthorized;
+    _passwords = FakeHouseController.CreateStore(new EphemeralDataProtectionProvider(), null, new RecordingHandler());
+    await _passwords.SetAsync("the-old-one", CancellationToken.None);
+    JSInterop.Setup<string>("Reflect.get", _ => true).SetResult(FakeHouseController.Password);
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "refused the password");
+
+    cut.Find("[data-testid='house-controller-settings']").HasAttribute("disabled").Should().BeFalse("this is where the password is entered");
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-settings']").ClickAsync(new MouseEventArgs()));
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-password']").ClickAsync(new MouseEventArgs()));
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-entry-save']").ClickAsync(new MouseEventArgs()));
+    _controller.ForcedStatus = null;
+    await NextPollAsync();
+
+    WaitForMarkup(cut, "Kitchen");
+    cut.FindAll("[data-testid='house-audio-status']").Should().BeEmpty();
+    _controller.Seen[^1].PasswordHeader.Should().Be(FakeHouseController.Password);
+  }
+
+  [Fact]
+  public async Task Panel_SavedSource_ReachesTheCards_BeforeThePollDoes()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "Kitchen");
+    Card(cut, "Kitchen").TextContent.Should().Contain("Pi Audio");
+
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-settings']").ClickAsync(new MouseEventArgs()));
+    await cut.InvokeAsync(() => cut.FindAll("[data-testid='house-source-row']")
+      .Single(row => row.TextContent.Contains("Pi Audio")).ClickAsync(new MouseEventArgs()));
+    await cut.InvokeAsync(() => cut.Find(".kiosk-entry-overlay input").Change("Porch Pi"));
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-entry-save']").ClickAsync(new MouseEventArgs()));
+
+    Card(cut, "Kitchen").TextContent.Should().Contain("Porch Pi");
   }
 
   [Fact]

@@ -3,8 +3,8 @@
 
 @* SeekBar — drag-to-seek with SEEK ON RELEASE (AUD-28 owner ruling 2026-09-25; UI-16 by analogy).
 
-   ⛔ OnSeek fires ONCE per gesture, when the pointer is released. Nothing during the drag reaches it,
-   and there is no debounce or throttle — option (2) in archive/queue/AUD-28.md was declined by the owner.
+   ⛔ OnSeek fires AT MOST ONCE per gesture, when the pointer is released, and not at all if the bar turned
+   Disabled during the drag. Nothing during the drag reaches it, and there is no debounce or throttle — option (2) in archive/queue/AUD-28.md was declined by the owner.
    The accepted cost is silence-then-jump: no audible response while dragging, and no scrub preview.
 
    OnScrub is the readout channel: it carries the fraction under the finger while the drag is live, so a
@@ -49,7 +49,10 @@
   /// <summary>Fraction under the finger while dragging; null when the drag ends. Display only — never seek from it.</summary>
   [Parameter] public EventCallback<double?> OnScrub { get; set; }
 
-  /// <summary>The single commit for a gesture, raised on release with the release fraction in [0, 1].</summary>
+  /// <summary>
+  /// The commit for a gesture, raised on release with the release fraction in [0, 1]. Not raised for a
+  /// drag during which the bar turned <see cref="Disabled"/>, or, with <see cref="RelativeDragSlop"/>, for a tap.
+  /// </summary>
   [Parameter] public EventCallback<double> OnSeek { get; set; }
 
   [Parameter] public string? AriaLabel { get; set; }
@@ -163,7 +166,7 @@
     await OnScrub.InvokeAsync(_dragFraction);
   });
 
-  /// <summary>Pointer released: the one seek for this gesture.</summary>
+  /// <summary>Pointer released: the gesture's seek, if it has one.</summary>
   [JSInvokable]
   public Task OnDragEnd(double fraction) => InvokeAsync(async () =>
   {
@@ -175,9 +178,9 @@
 
     _dragging = false;
 
-    // Disabled under the finger, as a room turned off mid-drag is: nothing to send it. Otherwise still
-    // a tap. Either way a commit from an earlier drag may still be showing, and its finally left that
-    // here because this press had started, so this has to end it.
+    // Disabled under the finger, as a room turned off mid-drag is, or still a tap: no seek. The bar may
+    // still be holding a value, which ends here: this drag's own, if it moved before the bar was
+    // disabled, or an earlier commit's, whose finally left that to this press because it had started.
     if (Disabled || (RelativeDragSlop is not null && _dragStartFraction is null))
     {
       await EndHoldAsync();

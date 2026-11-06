@@ -42,8 +42,9 @@
             disabled="@(powered.Count == 0)" @onclick="@(() => TurnAllOffAsync(zones))">
       All off
     </button>
-    @* Opens the panel Task 10 adds. *@
-    <button type="button" class="house-audio-action" data-testid="house-controller-settings" disabled>
+    @* Never disabled: this is where a missing or wrong password gets entered. *@
+    <button type="button" class="house-audio-action" data-testid="house-controller-settings"
+            @onclick="@(() => _controllerSettingsOpen = true)">
       Controller settings
     </button>
   </header>
@@ -82,6 +83,13 @@
                               OnDelete="@(() => DeleteZoneAsync(tuned))"
                               OnClose="@(() => _tunedZone = null)" />
   }
+
+  @if (_controllerSettingsOpen)
+  {
+    <HouseControllerSettingsPanel Snapshot="@_snapshot"
+                                  OnSaved="ApplySaved"
+                                  OnClose="@(() => _controllerSettingsOpen = false)" />
+  }
 </section>
 
 @code {
@@ -96,6 +104,7 @@
 
   // The room whose settings are open. Ids, because two zones can share a name.
   private (int ControllerId, int ZoneId)? _tunedZone;
+  private bool _controllerSettingsOpen;
 
   // With no rooms and a failed poll, the health line already says what is wrong.
   private string? EmptyText => _snapshot?.Health switch
@@ -114,7 +123,7 @@
 
   private bool IsTuned(HouseZone zone) => _tunedZone == (zone.ControllerId, zone.ZoneId);
 
-  private static string Reason(HouseAudioHealth health) => health switch
+  internal static string Reason(HouseAudioHealth health) => health switch
   {
     HouseAudioHealth.Ok => "The controller refused it.",
     HouseAudioHealth.AmpDisconnected => "The controller can't reach the amp.",
@@ -158,6 +167,15 @@
     }
 
     StateHasChanged();
+  }
+
+  // Shows a saved name or source until the next poll replaces it with what the controller reports.
+  private void ApplySaved(Func<HouseAudioSnapshot, HouseAudioSnapshot> change)
+  {
+    if (_snapshot is not null)
+    {
+      _snapshot = change(_snapshot);
+    }
   }
 
   private Task SetPowerAsync(HouseZone zone)

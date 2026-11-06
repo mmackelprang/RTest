@@ -8727,7 +8727,8 @@ body:has(.icb-scrim) .encoder-selector-overlay {
    the one overlay here that must leave that box. The child's transform makes it the containing block
    for anything fixed, and a stacking context under the dock, so the rule below lifts that while the
    popover is open. It then sits under the top bar and over the dock, which the owner allows. */
-.page-transition > :has(.house-settings-popover) {
+.page-transition > :has(.house-settings-popover),
+.page-transition > :has(.house-controller-panel) {
   transform: none;
   will-change: auto;
 }
@@ -8932,3 +8933,181 @@ body:has(.icb-scrim) .encoder-selector-overlay {
   line-height: 1.4;
   color: var(--text-high);
 }
+
+/* ─── Controller settings ────────────────────────────────────────────────────
+   Two columns, because six sources of 56 px, the rows above them and About do not fit one. No text
+   field here, and none may be added: the keyboard covers everything below y = 348. Fields live in the
+   entry card below, which .kiosk-entry-overlay (§20a) hangs from the top of the screen. That needs the
+   lifted transform above: under it, the overlay would be bounded by the content area and the card
+   would start at y = 144, with room for only the shortest form above the keyboard. */
+.house-controller-panel {
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--sp-2));
+  right: var(--sp-4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  box-sizing: border-box;
+  width: 880px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.house-controller-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.house-controller-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.house-controller-heading {
+  flex: none;
+  padding-top: var(--sp-1);
+  font-size: 13px;
+  line-height: 20px;
+  letter-spacing: 0.06em;
+  color: var(--text-medium);
+  text-transform: uppercase;
+}
+
+.house-controller-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+}
+
+.house-controller-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-high);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.house-controller-row:disabled .house-controller-text,
+.house-controller-row:disabled .house-controller-edit {
+  color: var(--text-low);
+}
+
+.house-controller-input {
+  flex: none;
+  width: 58px;
+  font-size: 14px;
+  color: var(--text-medium);
+}
+
+.house-controller-type {
+  flex: none;
+  max-width: 124px;
+  overflow: hidden;
+  font-size: 14px;
+  color: var(--text-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.house-controller-edit,
+.house-controller-add { color: var(--accent-primary); }
+
+.house-controller-edit { flex: none; font-size: 14px; }
+
+.house-controller-fact {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  height: 28px;
+  font-size: 14px;
+  color: var(--text-medium);
+}
+
+.house-controller-fact span:last-child { color: var(--text-high); }
+
+.house-controller-fact span.is-down { color: var(--signal-amber); }
+
+.house-controller-note {
+  padding: var(--sp-2) 0;
+  font-size: 15px;
+  color: var(--text-medium);
+}
+
+/* A source form with a two-line error still ends above y = 348, so its buttons stay clear too. */
+.kiosk-entry-card.house-entry-card {
+  box-sizing: border-box;
+  width: 560px;
+  max-width: 560px;
+  padding: var(--sp-4);
+}
+
+/* Twenty types, four across: five rows of 56 px. The keyboard has gone by then, as focus left the field. */
+.kiosk-entry-card.house-entry-card.is-picking {
+  width: 780px;
+  max-width: 780px;
+}
+
+.house-entry-card input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--touch-preferred);
+}
+
+.house-entry-pickers {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.house-entry-picker {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  color: var(--text-high);
+}
+
+.house-entry-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-1);
+}
+
+.house-entry-option { color: var(--text-high); }
+
+.house-entry-option.is-active {
+  background: var(--accent-surface);
+  color: var(--accent-primary);
+}
+
+.house-entry-error {
+  overflow-wrap: anywhere;
+  margin: var(--sp-2) 0 0;
+  font-size: 14px;
+  line-height: 1.25;
+  color: var(--signal-amber);
+}
+
+.house-entry-prompt {
+  overflow-wrap: anywhere;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text-high);
+}
+
+.house-entry-left.rz-button { margin-right: auto; }
