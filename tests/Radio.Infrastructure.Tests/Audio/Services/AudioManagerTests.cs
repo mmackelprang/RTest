@@ -94,6 +94,33 @@ public class AudioManagerTests : IAsyncDisposable
   }
 
   [Fact]
+  public async Task AStandIn_ThatCannotBeCreated_LeavesNothingActive()
+  {
+    // No SDR: the radio factory throws. With no active source nothing can report playing.
+    _sourceFactoryMock.Setup(f => f.CreateSource(AudioSourceType.Radio))
+      .Throws(new InvalidOperationException("Failed to create RTL-SDR radio source"));
+
+    var standIn = await _sut.ActivateStandInSourceAsync(AudioSourceType.Radio);
+
+    Assert.Null(standIn);
+    Assert.Null(_sut.ActiveSource);
+  }
+
+  [Fact]
+  public async Task AStandIn_NeverReplacesASourceAlreadyActive()
+  {
+    // A phone can connect and take over while the radio is still being created at startup.
+    var bluetooth = CreateMockPrimarySource(AudioSourceType.Bluetooth, "BT");
+    var radio = CreateMockPrimarySource(AudioSourceType.Radio, "FM Radio");
+    _sourceFactoryMock.Setup(f => f.CreateSource(AudioSourceType.Radio)).Returns(radio.Object);
+    await _sut.SwitchSourceAsync(bluetooth.Object);
+
+    await _sut.ActivateStandInSourceAsync(AudioSourceType.Radio);
+
+    Assert.Equal(bluetooth.Object, _sut.ActiveSource);
+  }
+
+  [Fact]
   public async Task SwitchSourceAsync_StopsOldSource()
   {
     // Arrange

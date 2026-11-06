@@ -400,6 +400,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           continue; // Already logged error, stop retrying
         }
 
+        // A connected phone with no node is idle, not broken, and since a phone takes over at the
+        // connect that is the ordinary state of an active source. One read per tick, rather than a
+        // Warning, a 20 s search and an eventual Error for it. A node with no stream is what this
+        // loop is for: it is what a missed node event leaves.
+        if (!await IsCaptureNodeAvailableAsync(connected.Address, cancellationToken))
+        {
+          continue;
+        }
+
         _pipelineRecoveryFailures++;
         _logger.LogWarning(
           "BT device connected but capture stream missing (attempt {Attempt}/3) — attempting recovery",

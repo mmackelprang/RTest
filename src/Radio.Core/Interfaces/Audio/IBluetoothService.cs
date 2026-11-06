@@ -298,8 +298,8 @@ public class BluetoothDeviceConnectedEventArgs : EventArgs
   public required BluetoothDeviceInfo Device { get; init; }
 
   /// <summary>
-  /// True when the link was already up as this service started, so nothing connected just now: a
-  /// restart of radio-api leaves BlueZ and the phone connected.
+  /// True when the link was already up as this service started, so nothing connected just now. A clean
+  /// stop powers the adapter off and drops the link, so this is what follows a crash or a kill.
   /// </summary>
   public bool AlreadyConnected { get; init; }
 }

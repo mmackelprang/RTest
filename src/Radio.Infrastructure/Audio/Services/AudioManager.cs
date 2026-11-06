@@ -215,7 +215,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     CancellationToken cancellationToken = default)
   {
     var source = await GetOrCreateSourceAsync(sourceType, switchToSource: false, cancellationToken);
-    if (source != null && source != _activeSource)
+
+    // Only into an empty seat: whatever became active while this was being created is the real choice.
+    if (source != null && _activeSource == null)
     {
       await SwitchToSourceAsync(source, persistSelection: false, cancellationToken);
     }

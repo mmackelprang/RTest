@@ -29,9 +29,9 @@ namespace Radio.Infrastructure.Audio.Services;
 /// node appears or that device disconnects.
 ///
 /// Each connection takes over once, so a source the owner picks afterwards stays picked. A phone back
-/// within <see cref="BluetoothOptions.AutoSwitchSameConnectionWindowMs"/> of a disconnect it did not
-/// ask for counts as the same connection: a PBAP sync can drop the link and reconnect it seconds
-/// later, and neither that nor a flap is the phone arriving.
+/// within <see cref="BluetoothOptions.AutoSwitchSameConnectionWindowMs"/> counts as the same connection:
+/// a PBAP sync can drop the link and reconnect it seconds later, and neither that nor a flap is the
+/// phone arriving. A disconnect made on the console or on the phone ends the connection at once.
 /// </summary>
 public class BluetoothAutoSwitchService : IDisposable
 {
@@ -48,10 +48,12 @@ public class BluetoothAutoSwitchService : IDisposable
   private readonly Dictionary<string, CancellationTokenSource> _waiters = new(StringComparer.OrdinalIgnoreCase);
   private readonly object _waitersLock = new();
 
-  // The devices that have taken over, by address: null while connected, or when they went. An entry
-  // is what makes a reconnect the same connection. One per paired phone at most, and replaced or
-  // removed on its next connect. Guarded by _waitersLock.
-  private readonly Dictionary<string, DateTimeOffset?> _takenOver = new(StringComparer.OrdinalIgnoreCase);
+  // The connections that have settled, by address, with when they did or when the device last left.
+  // Settled includes the cases with nothing to switch: Bluetooth already active, or the option off.
+  // A time rather than a "still connected" flag, because a disconnect can go unreported (evicting a
+  // Device1 raises none), and a flag would hold back every later connection. One per paired device at
+  // most. Guarded by _waitersLock.
+  private readonly Dictionary<string, DateTimeOffset> _settled = new(StringComparer.OrdinalIgnoreCase);
   private bool _disposed;
 
   public BluetoothAutoSwitchService(
@@ -95,7 +97,7 @@ public class BluetoothAutoSwitchService : IDisposable
   /// </summary>
   /// <remarks>
   /// There is no grace period for the phone beyond the adapter's own start, which is when a link
-  /// that survived a radio-api restart is seen. A phone that arrives later takes over anyway, so
+  /// that is already up is seen. A phone that arrives later takes over anyway, so
   /// waiting would only buy a few seconds of FM not being heard, at the price of silence on every
   /// start with the phone away.
   ///
@@ -165,9 +167,7 @@ public class BluetoothAutoSwitchService : IDisposable
 
       if (!e.AlreadyConnected && await HoldsAsAudioSourceAsync(address, waiter.Token))
       {
-        // The Bluetooth source binds the node when it appears, so nothing is bound here. The old
-        // source's stop cannot outlive a node that does not exist yet.
-        await SwitchIfStillNeededAsync(address, waiter.Token, bindFirst: false);
+        await TakeOverAtTheConnectAsync(address, waiter.Token);
       }
       else
       {
@@ -176,9 +176,9 @@ public class BluetoothAutoSwitchService : IDisposable
 
       lock (_waitersLock)
       {
-        // Already cancelled means it left during the switch, past the disconnect's own bookkeeping.
-        _takenOver[address] = waiter.IsCancellationRequested ? _timeProvider.GetUtcNow() : null;
+        _settled[address] = _timeProvider.GetUtcNow();
       }
+      _metricsCollector?.Increment("bluetooth.autoswitch_takeover_total");
     }
     catch (OperationCanceledException) when (waiter?.IsCancellationRequested == true)
     {
@@ -212,20 +212,67 @@ public class BluetoothAutoSwitchService : IDisposable
   /// </summary>
   private bool IsSameConnection(string address)
   {
-    if (!_takenOver.TryGetValue(address, out var wentAt))
+    if (!_settled.TryGetValue(address, out var lastSeen))
     {
       return false;
     }
 
     var window = TimeSpan.FromMilliseconds(_bluetoothOptions.CurrentValue.AutoSwitchSameConnectionWindowMs);
-    if (wentAt == null || _timeProvider.GetUtcNow() - wentAt <= window)
+    if (_timeProvider.GetUtcNow() - lastSeen <= window)
     {
-      _takenOver[address] = null;
       return true;
     }
 
-    _takenOver.Remove(address);
+    _settled.Remove(address);
     return false;
+  }
+
+  /// <summary>
+  /// Switches for a phone the connect has decided on. Nothing here can call that off, so a bind that
+  /// fails does not leave the old source playing, as it does on the node path.
+  /// </summary>
+  /// <remarks>
+  /// The phone may already be streaming: the settle has passed, so its node can exist, and the old
+  /// source's stop can last as long as an unbound node does. So a node that exists now is bound first,
+  /// and one that appears during the stop is bound as it appears. The Bluetooth source leaves a node
+  /// alone until it is active, which it is not until the stop has finished.
+  /// </remarks>
+  private async Task TakeOverAtTheConnectAsync(string address, CancellationToken deviceLeft)
+  {
+    EventHandler<CaptureNodeAvailableEventArgs> bindOnNode = (_, evt) =>
+    {
+      if (string.Equals(evt.DeviceAddress, address, StringComparison.OrdinalIgnoreCase))
+      {
+        // Off the PipeWire registry thread, as for the Bluetooth source's own handler.
+        _ = Task.Run(() => BindNodeDuringTheStopAsync(deviceLeft));
+      }
+    };
+
+    _bluetoothService.CaptureNodeAvailable += bindOnNode;
+    try
+    {
+      if (await _bluetoothService.IsCaptureNodeAvailableAsync(address, deviceLeft))
+      {
+        await BindCaptureBeforeTheSwitchAsync(deviceLeft);
+      }
+      await SwitchIfStillNeededAsync(address, deviceLeft, bindFirst: false);
+    }
+    finally
+    {
+      _bluetoothService.CaptureNodeAvailable -= bindOnNode;
+    }
+  }
+
+  private async Task BindNodeDuringTheStopAsync(CancellationToken deviceLeft)
+  {
+    try
+    {
+      await BindCaptureBeforeTheSwitchAsync(deviceLeft);
+    }
+    catch (OperationCanceledException)
+    {
+      // The phone left. The takeover's own wait reports that.
+    }
   }
 
   /// <summary>
@@ -244,23 +291,24 @@ public class BluetoothAutoSwitchService : IDisposable
 
   /// <summary>
   /// A device that has gone cannot take over: ends its wait, and cancels a probe in flight. One that
-  /// already has starts the window in which it counts as the same connection, unless the user
-  /// disconnected it, which ends the connection whatever follows.
+  /// already settled starts the window in which it counts as the same connection, unless the user
+  /// disconnected it, on the console or on the phone, which ends the connection whatever follows.
+  /// PBAP's teardown reports LocalHost and a flap a timeout, so neither is taken for the user.
   /// </summary>
   private void OnBluetoothDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
   {
     CancellationTokenSource? waiter;
     lock (_waitersLock)
     {
-      if (_takenOver.ContainsKey(e.Device.Address))
+      if (_settled.ContainsKey(e.Device.Address))
       {
-        if (e.UserInitiated)
+        if (e.UserInitiated || e.Reason == BluetoothDisconnectReason.Remote)
         {
-          _takenOver.Remove(e.Device.Address);
+          _settled.Remove(e.Device.Address);
         }
         else
         {
-          _takenOver[e.Device.Address] = _timeProvider.GetUtcNow();
+          _settled[e.Device.Address] = _timeProvider.GetUtcNow();
         }
       }
 
@@ -405,7 +453,7 @@ public class BluetoothAutoSwitchService : IDisposable
   {
     if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
     {
-      _logger.LogInformation("BT auto-switch: PW node ready for {Address}, but auto-switch is now off", address);
+      _logger.LogInformation("BT auto-switch: nothing to do for {Address}, auto-switch is now off", address);
       return true;
     }
 
@@ -413,7 +461,7 @@ public class BluetoothAutoSwitchService : IDisposable
     if (audioManager.ActiveSource?.Type == AudioSourceType.Bluetooth)
     {
       _logger.LogInformation(
-        "BT auto-switch: PW node ready for {Address}; Bluetooth is already the active source",
+        "BT auto-switch: nothing to do for {Address}, Bluetooth is already the active source",
         address);
       return true;
     }
@@ -431,10 +479,10 @@ public class BluetoothAutoSwitchService : IDisposable
   }
 
   /// <summary>
-  /// Binds the node before the switch stops the old source. This is the point of no return for the
-  /// old source, for two reasons. A node that went before it could be bound (a notification sound, or
-  /// a phone that left) means there is no audio to replace it with, so the switch does not happen.
-  /// And the switch's own stop can outlive the node: the phone gives up on an unbound A2DP node after
+  /// Binds the node before the switch stops the old source. On the node path this decides the switch:
+  /// a node that went before it could be bound (a notification sound, or a phone that left) means
+  /// there is no audio to replace the old source with. On both paths the switch's own stop can
+  /// otherwise outlive the node: the phone gives up on an unbound A2DP node after
   /// about 4 s (AUD-10), and stopping FM can block for about that long by itself, because
   /// RadioReceiver.Shutdown joins its processing thread for up to 2 s and then
   /// RtlSdrDevice.StopStreaming waits for up to 2 s more.
@@ -442,7 +490,7 @@ public class BluetoothAutoSwitchService : IDisposable
   /// <remarks>
   /// This does not put anything in the mixer. The stream feeds a generator that nothing plays until
   /// the switch starts the Bluetooth source, which picks up this capture and routes it. If the node
-  /// goes during the old source's stop, the source searches for a capture of its own instead.
+  /// goes during the old source's stop, the source binds the node that replaces it, when one appears.
   /// </remarks>
   /// <returns>Whether a capture is bound, or the platform routes the audio itself.</returns>
   private async Task<bool> BindCaptureBeforeTheSwitchAsync(CancellationToken deviceLeft)
@@ -458,7 +506,7 @@ public class BluetoothAutoSwitchService : IDisposable
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
-      _logger.LogWarning(ex, "BT auto-switch: binding the capture failed; leaving the current source");
+      _logger.LogWarning(ex, "BT auto-switch: binding the capture failed");
       return false;
     }
   }

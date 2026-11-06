@@ -32,8 +32,8 @@ public interface IAudioSourceManager
     CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Gets or creates an audio source and switches to it for now, leaving the persisted source
-  /// selection as it is. For a stand-in, when the source the user chose cannot play.
+  /// Gets or creates an audio source and, if no source is active, switches to it for now, leaving the
+  /// persisted source selection as it is. For a stand-in, when the source the user chose cannot play.
   /// </summary>
   /// <param name="sourceType">The type of audio source to stand in.</param>
   /// <param name="cancellationToken">Cancellation token.</param>

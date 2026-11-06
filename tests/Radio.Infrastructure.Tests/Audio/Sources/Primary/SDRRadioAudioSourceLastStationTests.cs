@@ -75,15 +75,4 @@ public class SDRRadioAudioSourceLastStationTests
     Assert.Equal("98500000", _saved["Radio:LastFrequency"]);
     Assert.Equal("FM", _saved["Radio:LastBand"]);
   }
-
-  [Fact]
-  public async Task Stop_OnASourceThatNeverPlayed_SavesNothing()
-  {
-    // Its frequency is a default, and writing that would replace the real last station.
-    await _source.InitializeAsync();
-
-    await _source.StopAsync();
-
-    Assert.Empty(_saved);
-  }
 }

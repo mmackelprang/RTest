@@ -2047,9 +2047,8 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
     Assert.Equal(0, probe.Calls);
 
-    // The phone plays: the node appears and is bound, within its 4 s.
-    btMock.Setup(b => b.IsCaptureNodeAvailableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync(true);
+    // The phone plays. The event is the proof the node exists, and the probe is left answering no:
+    // a pw-cli read that fails here must not lose a node that lives about 4 s.
     RaiseCaptureNode(btMock);
 
     await WaitForAsync(() => probe.Calls == 1);

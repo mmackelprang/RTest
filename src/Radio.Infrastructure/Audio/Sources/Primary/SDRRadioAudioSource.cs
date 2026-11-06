@@ -1162,13 +1162,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// a switch would otherwise be lost, and a restart with no phone comes back to this station.
   /// </summary>
   /// <remarks>
-  /// Written as PreferencesPersistenceService writes them, in Hz. Skipped for a source that never
-  /// played, whose frequency is a default, and during a scan or a band sweep, when the receiver is
-  /// not on a station. A failed write costs the last few seconds of tuning, not the stop.
+  /// Written as PreferencesPersistenceService writes them, in Hz. Skipped during a scan or a band
+  /// sweep, when the receiver is not on a station. A failed write costs the last few seconds of
+  /// tuning, not the stop.
   /// </remarks>
   private async Task SaveLastStationAsync()
   {
-    if (_configurationManager == null || !_hasRestoredPreferences || _isScanning || _radioReceiver.IsSweeping)
+    if (_configurationManager == null || _isScanning || _radioReceiver.IsSweeping)
     {
       return;
     }
