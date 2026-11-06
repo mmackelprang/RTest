@@ -1206,7 +1206,8 @@ is why it is the case the harness leads with.
 ## ADR-036: A connected phone takes over when it has audio, however late, and once per connection
 
 **Date:** 2026-11-06
-**Status:** Accepted. The trigger is open to the owner (below).
+**Status:** Accepted, then amended the same day: **the trigger is now the connect.** See ruling 2 below,
+which supersedes the trigger and the first two consequences here.
 **Context:** The auto-switch gave up 60 s after a connect, so a phone connected idle and played later
 never took over. Asked whether a late switch should replace a source picked by hand, the owner ruled:
 *"Yes - bluetooth should pause the current stream whenever it connects."*
@@ -1231,6 +1232,51 @@ or it disconnects. The trigger stays the node, not the connect. Each connection 
   delivering (`H6`), and the wait then ends only at a disconnect.
 - A switch still stops the old source; there is no pause in `AudioManager`. A file keeps its place for
   the next press of Play, on this path only. Nothing resumes when the phone disconnects.
+
+### Ruling 2, 2026-11-06: the connect is the trigger
+
+*"Should Bluetooth take over the instant a phone connects?" - "Yes"*, with the cost read first: it
+silences the radio when a phone connects with nothing playing.
+
+**Decision:** A connect takes over, and Bluetooth then waits, active, for the phone's audio, provided
+the link holds for `AutoSwitchConnectSettleMs` (1.5 s) and the device's `UUIDs` include A2DP Source.
+Any other device falls back to the node, as above, so a keyboard or a speaker never stops the radio
+and a phone paired moments ago still takes over when it plays. A link already up when the service
+starts takes the node path too: a `radio-api` restart is not a connect.
+
+**The gate is `UUIDs`, not `ServicesResolved`.** Measured 2026-11-06: the Pixel read `Connected: true`
+and `ServicesResolved: false` while connected, so a gate on that property would never open. RotaryPhone's
+hci1 cannot reach this path, because no object under it is cached (AUD-30). Its HFP on *hci0* can: `UUIDs`
+says what a device can do, not which profile connected, so an HFP-only link from the Pixel takes over.
+
+**The same connection:** a phone back within `AutoSwitchSameConnectionWindowMs` (60 s) of a disconnect it
+did not ask for does not take over again. A PBAP sync can drop the link and reconnect it 3 s later, and
+a flap looks the same. A user disconnect ends the connection at once.
+
+**Capture:** nothing is bound ahead of this switch, because no node exists yet. The old source is
+stopped long before one can, so the 4 s node lifetime is no longer exposed to FM's stop. The Bluetooth
+source binds the node from the node event. It now probes before it acquires: starting with no node
+used to search for 20 s under `AudioManager`'s switch lock, on what is now every connect.
+
+**Consequences:**
+- ⚠ `isPlaying` reads true after a takeover while the phone sits idle: `PlayAsync` promotes to Playing
+  with no capture, as it does for a hand-picked Bluetooth source.
+- A failed connect that outlasts the settle leaves the radio stopped. Nothing goes back to it.
+
+### Ruling 3, 2026-11-06: a restart with no phone
+
+*"Select FM Radio (last station played) if no BT available after restart from playing BT audio."*
+
+**Decision:** If the restored source is Bluetooth and no phone is connected once the adapter has
+started, the radio stands in. There is no further wait for the phone: ruling 2 takes over when it
+arrives, so waiting would only buy silence on every start with the phone away. The stand-in does not
+persist, so the owner's choice stays Bluetooth until the owner picks another source. Bluetooth is
+created but never activated, which is what stops `isPlaying:true` with no phone on this path. With no
+SDR the radio cannot be created, no source is active, and the phone still takes over.
+
+**The station** is `Radio:LastBand` and `Radio:LastFrequency`, which the radio restores on its first play.
+These were saved only every 30 s and only while radio was active, so `SDRRadioAudioSource` now also
+saves them as it stops. ⚠ This is the last band too: if the radio was last on AM, it restarts on AM.
 
 ---
 

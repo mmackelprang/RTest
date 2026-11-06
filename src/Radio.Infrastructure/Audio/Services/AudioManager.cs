@@ -210,7 +210,23 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
 
   /// <inheritdoc/>
-  public async Task SwitchSourceAsync(IAudioSource source, CancellationToken cancellationToken = default)
+  public async Task<IAudioSource?> ActivateStandInSourceAsync(
+    AudioSourceType sourceType,
+    CancellationToken cancellationToken = default)
+  {
+    var source = await GetOrCreateSourceAsync(sourceType, switchToSource: false, cancellationToken);
+    if (source != null && source != _activeSource)
+    {
+      await SwitchToSourceAsync(source, persistSelection: false, cancellationToken);
+    }
+    return source;
+  }
+
+  /// <inheritdoc/>
+  public Task SwitchSourceAsync(IAudioSource source, CancellationToken cancellationToken = default) =>
+    SwitchToSourceAsync(source, persistSelection: true, cancellationToken);
+
+  private async Task SwitchToSourceAsync(IAudioSource source, bool persistSelection, CancellationToken cancellationToken)
   {
     ObjectDisposedException.ThrowIf(_disposed, this);
     ArgumentNullException.ThrowIfNull(source);
@@ -395,7 +411,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       }
 
       // Persist the source selection
-      if (_preferencePersistence != null)
+      if (persistSelection && _preferencePersistence != null)
       {
         await _preferencePersistence.PersistSourcePreferenceAsync(source.Type, cancellationToken);
       }

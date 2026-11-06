@@ -148,6 +148,9 @@ public sealed class MockBluetoothService : IBluetoothService
         public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
             => Task.FromResult(true);
 
+        public Task<bool> IsAudioSourceDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
         public ValueTask DisposeAsync()
         {
             return ValueTask.CompletedTask;

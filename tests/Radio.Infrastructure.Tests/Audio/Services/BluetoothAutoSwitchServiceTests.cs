@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
@@ -29,6 +30,12 @@ public class BluetoothAutoSwitchServiceTests
     public BluetoothDeviceInfo? ConnectedDevice { get; set; }
     public bool IsAudioManagedByPlatform => false;
     public bool IsCaptureNodeAvailable { get; set; }
+
+    /// <summary>
+    /// False by default, so a test that says nothing about the device gets the path for one not
+    /// known to send audio: the takeover waits for the node.
+    /// </summary>
+    public bool IsAudioSourceDevice { get; set; }
     public float? DeviceVolume => null;
     public bool IsReconnecting => false;
     public BluetoothDisconnectReason? LastDisconnectReason => null;
@@ -127,13 +134,15 @@ public class BluetoothAutoSwitchServiceTests
     public void StopAudioCapture() { }
     public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
       => ProbeHandler?.Invoke(deviceAddress, cancellationToken) ?? Task.FromResult(IsCaptureNodeAvailable);
+    public Task<bool> IsAudioSourceDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+      => Task.FromResult(IsAudioSourceDevice);
     public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
     public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task PreviousTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public void CancelReconnection() { }
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    public void SimulateDeviceConnected(string address)
+    public void SimulateDeviceConnected(string address, bool alreadyConnected = false)
     {
       var device = new BluetoothDeviceInfo
       {
@@ -143,17 +152,21 @@ public class BluetoothAutoSwitchServiceTests
         IsConnected = true
       };
       ConnectedDevice = device;
-      DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+      DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs
+      {
+        Device = device,
+        AlreadyConnected = alreadyConnected
+      });
     }
 
-    public void SimulateDeviceDisconnected(string address)
+    public void SimulateDeviceDisconnected(string address, bool userInitiated = false)
     {
       var device = new BluetoothDeviceInfo { Address = address, Name = "Test Phone", IsPaired = true };
       ConnectedDevice = null;
       DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs
       {
         Device = device,
-        UserInitiated = false,
+        UserInitiated = userInitiated,
         Reason = BluetoothDisconnectReason.Unknown
       });
     }
@@ -174,9 +187,27 @@ public class BluetoothAutoSwitchServiceTests
   {
     public bool GetOrCreateCalled { get; set; }
     public bool SwitchedToBluetooth { get; set; }
-    public int SwitchCount { get; set; }
+    public int SwitchCount
+    {
+      get => Volatile.Read(ref _switchCount);
+      set
+      {
+        Volatile.Write(ref _switchCount, value);
+        if (value >= 2)
+        {
+          _second.TrySetResult();
+        }
+      }
+    }
+    private int _switchCount;
+    private readonly TaskCompletionSource _second = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public TaskCompletionSource Switched { get; } =
       new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes on the second switch, the only count these tests wait for beyond the first.</summary>
+    public Task AtLeastSwitches(int count) =>
+      count == 2 ? _second.Task : throw new ArgumentOutOfRangeException(nameof(count));
   }
 
   /// <summary>
@@ -217,14 +248,18 @@ public class BluetoothAutoSwitchServiceTests
     Mock<IAudioManager> audioMock,
     int probeMs = 200,
     bool autoSwitchEnabled = true,
-    IMetricsCollector? metrics = null)
+    IMetricsCollector? metrics = null,
+    int settleMs = 0,
+    TimeProvider? timeProvider = null)
   {
     var optionsMock = new Mock<IOptionsMonitor<BluetoothOptions>>();
     optionsMock.Setup(o => o.CurrentValue).Returns(new BluetoothOptions
     {
       EnableOnStartup = true,
       AutoSwitchOnConnect = autoSwitchEnabled,
-      AutoSwitchProbeWindowMs = probeMs
+      AutoSwitchProbeWindowMs = probeMs,
+      AutoSwitchConnectSettleMs = settleMs,
+      AutoSwitchSameConnectionWindowMs = 60000
     });
 
     return new BluetoothAutoSwitchService(
@@ -232,6 +267,7 @@ public class BluetoothAutoSwitchServiceTests
       bt,
       optionsMock.Object,
       () => audioMock.Object,
+      timeProvider: timeProvider,
       metricsCollector: metrics);
   }
 
@@ -952,6 +988,234 @@ public class BluetoothAutoSwitchServiceTests
     return new FilePlayerAudioSource(
       Mock.Of<ILogger<FilePlayerAudioSource>>(), options.Object, preferences.Object, rootDirectory);
   }
+
+  // ---- Owner's ruling, 2026-11-06: "Should Bluetooth take over the instant a phone connects?" -
+  // "Yes". The source stops at the connect, with nothing yet playing on the phone. ----
+
+  [Fact]
+  public async Task AudioSourcePhone_TakesOverAtTheConnect_WithNoNodeYet()
+  {
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = true, IsCaptureNodeAvailable = false };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 60000, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(1, counters.SwitchCount);
+    Assert.False(metrics.Deferred.Task.IsCompleted, "Nothing waits for the node on this path");
+    // No node exists to bind: the Bluetooth source binds it when it appears.
+    Assert.Equal(0, bt.CaptureRequests);
+  }
+
+  [Fact]
+  public async Task AudioSourcePhone_ThatDropsWithinTheSettle_LeavesTheRadio()
+  {
+    // A failed connect: the link comes up and falls straight back down. M3.
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = true };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, metrics: metrics.Mock.Object, settleMs: 60000);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Abandoned.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(0, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task DeviceThatDoesNotSendAudio_LeavesTheRadio_UntilANodeProvesOtherwise()
+  {
+    // M3: DeviceConnected reports the link, which a keyboard, a speaker or a call profile can open.
+    // A phone paired moments ago reads the same here, so a node still takes over for it.
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = false };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
+    Assert.Equal(0, counters.SwitchCount);
+
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(1, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task ConnectionAlreadyUpAtStartup_IsNotAConnect()
+  {
+    // A radio-api restart leaves the phone connected, and the owner may be on a source picked
+    // since. It takes over if the phone plays, as it always has, but nothing connected just now.
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = true };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF", alreadyConnected: true);
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
+    Assert.Equal(0, counters.SwitchCount);
+
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+  }
+
+  [Fact]
+  public async Task PhoneBackWithinTheWindow_IsTheSameConnection_SoAPickedSourceStays()
+  {
+    // A PBAP sync's OBEX teardown can drop the link and reconnect it 3 s later, and a flap looks
+    // the same. Neither is the phone arriving, so neither may undo a source picked since.
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 6, 12, 0, 0, TimeSpan.Zero));
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = true };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock, timeProvider: time);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+    await WaitForSwitchToFinishAsync();
+
+    bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF");
+    time.Advance(TimeSpan.FromSeconds(59));
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+
+    // A second flap inside the window of the first reconnect is still the same connection.
+    bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF");
+    time.Advance(TimeSpan.FromSeconds(59));
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+
+    await WaitForSwitchToFinishAsync();
+    Assert.Equal(1, counters.SwitchCount);
+    Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
+  }
+
+  [Fact]
+  public async Task PhoneBackAfterTheWindow_IsANewConnection()
+  {
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 6, 12, 0, 0, TimeSpan.Zero));
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = true };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock, timeProvider: time);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+    await WaitForSwitchToFinishAsync();
+
+    bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF");
+    time.Advance(TimeSpan.FromSeconds(61));
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+
+    await counters.AtLeastSwitches(2).WaitAsync(Rendezvous);
+    Assert.Equal(2, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task PhoneBackAfterAUserDisconnect_IsANewConnection_HoweverSoon()
+  {
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 6, 12, 0, 0, TimeSpan.Zero));
+    var bt = new FakeBluetoothService { IsAudioSourceDevice = true };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock, timeProvider: time);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+    await WaitForSwitchToFinishAsync();
+
+    bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF", userInitiated: true);
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+
+    await counters.AtLeastSwitches(2).WaitAsync(Rendezvous);
+  }
+
+  [Fact]
+  public async Task ADeviceThatLeftBeforeTakingOver_GetsNoSameConnectionTreatment()
+  {
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 6, 12, 0, 0, TimeSpan.Zero));
+    var bt = new FakeBluetoothService();
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, metrics: metrics.Mock.Object, timeProvider: time);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
+    bt.SimulateDeviceDisconnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Abandoned.Task.WaitAsync(Rendezvous);
+
+    bt.IsAudioSourceDevice = true;
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+  }
+
+  // ---- Owner's ruling, 2026-11-06: "Select FM Radio (last station played) if no BT available after
+  // restart from playing BT audio." ----
+
+  [Fact]
+  public async Task RestoredBluetooth_WithNoPhone_StandsInTheRadio_WithoutActivatingBluetooth()
+  {
+    var bt = new FakeBluetoothService();
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock);
+
+    await svc.ActivateRestoredBluetoothAsync();
+
+    // Created, so the adapter is up and a phone can connect, but never active: an active Bluetooth
+    // source with no phone is what reported isPlaying:true.
+    audioMock.Verify(m => m.GetOrCreateSourceAsync(AudioSourceType.Bluetooth, false, It.IsAny<CancellationToken>()), Times.Once);
+    Assert.Equal(0, counters.SwitchCount);
+    audioMock.Verify(m => m.ActivateStandInSourceAsync(AudioSourceType.Radio, It.IsAny<CancellationToken>()), Times.Once);
+  }
+
+  [Fact]
+  public async Task RestoredBluetooth_WithThePhoneThere_StaysOnBluetooth()
+  {
+    // The phone is only known once the adapter has started, so it appears during the create.
+    var bt = new FakeBluetoothService();
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    audioMock.Setup(m => m.GetOrCreateSourceAsync(AudioSourceType.Bluetooth, false, It.IsAny<CancellationToken>()))
+      .Callback(() => bt.ConnectedDevice = new BluetoothDeviceInfo { Address = "AA:BB:CC:DD:EE:FF", Name = "Test Phone" })
+      .ReturnsAsync((IAudioSource?)null);
+    using var svc = CreateService(bt, audioMock);
+
+    await svc.ActivateRestoredBluetoothAsync();
+
+    Assert.Equal(1, counters.SwitchCount);
+    audioMock.Verify(m => m.ActivateStandInSourceAsync(It.IsAny<AudioSourceType>(), It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task RestoredBluetooth_WithNoSdrEither_StartsWithNothingPlaying()
+  {
+    // ActivateStandInSourceAsync answers null when the radio cannot be created. No source is active,
+    // so nothing can report playing, and the phone still takes over when it connects.
+    var bt = new FakeBluetoothService();
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    audioMock.Setup(m => m.ActivateStandInSourceAsync(AudioSourceType.Radio, It.IsAny<CancellationToken>()))
+      .ReturnsAsync((IAudioSource?)null);
+    using var svc = CreateService(bt, audioMock);
+
+    await svc.ActivateRestoredBluetoothAsync();
+
+    Assert.Equal(0, counters.SwitchCount);
+  }
+
+  // A takeover records itself after the switch returns, a moment after Switched fires. Bounded, and
+  // only a starved run could weaken what follows (CLAUDE.md § Test Timing).
+  private static Task WaitForSwitchToFinishAsync() => Task.Delay(50);
 
   [Fact]
   public async Task AlreadyActiveBluetoothSource_SkipsSwitch()

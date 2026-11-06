@@ -243,6 +243,10 @@ internal sealed class SelectorFakeAudioManager : IAudioManager
   public IAudioSource? GetCachedSource(AudioSourceType sourceType) =>
     Cached.TryGetValue(sourceType, out var source) ? source : null;
 
+  public Task<IAudioSource?> ActivateStandInSourceAsync(
+    AudioSourceType sourceType,
+    CancellationToken cancellationToken = default) => Task.FromResult<IAudioSource?>(null);
+
   public Task<IAudioSource?> GetOrCreateSourceAsync(
     AudioSourceType sourceType,
     bool switchToSource = true,

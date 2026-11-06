@@ -95,6 +95,10 @@ public interface IAgent1 : IDBusObject
 public static class BluezConstants
 {
   public const string ServiceName = "org.bluez";
+
+  /// <summary>Bluetooth SIG service class 0x110A, Audio Source: the device sends A2DP audio.</summary>
+  public const string A2dpSourceUuid = "0000110a-0000-1000-8000-00805f9b34fb";
+
   public const string AdapterInterface = "org.bluez.Adapter1";
   public const string DeviceInterface = "org.bluez.Device1";
   public const string MediaControlInterface = "org.bluez.MediaControl1";

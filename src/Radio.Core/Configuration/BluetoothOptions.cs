@@ -103,6 +103,19 @@ public class BluetoothOptions
   public int AutoSwitchProbeWindowMs { get; set; } = 5000;
 
   /// <summary>
+  /// How long a connect must hold before a phone takes over (milliseconds). Long enough that a
+  /// link which opens and drops at once does not stop the radio; a person should not notice it.
+  /// </summary>
+  public int AutoSwitchConnectSettleMs { get; set; } = 1500;
+
+  /// <summary>
+  /// How long after a disconnect the same phone coming back counts as the same connection
+  /// (milliseconds), so that a PBAP sync dropping the link or a flap does not take over again from
+  /// a source picked since. A disconnect the user asked for always ends the connection.
+  /// </summary>
+  public int AutoSwitchSameConnectionWindowMs { get; set; } = 60000;
+
+  /// <summary>
   /// Interval at which LinuxBluetoothService re-scans for newly-appeared PW BT nodes
   /// (milliseconds). The re-scan raises CaptureNodeAvailable for any node not present in
   /// the previous scan.

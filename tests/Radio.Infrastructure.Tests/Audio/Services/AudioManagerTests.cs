@@ -63,6 +63,36 @@ public class AudioManagerTests : IAsyncDisposable
     Assert.Equal(source.Object, _sut.ActiveSource);
   }
 
+  [Theory]
+  [InlineData(true, 0)]
+  [InlineData(false, 1)]
+  public async Task AStandInSource_LeavesThePersistedSelectionAlone(bool standIn, int expectedWrites)
+  {
+    // With a stand-in, the owner's choice of Bluetooth is what the next restart reads. The false
+    // case is the control: an ordinary switch does persist, so the 0 means something.
+    var config = new Mock<IConfigurationManager>();
+    var preferences = new Mock<IOptionsMonitor<AudioPreferences>>();
+    preferences.Setup(p => p.CurrentValue).Returns(new AudioPreferences());
+    using var persistence = new AudioPreferencePersistence(
+      Mock.Of<ILogger<AudioPreferencePersistence>>(), _engineMock.Object, preferences.Object, config.Object);
+    await using var manager = new AudioManager(
+      _loggerMock.Object, _engineMock.Object, _sourceFactoryMock.Object, preferencePersistence: persistence);
+    var radio = CreateMockPrimarySource(AudioSourceType.Radio, "FM Radio");
+    _sourceFactoryMock.Setup(f => f.CreateSource(AudioSourceType.Radio)).Returns(radio.Object);
+
+    if (standIn)
+    {
+      await manager.ActivateStandInSourceAsync(AudioSourceType.Radio);
+    }
+    else
+    {
+      await manager.GetOrCreateSourceAsync(AudioSourceType.Radio);
+    }
+
+    Assert.Equal(radio.Object, manager.ActiveSource);
+    Assert.Equal(expectedWrites, config.Invocations.Count(i => i.Method.Name.StartsWith("SetValue")));
+  }
+
   [Fact]
   public async Task SwitchSourceAsync_StopsOldSource()
   {

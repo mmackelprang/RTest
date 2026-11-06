@@ -1707,6 +1707,12 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         sourceType,
         !string.IsNullOrEmpty(prefs.CurrentSource) ? "preferences" : "default");
 
+      if (sourceType == AudioSourceType.Bluetooth && _bluetoothAutoSwitch != null)
+      {
+        await _bluetoothAutoSwitch.ActivateRestoredBluetoothAsync(cancellationToken);
+        return;
+      }
+
       await _audioManager.GetOrCreateSourceAsync(sourceType, switchToSource: true, cancellationToken);
       _logger.LogInformation("Source {SourceType} activated on startup", sourceType);
     }

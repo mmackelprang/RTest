@@ -253,6 +253,9 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
         => Task.FromResult(true);
 
+    public Task<bool> IsAudioSourceDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
+
     public Task SetDeviceVolumeAsync(float volume)
     {
       // AVRCP absolute volume set is not yet implemented for Windows.

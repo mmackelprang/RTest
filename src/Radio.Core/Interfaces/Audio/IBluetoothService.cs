@@ -110,6 +110,15 @@ public interface IBluetoothService : IAsyncDisposable
   /// </summary>
   Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default);
 
+  /// <summary>
+  /// Whether the given device is known to send audio to this console, that is, it offers the A2DP
+  /// Source profile. False means "not known to": a device paired moments ago may not have its
+  /// services read yet. A <c>DeviceConnected</c> alone does not say this, because it reports the
+  /// link, which any device or profile can open. This says what the device can do, not that its
+  /// audio profile has connected.
+  /// </summary>
+  Task<bool> IsAudioSourceDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default);
+
   /// <summary>Event raised when adapter state changes.</summary>
   event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
 
@@ -287,6 +296,12 @@ public class BluetoothAdapterStateChangedEventArgs : EventArgs
 public class BluetoothDeviceConnectedEventArgs : EventArgs
 {
   public required BluetoothDeviceInfo Device { get; init; }
+
+  /// <summary>
+  /// True when the link was already up as this service started, so nothing connected just now: a
+  /// restart of radio-api leaves BlueZ and the phone connected.
+  /// </summary>
+  public bool AlreadyConnected { get; init; }
 }
 
 /// <summary>Device disconnected args.</summary>

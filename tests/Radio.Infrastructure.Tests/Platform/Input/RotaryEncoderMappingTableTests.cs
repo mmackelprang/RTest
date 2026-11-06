@@ -76,6 +76,10 @@ public class RotaryEncoderMappingTableTests
       bool switchToSource = true,
       CancellationToken cancellationToken = default) => Task.FromResult<IAudioSource?>(null);
 
+    public Task<IAudioSource?> ActivateStandInSourceAsync(
+      AudioSourceType sourceType,
+      CancellationToken cancellationToken = default) => Task.FromResult<IAudioSource?>(null);
+
     public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public IAudioSource? GetCachedSource(AudioSourceType sourceType) => null;
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
