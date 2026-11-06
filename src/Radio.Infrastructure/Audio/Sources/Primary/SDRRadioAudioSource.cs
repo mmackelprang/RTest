@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -1155,6 +1156,40 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     }
   }
 
+  /// <summary>
+  /// Saves the band and frequency this source is leaving. PreferencesPersistenceService does this
+  /// every 30 s, but only while radio is the active source, so a station tuned in the seconds before
+  /// a switch would otherwise be lost, and a restart with no phone comes back to this station.
+  /// </summary>
+  /// <remarks>
+  /// Written as PreferencesPersistenceService writes them, in Hz. Skipped during a scan or a band
+  /// sweep, when the receiver is not on a station. A failed write costs the last few seconds of
+  /// tuning, not the stop.
+  /// </remarks>
+  private async Task SaveLastStationAsync()
+  {
+    if (_configurationManager == null || _isScanning || _radioReceiver.IsSweeping)
+    {
+      return;
+    }
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var store = await _configurationManager.GetStoreAsync(storeId);
+      await store.SetEntriesAsync(
+        [
+          new ConfigurationEntry { Key = "Radio:LastBand", Value = CurrentBand.ToString() },
+          new ConfigurationEntry { Key = "Radio:LastFrequency", Value = CurrentFrequency.Hertz.ToString(CultureInfo.InvariantCulture) },
+        ]);
+      await store.SaveAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "📻 SDR RADIO: Failed to save the last station");
+    }
+  }
+
   #endregion
 
   #region Helper Methods
@@ -1351,6 +1386,8 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       "📻 SDR RADIO AUDIO FLOW STOPPED: Stopping playback " +
       "(Frequency: {Frequency}, Band: {Band}, TotalSamplesProcessed: {Samples})",
       CurrentFrequency.ToDisplayString(), CurrentBand, _totalSamplesReceived);
+
+    await SaveLastStationAsync();
 
     // Stop diagnostic timer
     _diagnosticTimer?.Dispose();

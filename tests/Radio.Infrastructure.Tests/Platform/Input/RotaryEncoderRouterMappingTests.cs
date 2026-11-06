@@ -257,6 +257,10 @@ public class RotaryEncoderRouterMappingTests
     public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task SwitchSourceAsync(IAudioSource source, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+    public Task<IAudioSource?> ActivateStandInSourceAsync(
+      AudioSourceType sourceType,
+      CancellationToken cancellationToken = default) => Task.FromResult<IAudioSource?>(null);
+
     public Task<IAudioSource?> GetOrCreateSourceAsync(
       AudioSourceType sourceType,
       bool switchToSource = true,

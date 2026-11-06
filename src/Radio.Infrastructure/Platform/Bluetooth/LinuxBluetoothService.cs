@@ -400,6 +400,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           continue; // Already logged error, stop retrying
         }
 
+        // A connected phone with no node is idle, not broken, and since a phone takes over at the
+        // connect that is the ordinary state of an active source. One read per tick, rather than a
+        // Warning, a 20 s search and an eventual Error for it. A node with no stream is what this
+        // loop is for: it is what a missed node event leaves.
+        if (!await IsCaptureNodeAvailableAsync(connected.Address, cancellationToken))
+        {
+          continue;
+        }
+
         _pipelineRecoveryFailures++;
         _logger.LogWarning(
           "BT device connected but capture stream missing (attempt {Attempt}/3) — attempting recovery",
@@ -881,7 +890,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           device.Name, device.Address, obj.Key);
         _pipelineRecoveryFailures = 0;
         EnsureRescanLoopRunning();
-        DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+        DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device, AlreadyConnected = true });
       }
     }
   }
@@ -1107,6 +1116,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       // removes its generator from the mixer on this same event.
       _parkedCapture = null;
       _captureTargetLost = false;
+      // A stop on purpose belonged to that session too. The next one may start with no node to
+      // acquire, and acquiring was the only other thing that cleared this.
+      _captureIntentionallyStopped = false;
       StopCaptureSubprocess();
       StopRescanLoop();
       // Clean up media transport on disconnect
@@ -1837,6 +1849,40 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       throw;
     }
   }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// ⚠ Reads <c>UUIDs</c> and deliberately not <c>ServicesResolved</c>. Measured on the box
+  /// 2026-11-06: the Pixel, connected and bonded, read <c>Connected: true</c> and
+  /// <c>ServicesResolved: false</c>, so a gate on that property would never open for it. <c>UUIDs</c>
+  /// is stored with the bond and held the A2DP Source entry at that moment. Only devices under our
+  /// adapter are found here: <see cref="_deviceCache"/> holds nothing from RotaryPhone's hci1 (AUD-30).
+  /// </remarks>
+  public async Task<bool> IsAudioSourceDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+  {
+    var devicePath = FindDevicePath(deviceAddress);
+    if (_connection == null || devicePath == null)
+    {
+      return false;
+    }
+
+    try
+    {
+      var device = _connection.CreateProxy<Linux.IDevice1>(Linux.BluezConstants.ServiceName, devicePath.Value);
+      return HasA2dpSourceProfile(await device.GetAsync<string[]>("UUIDs").WaitAsync(cancellationToken));
+    }
+    catch (OperationCanceledException) { throw; }
+    catch (Exception ex)
+    {
+      // "Not known to": the caller then waits for the node, which proves it instead.
+      _logger.LogDebug(ex, "Could not read the services of {Address}", deviceAddress);
+      return false;
+    }
+  }
+
+  /// <summary>Whether a Device1 <c>UUIDs</c> list includes A2DP Source.</summary>
+  internal static bool HasA2dpSourceProfile(IEnumerable<string> uuids) =>
+    uuids.Contains(Linux.BluezConstants.A2dpSourceUuid, StringComparer.OrdinalIgnoreCase);
 
   /// <summary>
   /// Probes whether a PipeWire bluez_input source node exists for the given BT address.

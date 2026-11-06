@@ -327,7 +327,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
 
     // Obtain platform audio capture device (may be AudioCaptureDevice or BufferedSoundGenerator)
-    var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(cancellationToken);
+    var capture = await AcquireCaptureIfNodeExistsAsync(cancellationToken);
     if (capture is AudioCaptureDevice audioCapture)
     {
       _captureDevice = audioCapture;
@@ -613,20 +613,19 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // album-art enrichment. Without this, no track on the recovered session gets identified
     // until the service restarts.
     NeedsFingerprintingLookup = true;
-    _ = TryAcquireAudioCaptureAsync();
+    _ = TryAcquireAudioCaptureAsync(nodeSeen: true);
   }
 
   /// <summary>
-  /// H1: binds a node that appears when this source is active and holds no capture. The search on
-  /// connect gives up after about 20 s, and an idle phone has no node until it plays, so without this
-  /// the node of a phone played later was bound by nothing and the phone dropped it after about 4 s
-  /// (AUD-10). The 30 s pipeline monitor is too slow for that, and stops after three attempts.
+  /// H1: binds a node that appears when this source is active and holds no capture. An idle phone has
+  /// no node until it plays, so without this the node of a phone played later was bound by nothing
+  /// and the phone dropped it after about 4 s (AUD-10). The 30 s pipeline monitor is too slow for that.
   /// </summary>
   /// <remarks>
   /// <see cref="TryAcquireAudioCaptureAsync"/> decides the two cases that are not this one. A capture
   /// parked by a pause: this source still holds that generator, so it returns, and
   /// LinuxBluetoothService re-binds it (AUD-10). An inactive source: it returns, and
-  /// BluetoothAutoSwitchService binds the node ahead of the switch.
+  /// BluetoothAutoSwitchService binds the node, if it is switching to this source.
   /// </remarks>
   private void OnCaptureNodeAvailable(object? sender, CaptureNodeAvailableEventArgs e)
   {
@@ -636,7 +635,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
 
     // Off the PipeWire registry thread: acquisition tears down the old capture synchronously.
-    _ = Task.Run(TryAcquireAudioCaptureAsync);
+    _ = Task.Run(() => TryAcquireAudioCaptureAsync(nodeSeen: true));
   }
 
   /// <summary>
@@ -804,7 +803,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     State = AudioSourceState.Playing;
   }
 
-  private async Task TryAcquireAudioCaptureAsync()
+  /// <param name="nodeSeen">The caller knows a node exists, so one failed read must not lose it: it
+  /// gets the service's whole search, which is safe here because no lock of AudioManager's is held.</param>
+  private async Task TryAcquireAudioCaptureAsync(bool nodeSeen = false)
   {
     try
     {
@@ -832,7 +833,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
         return;
       }
 
-      var capture = await _bluetoothService.GetAudioCaptureDeviceAsync();
+      var capture = nodeSeen
+        ? await _bluetoothService.GetAudioCaptureDeviceAsync()
+        : await AcquireCaptureIfNodeExistsAsync(CancellationToken.None);
+
+      // That search can run for 20 s, and the owner can have pressed Stop or picked a source in it.
+      if (nodeSeen && capture != null && (_stopRequested || !IsActiveSource))
+      {
+        Logger.LogDebug("BluetoothAudioSource: no longer wanted, releasing the capture just bound");
+        _bluetoothService.StopAudioCapture();
+        return;
+      }
+
       if (capture is AudioCaptureDevice audioCapture)
       {
         _captureDevice = audioCapture;
@@ -853,9 +865,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
         // connected) or has only just become Ready.
         await RouteCaptureThroughMixerAsync();
       }
-      else
+      else if (nodeSeen)
       {
         Logger.LogWarning("BluetoothAudioSource: no audio capture device available after retries");
+      }
+      else
+      {
+        // The ordinary answer for a phone that is connected and not playing.
+        Logger.LogDebug("BluetoothAudioSource: no capture yet");
       }
     }
     catch (Exception ex)
@@ -1026,7 +1043,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
       if (State == AudioSourceState.Playing && _playbackId == null)
       {
-        Logger.LogWarning("BluetoothAudioSource: capture retry exhausted after {Max} attempts", maxRetries);
+        // Information: this is every phone that stays idle for two minutes after a takeover, and the
+        // node event still binds it when it plays.
+        Logger.LogInformation("BluetoothAudioSource: capture retry finished after {Max} attempts", maxRetries);
       }
     }
     catch (OperationCanceledException) { }
@@ -1034,6 +1053,29 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       Logger.LogWarning(ex, "BluetoothAudioSource: capture retry loop error");
     }
+  }
+
+  /// <summary>
+  /// Acquires the capture, without searching for a node that a connected phone does not have yet.
+  /// </summary>
+  /// <remarks>
+  /// A takeover at the connect starts this source with the phone idle, so "no node" is the ordinary
+  /// answer here. The service's acquisition would search for one, about 20 reads of pw-cli over 20 s,
+  /// and <c>AudioManager</c> holds its switch lock across this source's start, so no one could pick a
+  /// source meanwhile. One probe answers it, and <see cref="OnCaptureNodeAvailable"/> binds the node
+  /// when the phone plays. With no phone this falls through, because the service reports that itself.
+  /// </remarks>
+  private async Task<object?> AcquireCaptureIfNodeExistsAsync(CancellationToken cancellationToken)
+  {
+    var connected = _bluetoothService.ConnectedDevice;
+    if (connected != null
+        && !await _bluetoothService.IsCaptureNodeAvailableAsync(connected.Address, cancellationToken))
+    {
+      Logger.LogDebug("BluetoothAudioSource: {Device} has no capture node yet", connected.Name);
+      return null;
+    }
+
+    return await _bluetoothService.GetAudioCaptureDeviceAsync(cancellationToken);
   }
 
   /// <summary>
@@ -1054,7 +1096,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
         return;
       }
 
-      var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(ct);
+      var capture = await AcquireCaptureIfNodeExistsAsync(ct);
       if (capture is AudioCaptureDevice audioCapture)
       {
         _captureDevice = audioCapture;

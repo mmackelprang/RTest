@@ -1206,7 +1206,8 @@ is why it is the case the harness leads with.
 ## ADR-036: A connected phone takes over when it has audio, however late, and once per connection
 
 **Date:** 2026-11-06
-**Status:** Accepted. The trigger is open to the owner (below).
+**Status:** Accepted, then amended the same day: **the trigger is now the connect.** See rulings 2 and 3
+below. The first consequence here still describes the node path; ruling 3 replaces the second.
 **Context:** The auto-switch gave up 60 s after a connect, so a phone connected idle and played later
 never took over. Asked whether a late switch should replace a source picked by hand, the owner ruled:
 *"Yes - bluetooth should pause the current stream whenever it connects."*
@@ -1231,6 +1232,64 @@ or it disconnects. The trigger stays the node, not the connect. Each connection 
   delivering (`H6`), and the wait then ends only at a disconnect.
 - A switch still stops the old source; there is no pause in `AudioManager`. A file keeps its place for
   the next press of Play, on this path only. Nothing resumes when the phone disconnects.
+
+### Ruling 2, 2026-11-06: the connect is the trigger
+
+*"Should Bluetooth take over the instant a phone connects?" - "Yes"*, with the cost read first: it
+silences the radio when a phone connects with nothing playing.
+
+**Decision:** A connect takes over, and Bluetooth then waits, active, for the phone's audio, provided
+the link holds for `AutoSwitchConnectSettleMs` (1.5 s) and the device's `UUIDs` include A2DP Source.
+Any other device falls back to the node, as above, so a keyboard or a speaker never stops the radio
+and a phone paired moments ago still takes over when it plays. A link already up when the service
+starts takes the node path too. ⚠ That is a crash or a kill: a clean stop powers the adapter off and
+drops the link, so a phone that reconnects by itself after a deploy is a real connect and takes over.
+
+**The gate is `UUIDs`, not `ServicesResolved`.** Measured 2026-11-06: the Pixel read `Connected: true`
+and `ServicesResolved: false` while connected, so a gate on that property would never open. RotaryPhone's
+hci1 cannot reach this path, because no object under it is cached (AUD-30). Its HFP on *hci0* can: `UUIDs`
+says what a device can do, not which profile connected, so an HFP-only link from the Pixel takes over.
+
+**The same connection:** a phone back within `AutoSwitchSameConnectionWindowMs` (60 s) of its takeover
+or its last disconnect does not take over again. A PBAP sync can drop the link and reconnect it 3 s
+later, expected to report `LocalHost`, not measured, and a flap reports a timeout. A disconnect made on
+the console or by the phone ending the link (`Remote`) ends the connection at once.
+
+**Capture:** for an idle phone the node does not exist yet, and the Bluetooth source binds it from the
+node event once it is active. For a phone already streaming the settle has passed, so its node can
+exist, and FM's stop can last as long as an unbound node does. So a node that exists after the settle
+is bound before the stop, and one that appears during the stop is bound as it appears. A failed bind
+does not call the takeover off on this path, because the connect decided it. The source now probes
+before it acquires at its start: starting with no node used to search for 20 s under `AudioManager`'s
+switch lock, on what is now every connect. A node event skips the probe, because the event is the proof.
+
+**Consequences:**
+- ⚠ `isPlaying` reads true after a takeover while the phone sits idle: `PlayAsync` promotes to Playing
+  with no capture, as it does for a hand-picked Bluetooth source.
+- ⚠ **H6 is worse under this ruling.** If the registry listener has stopped delivering, a takeover now
+  stops the radio at the connect and then waits for an event that will not come, where FM used to
+  keep playing. What remains is the source's 12 probes over 2 minutes and the monitor's 30 s probe, both
+  of which only catch a node alive at that moment, and the monitor stands down after a hand switch away
+  until the next disconnect. Restarting `radio-api` restores the listener.
+- A failed connect that outlasts the settle leaves the radio stopped. Nothing goes back to it.
+
+### Ruling 3, 2026-11-06: a restart with no phone
+
+*"Select FM Radio (last station played) if no BT available after restart from playing BT audio."*
+
+**Decision:** If the restored source is Bluetooth and no phone is connected once the adapter has
+started, the radio stands in. There is no further wait for the phone: ruling 2 takes over when it
+arrives, so waiting would only buy silence on every start with the phone away. The stand-in does not
+persist, so the owner's choice stays Bluetooth until the owner picks another source. Bluetooth is
+created but never activated, so it cannot report `isPlaying:true` with no phone. With no SDR the radio
+cannot be created, no source is active, and the phone still takes over. ⚠ A dongle that is found but
+fails to start is different: the radio ignores that result and reports Playing, silently, as it always
+has. And a clean restart drops the link, so a restart while listening to the phone comes up on FM until
+the phone reconnects.
+
+**The station** is `Radio:LastBand` and `Radio:LastFrequency`, which the radio restores on its first play.
+These were saved only every 30 s and only while radio was active, so `SDRRadioAudioSource` now also
+saves them as it stops. ⚠ This is the last band too: if the radio was last on AM, it restarts on AM.
 
 ---
 

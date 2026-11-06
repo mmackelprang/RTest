@@ -240,6 +240,23 @@ public class AdapterScopingTests
   }
 
   [Fact]
+  public void ADisconnect_EndsAnEarlierStop_SoTheMonitorWatchesTheNextConnection()
+  {
+    // A takeover with the phone idle starts the source without acquiring, which was the only thing
+    // that cleared this flag, so a stop by hand in an earlier session left the 30 s monitor off.
+    // PipelineStatus reads the same flag: Degraded while stopped on purpose, Broken once it is not.
+    var h = new Harness();
+    h.BindCapture();
+    h.Service.StopAudioCapture();
+    Assert.Equal(BluetoothPipelineStatus.Degraded, h.Service.PipelineStatus);
+
+    h.Service.OnDeviceConnectedChanged(new ObjectPath(OurPath), connected: false);
+    h.Service.OnDeviceConnectedChanged(new ObjectPath(OurPath), connected: true);
+
+    Assert.Equal(BluetoothPipelineStatus.Broken, h.Service.PipelineStatus);
+  }
+
+  [Fact]
   public void OurDeviceRemoved_StillEvicts_AndLogsItsPath()
   {
     var h = new Harness();

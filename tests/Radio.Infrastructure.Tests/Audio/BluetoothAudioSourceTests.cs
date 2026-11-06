@@ -1400,6 +1400,8 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     btMock.Setup(b => b.IsAudioManagedByPlatform).Returns(platformManaged);
     btMock.Setup(b => b.StartAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync(true);
+    btMock.Setup(b => b.IsCaptureNodeAvailableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(true);
     btMock.Setup(b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()))
       .Returns(() =>
       {
@@ -2025,6 +2027,76 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await source.PlayAsync(CancellationToken.None);
 
     Assert.Equal(0, generator.GetDiagnostics().BufferCount);
+  }
+
+  // --- A takeover at the connect: the phone is there and it has no node yet --------------------
+
+  [Fact]
+  public async Task NodeBoundAfterTheOwnerPressedStop_IsReleased_NotRouted()
+  {
+    // A node event's search can run for 20 s, and the owner can press Stop or pick a source in it.
+    var capture = NewSoundComponentMock();
+    var searching = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var found = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var btMock = BuildBtMock(capture: null, new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+    btMock.Setup(b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()))
+      .Returns(() =>
+      {
+        searching.TrySetResult();
+        return found.Task;
+      });
+
+    RaiseCaptureNode(btMock);
+    await searching.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    await source.StopAsync(CancellationToken.None);
+    var stopsSoFar = btMock.Invocations.Count(i => i.Method.Name == "StopAudioCapture");
+
+    found.SetResult(capture);
+
+    await WaitForAsync(() => btMock.Invocations.Count(i => i.Method.Name == "StopAudioCapture") > stopsSoFar);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+    Assert.Throws<InvalidOperationException>(() => source.GetSoundComponent());
+  }
+
+  [Fact]
+  public async Task Play_WithThePhoneConnectedAndNoNode_DoesNotSearch()
+  {
+    // The takeover now reaches PlayCoreAsync on every connect, with the phone idle. A search there
+    // holds AudioManager's _switchLock for 20 s of pw-cli, so no one could pick a source meanwhile.
+    var capture = NewSoundComponentMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe);
+    btMock.Setup(b => b.IsCaptureNodeAvailableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(false);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.Equal(0, probe.Calls);
+
+    // The phone plays. The event is the proof the node exists, and the probe is left answering no:
+    // a pw-cli read that fails here must not lose a node that lives about 4 s.
+    RaiseCaptureNode(btMock);
+
+    await WaitForAsync(() => probe.Calls == 1);
+    AssertArmTaken("SoundComponent", source, capture);
+  }
+
+  [Fact]
+  public async Task Connect_WhileActiveWithNoNode_DoesNotSearch()
+  {
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(NewSoundComponentMock(), probe);
+    btMock.Setup(b => b.IsCaptureNodeAvailableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(false);
+    await using var source = BuildSource(btMock);
+
+    RaiseDeviceConnected(btMock);
+    await WaitForAsync(() => btMock.Invocations.Any(i => i.Method.Name == "IsCaptureNodeAvailableAsync"));
+
+    Assert.Equal(0, probe.Calls);
   }
 
   // --- Bluetooth restored at startup with no phone ---------------------------------------------

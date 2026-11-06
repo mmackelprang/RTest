@@ -409,7 +409,9 @@ Configuration options are static settings that define application behavior. They
 | `RequirePairing` | `bool` | `false` | Require pairing before connecting |
 | `Enabled` | `bool` | `true` | Master enable/disable switch for Bluetooth |
 | `EnableOnStartup` | `bool` | `true` | Enable Bluetooth on application startup |
-| `AutoSwitchOnConnect` | `bool` | `true` | Switch to the Bluetooth source when a connected device has audio, however long after the connect. Once per connection. Replaces whatever is playing, including a source picked by hand. A phone that connects with nothing playing changes nothing until it plays. |
+| `AutoSwitchOnConnect` | `bool` | `true` | Switch to the Bluetooth source when a phone connects, with or without audio playing. Once per connection. Replaces whatever is playing, including a source picked by hand. A device not known to send audio switches only if audio arrives from it. |
+| `AutoSwitchConnectSettleMs` | `int` | `1500` | How long a connect must hold before it switches, so a link that drops at once does not stop the radio |
+| `AutoSwitchSameConnectionWindowMs` | `int` | `60000` | How long after its takeover or last disconnect the same phone counts as the same connection, and does not switch again. A disconnect made on the console or on the phone ends the connection at once |
 | `AudioQuality` | `BluetoothAudioQuality` | `High` | Audio quality setting (`Standard` = 44.1kHz, `High` = 48kHz) |
 | `EnableA2dpSink` | `bool` | `true` | Enable A2DP sink to receive audio from phone (Windows: requires 10 2004+ and MSIX identity) |
 | `EnableMediaSessionMonitoring` | `bool` | `true` | Enable SMTC monitoring for AVRCP-equivalent metadata (Windows only) |

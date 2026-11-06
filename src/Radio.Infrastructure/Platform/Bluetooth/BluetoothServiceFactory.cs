@@ -158,6 +158,9 @@ internal sealed class NullBluetoothService : IBluetoothService
   public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
       => Task.FromResult(false);
 
+  public Task<bool> IsAudioSourceDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+      => Task.FromResult(false);
+
   public ValueTask DisposeAsync()
   {
       return ValueTask.CompletedTask;
