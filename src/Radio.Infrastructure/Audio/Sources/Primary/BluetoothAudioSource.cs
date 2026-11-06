@@ -396,6 +396,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
       // Capture device available — route through mixer
       await RouteCaptureThroughMixerAsync();
     }
+    else if (_bluetoothService.ConnectedDevice == null)
+    {
+      // No phone, so there is nothing to retry: every attempt would only log a Warning into
+      // journald, 12 times, 10 s apart. Measured on the box 2026-11-06 with Bluetooth restored as
+      // the persisted source. OnDeviceConnected acquires when a phone does connect.
+      Logger.LogInformation("BluetoothAudioSource: PlayCoreAsync — no device connected, waiting for one");
+    }
     else
     {
       // No capture device yet — phone may not be streaming, or PipeWire node isn't ready.

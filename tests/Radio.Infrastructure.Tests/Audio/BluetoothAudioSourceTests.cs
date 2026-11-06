@@ -1933,6 +1933,48 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await WaitForAsync(() => probe.Calls > calls);
   }
 
+  // --- Bluetooth restored at startup with no phone ---------------------------------------------
+  //
+  // Measured on the box 2026-11-06: the persisted source came up as Bluetooth with the phone away,
+  // and the retry loop logged "No connected Bluetooth device" at Warning every 10 s, into journald.
+
+  private bool Logged(string text) =>
+    _loggerMock.Invocations.ToArray().Any(i =>
+      i.Arguments.Count > 2 && i.Arguments[2]?.ToString()?.Contains(text) == true);
+
+  [Fact]
+  public async Task Play_WithNoDeviceConnected_StartsNoRetryLoop_AndTheConnectStillBinds()
+  {
+    var capture = NewSoundComponentMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 2);
+    var phone = btMock.Object.ConnectedDevice!;
+    btMock.Setup(b => b.ConnectedDevice).Returns((BluetoothDeviceInfo?)null);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.False(Logged("starting background retry"), "Nothing can be retried without a phone");
+
+    // Nothing was lost by not retrying: the connect does the acquiring.
+    btMock.Setup(b => b.ConnectedDevice).Returns(phone);
+    RaiseDeviceConnected(btMock);
+    await WaitForAsync(() => probe.Calls == 3);
+    AssertArmTaken("SoundComponent", source, capture);
+  }
+
+  [Fact]
+  public async Task Play_WithADeviceConnectedAndNoCapture_StillStartsTheRetryLoop()
+  {
+    // The control: the loop still runs where it can do something, a phone that is connected.
+    var btMock = BuildBtMock(capture: null, new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.True(Logged("starting background retry"));
+  }
+
   [Theory]
   [MemberData(nameof(CaptureKinds))]
   public async Task DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady(string kind)
