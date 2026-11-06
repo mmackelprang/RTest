@@ -72,6 +72,8 @@ public class WasapiLoopbackTests : IAsyncDisposable
     btMock.Setup(b => b.IsAudioManagedByPlatform).Returns(false);
     btMock.Setup(b => b.StartAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync(true);
+    btMock.Setup(b => b.IsCaptureNodeAvailableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(true);
     btMock.Setup(b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()))
       .ReturnsAsync(mockComponent.Object);
     btMock.Setup(b => b.ConnectedDevice).Returns(new BluetoothDeviceInfo
@@ -130,6 +132,8 @@ public class WasapiLoopbackTests : IAsyncDisposable
     var btMock = new Mock<IBluetoothService>();
     btMock.Setup(b => b.IsAudioManagedByPlatform).Returns(false);
     btMock.Setup(b => b.StartAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(true);
+    btMock.Setup(b => b.IsCaptureNodeAvailableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync(true);
     btMock.Setup(b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()))
       .ReturnsAsync(mockCapture.Object);
