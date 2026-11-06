@@ -67,7 +67,7 @@ jobs:
           OLLAMA_URL_VAR: ${{ vars.OLLAMA_URL }}
         run: |
           set -u
-          for u in "$OLLAMA_URL_VAR" http://localhost:11434 http://172.17.0.1:11434 http://host.docker.internal:11434 http://192.168.86.167:11434; do
+          for u in "$OLLAMA_URL_VAR" http://localhost:11434 http://172.17.0.1:11434 http://host.docker.internal:11434 http://192.168.86.226:11434; do
             [ -z "$u" ] && continue
             if curl -sf -m 5 "$u/api/tags" >/dev/null 2>&1; then
               echo "url=$u" >> "$GITHUB_OUTPUT"
