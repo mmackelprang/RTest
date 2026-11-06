@@ -481,6 +481,19 @@ public class HouseAudioRegistrationTests(RadioWebFactory factory) : IClassFixtur
     Assert.Equal(TimeSpan.FromSeconds(5), client.Timeout);
   }
 
+  [Fact]
+  public void Client_DoesNotFollowRedirects_SoNoneCanCarryThePasswordToAnotherHost()
+  {
+    HttpMessageHandler? primary = null;
+    using WebApplicationFactory<Program> host = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+      services.Configure<HttpClientFactoryOptions>(ClientName, options =>
+        options.HttpMessageHandlerBuilderActions.Add(handlers => primary = handlers.PrimaryHandler))));
+
+    host.Services.GetRequiredService<IHttpClientFactory>().CreateClient(ClientName);
+
+    Assert.False(Assert.IsType<HttpClientHandler>(primary).AllowAutoRedirect);
+  }
+
   private static IConfiguration Settings(string key, string? value) => new ConfigurationBuilder()
     .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
     .Build();

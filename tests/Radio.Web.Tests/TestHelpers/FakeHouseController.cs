@@ -116,6 +116,18 @@ public sealed class FakeHouseController
     }
   }
 
+  private void SetAllPower(bool on)
+  {
+    lock (_sync)
+    {
+      _zonesOff.Clear();
+      if (!on)
+      {
+        _zonesOff.UnionWith(_zoneVolumes.Keys);
+      }
+    }
+  }
+
   public void SetMuted(string zone, bool muted)
   {
     lock (_sync)
@@ -250,6 +262,12 @@ public sealed class FakeHouseController
       {
         Content = new StringContent("RNet not connected.", Encoding.UTF8, "text/plain")
       };
+    }
+
+    // What the controller will do after the fix on its side: GET /zones reports the new power state.
+    if (request.Method == HttpMethod.Put && path is "/on" or "/off")
+    {
+      SetAllPower(path == "/on");
     }
 
     return (isRead, path) switch

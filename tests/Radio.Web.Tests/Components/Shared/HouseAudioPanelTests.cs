@@ -451,6 +451,25 @@ public class HouseAudioPanelTests : TestContext
   }
 
   [Fact]
+  public async Task Panel_AllOff_ShowsEveryRoomOff_AndThePollDoesNotPutThemBack()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, "Kitchen");
+
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-all-off']").ClickAsync(new MouseEventArgs()));
+    EveryRoomShowsOff();
+
+    // The second poll beginning means the first, the first report after the command, has been raised.
+    await NextPollAsync();
+    await NextPollAsync();
+    await cut.InvokeAsync(() => { });
+    EveryRoomShowsOff();
+
+    void EveryRoomShowsOff() => cut.FindAll("[data-testid='house-zone-power']").Should().HaveCount(2)
+      .And.OnlyContain(button => button.GetAttribute("aria-pressed") == "false" && button.QuerySelector("span")!.TextContent == "Off");
+  }
+
+  [Fact]
   public async Task Panel_Tune_OpensThatRoomsSettings_AndClosing_Leaves()
   {
     IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
