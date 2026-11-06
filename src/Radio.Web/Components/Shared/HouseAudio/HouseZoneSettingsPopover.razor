@@ -1,0 +1,195 @@
+@using System.Globalization
+
+@* One room's settings, opened from Tune on its card. Presentational: every control raises a callback,
+   and the panel owns the commands, so a setting is held and taken back exactly as a card's control is.
+   Zone is what the panel shows, so a command shows here at once and a failed one returns here too.
+
+   Nine rows of one touch height, and no text input. Height is stated in rows in design-system.css, and
+   Popover_FitsThePanel_WithoutScrolling holds the count to it. Loudness and Do Not Disturb share a row
+   because ten rows would not fit between the top bar and the bottom of the panel.
+
+   Delete Zone's question replaces the rows, and its buttons sit at the top, away from the Delete Zone
+   button, so a double tap on that cannot answer it.
+
+   A failure shows in the title row, in place of the room name, which the message repeats: the panel's
+   own status line can sit behind the popover. Styles: design-system.css § House Audio. *@
+
+<div class="house-settings-away" data-testid="house-settings-away"
+     @onclick="OnClose" @onclick:stopPropagation="true"
+     @ontouchend="OnClose" @ontouchend:stopPropagation="true" @ontouchend:preventDefault="true"></div>
+
+<aside class="house-settings-popover" role="dialog" aria-label="@($"{Zone.Name} settings")"
+       data-testid="house-settings-popover">
+  <div class="house-settings-row">
+    @if (Error is { } error)
+    {
+      <span class="house-settings-error" role="alert" data-testid="house-settings-error">@error</span>
+    }
+    else
+    {
+      <span class="house-settings-name">@Zone.Name</span>
+      @if (Stale)
+      {
+        <span class="house-zone-stale" data-testid="house-settings-stale">Last known</span>
+      }
+    }
+    <button type="button" class="house-settings-button house-settings-close" data-testid="house-settings-close"
+            aria-label="Close" @onclick="OnClose">
+      <RadzenIcon Icon="close" />
+    </button>
+  </div>
+
+  @if (_confirmingDelete)
+  {
+    <p class="house-settings-prompt" data-testid="house-delete-prompt">
+      Delete @Zone.Name? It leaves the controller, and this panel can't add it back.
+    </p>
+    <div class="house-settings-row">
+      <button type="button" class="house-settings-button house-settings-choice" data-testid="house-delete-cancel"
+              disabled="@_deleting" @onclick="@(() => _confirmingDelete = false)">
+        Cancel
+      </button>
+      <button type="button" class="house-settings-button house-settings-choice house-settings-danger"
+              data-testid="house-delete-confirm" disabled="@_deleting" @onclick="DeleteAsync">
+        Delete
+      </button>
+    </div>
+  }
+  else
+  {
+    <div class="house-settings-row">
+      <span class="house-settings-label">Party Mode</span>
+      <div class="house-settings-segments" role="group" aria-label="Party Mode">
+        @foreach ((string label, string testId, int value) in PartyModes)
+        {
+          <button type="button" class="house-settings-button" data-testid="@testId"
+                  aria-pressed="@AriaBool(Zone.PartyMode == value)" @onclick="@(() => SetPartyModeAsync(value))">
+            @label
+          </button>
+        }
+      </div>
+    </div>
+
+    <div class="house-settings-row">
+      @Toggle("Loudness", "house-loudness", HouseZoneParameter.Loudness, Zone.Loudness)
+      @Toggle("Do Not Disturb", "house-dnd", HouseZoneParameter.DoNotDisturb, Zone.DoNotDisturb)
+    </div>
+
+    @Stepper("Bass", "house-bass", HouseZoneParameter.Bass, Zone.Bass)
+    @Stepper("Treble", "house-treble", HouseZoneParameter.Treble, Zone.Treble)
+    @Stepper("Balance", "house-balance", HouseZoneParameter.Balance, Zone.Balance)
+
+    <div class="house-settings-row">
+      <span class="house-settings-label">Turn On Volume</span>
+      <HouseLevelSlider Class="house-settings-slider" Value="@Zone.TurnOnVolume" TapSlop="@SliderTapSlop"
+                        AriaLabel="@($"{Zone.Name} Turn On Volume")" LevelTestId="house-turn-on-level"
+                        OnCommitted="@(level => SetAsync(HouseZoneParameter.TurnOnVolume, level))" />
+    </div>
+
+    <div class="house-settings-row">
+      <span class="house-settings-label">Maximum Volume</span>
+      <HouseLevelSlider Class="house-settings-slider" Value="@Zone.MaxVolume" TapSlop="@SliderTapSlop"
+                        AriaLabel="@($"{Zone.Name} Maximum Volume")" LevelTestId="house-max-level"
+                        OnCommitted="OnMaxVolume" />
+    </div>
+
+    <div class="house-settings-row">
+      <button type="button" class="house-settings-button house-settings-choice house-settings-danger"
+              data-testid="house-delete-zone" @onclick="@(() => _confirmingDelete = true)">
+        Delete Zone
+      </button>
+    </div>
+  }
+</aside>
+
+@code {
+  // The tone range the controller accepts for bass, treble and balance.
+  private const int ToneMinimum = -10;
+  private const int ToneMaximum = 10;
+
+  // 12 px of a bar about 240 px long.
+  private const double SliderTapSlop = 0.05;
+
+  private static readonly (string Label, string TestId, int Value)[] PartyModes =
+  [
+    ("Off", "house-party-off", 0),
+    ("On", "house-party-on", 1),
+    ("Master", "house-party-master", 2)
+  ];
+
+  [Parameter, EditorRequired] public HouseZone Zone { get; set; } = default!;
+
+  /// <summary>The panel's last command failure, if any.</summary>
+  [Parameter] public string? Error { get; set; }
+
+  /// <summary>True when the last poll failed, so this is the room's last known state.</summary>
+  [Parameter] public bool Stale { get; set; }
+
+  [Parameter] public EventCallback<HouseZoneSetting> OnSetting { get; set; }
+
+  /// <summary>Raised once per gesture, on release. Maximum Volume has its own route.</summary>
+  [Parameter] public EventCallback<int> OnMaxVolume { get; set; }
+
+  /// <summary>Raised only after the question has been answered.</summary>
+  [Parameter] public EventCallback OnDelete { get; set; }
+
+  [Parameter] public EventCallback OnClose { get; set; }
+
+  private bool _confirmingDelete;
+  private bool _deleting;
+
+  private static string AriaBool(bool value) => value ? "true" : "false";
+
+  private static string Signed(int value) =>
+    value > 0 ? $"+{value.ToString(CultureInfo.InvariantCulture)}" : value.ToString(CultureInfo.InvariantCulture);
+
+  private Task SetAsync(HouseZoneParameter parameter, int value) =>
+    OnSetting.InvokeAsync(new HouseZoneSetting(parameter, value));
+
+  // Tapping the selected segment asks for nothing. A room whose Party Mode the amp never reported shows
+  // Off, so Off then sends nothing even if the amp is really On: a known limit, recorded with the plan.
+  private Task SetPartyModeAsync(int value) =>
+    value == Zone.PartyMode ? Task.CompletedTask : SetAsync(HouseZoneParameter.PartyMode, value);
+
+  private Task StepAsync(HouseZoneParameter parameter, int current, int delta)
+  {
+    int next = Math.Clamp(current + delta, ToneMinimum, ToneMaximum);
+    return next == current ? Task.CompletedTask : SetAsync(parameter, next);
+  }
+
+  private async Task DeleteAsync()
+  {
+    _deleting = true;
+    await OnDelete.InvokeAsync();
+
+    // Still here means it failed, and the rows are what the failure should be read against. On success
+    // the panel has closed this.
+    _deleting = false;
+    _confirmingDelete = false;
+  }
+
+  private RenderFragment Toggle(string label, string testId, HouseZoneParameter parameter, bool on) =>
+    @<div class="house-settings-half">
+      <span class="house-settings-label">@label</span>
+      <button type="button" class="house-settings-switch" data-testid="@testId" aria-label="@label"
+              aria-pressed="@AriaBool(on)" @onclick="@(() => SetAsync(parameter, on ? 0 : 1))"></button>
+    </div>;
+
+  private RenderFragment Stepper(string label, string testId, HouseZoneParameter parameter, int value) =>
+    @<div class="house-settings-row">
+      <span class="house-settings-label">@label</span>
+      <div class="house-settings-stepper">
+        <button type="button" class="house-settings-button" data-testid="@($"{testId}-down")"
+                aria-label="@($"{label} down")" disabled="@(value <= ToneMinimum)"
+                @onclick="@(() => StepAsync(parameter, value, -1))">
+          <RadzenIcon Icon="remove" />
+        </button>
+        <span class="house-settings-value" data-testid="@($"{testId}-value")">@Signed(value)</span>
+        <button type="button" class="house-settings-button" data-testid="@($"{testId}-up")"
+                aria-label="@($"{label} up")" disabled="@(value >= ToneMaximum)"
+                @onclick="@(() => StepAsync(parameter, value, 1))">
+          <RadzenIcon Icon="add" />
+        </button>
+      </div>
+    </div>;
+}

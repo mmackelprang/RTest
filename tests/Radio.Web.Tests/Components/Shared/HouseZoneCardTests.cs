@@ -43,6 +43,10 @@ public class HouseZoneCardTests : TestContext
       .Add(card => card.OnSource, EventCallback.Factory.Create(this, onSource ?? (_ => { })))
       .Add(card => card.OnTune, EventCallback.Factory.Create(this, onTune ?? (() => { }))));
 
+  /// <summary>A finger presses the thumb, where the room's volume is. See SeekBar's relative drag.</summary>
+  private static Task PressThumbAsync(IRenderedComponent<HouseZoneCard> cut, SeekBar bar, double fraction) =>
+    cut.InvokeAsync(() => bar.OnDragMove(fraction));
+
   [Theory]
   [InlineData(true, "On", "true")]
   [InlineData(false, "Off", "false")]
@@ -173,6 +177,7 @@ public class HouseZoneCardTests : TestContext
     IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40), onVolume: committed.Add);
     SeekBar bar = cut.FindComponent<SeekBar>().Instance;
 
+    await PressThumbAsync(cut, bar, 0.4);
     await cut.InvokeAsync(() => bar.OnDragMove(0.5));
     await cut.InvokeAsync(() => bar.OnDragMove(0.6));
 
@@ -190,6 +195,7 @@ public class HouseZoneCardTests : TestContext
     IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40));
     SeekBar bar = cut.FindComponent<SeekBar>().Instance;
 
+    await PressThumbAsync(cut, bar, 0.4);
     await cut.InvokeAsync(() => bar.OnDragMove(0.6));
     cut.SetParametersAndRender(parameters => parameters.Add(card => card.Zone, Zone(volume: 20)));
 
@@ -221,16 +227,88 @@ public class HouseZoneCardTests : TestContext
   [Theory]
   [InlineData(0.47, 80, 46)]    // the controller floors to even, so what the card shows is what lands
   [InlineData(0.90, 80, 80)]    // and clamps to the room's maximum
-  [InlineData(0.90, 81, 80)]    // and an odd maximum floors too, as the route does
+  [InlineData(0.90, 81, 80)]    // the route floors, the zone clamps to 81, and the amp packet makes that 80
   public async Task Card_Volume_IsWhatTheControllerWouldKeep(double fraction, int maxVolume, int expected)
   {
     List<int> committed = [];
     IRenderedComponent<HouseZoneCard> cut = Render(Zone(maxVolume: maxVolume), onVolume: committed.Add);
     SeekBar bar = cut.FindComponent<SeekBar>().Instance;
 
+    await PressThumbAsync(cut, bar, 0.4);
     await cut.InvokeAsync(() => bar.OnDragMove(fraction));
     await cut.InvokeAsync(() => bar.OnDragEnd(fraction));
 
     committed.Should().Equal(expected);
+  }
+
+  [Fact]
+  public async Task Card_Dragging_SendsOneVolume_OnRelease()
+  {
+    List<int> committed = [];
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40), onVolume: committed.Add);
+    SeekBar bar = cut.FindComponent<SeekBar>().Instance;
+
+    await PressThumbAsync(cut, bar, 0.4);
+    foreach (double fraction in new[] { 0.42, 0.44, 0.47, 0.51, 0.49, 0.48 })
+    {
+      await cut.InvokeAsync(() => bar.OnDragMove(fraction));
+    }
+
+    committed.Should().BeEmpty("nothing is sent until the finger lifts");
+
+    await cut.InvokeAsync(() => bar.OnDragEnd(0.46));
+
+    committed.Should().Equal(46);
+  }
+
+  // ⚠ The owner's ruling: a tap must not jump a room's volume. A tap reaches the bar as a press and a
+  // release at one place, far from the thumb here.
+  [Theory]
+  [InlineData(0.95, 0.95)]
+  [InlineData(0.95, 0.96)]    // a finger is never quite still
+  [InlineData(0.05, 0.05)]
+  public async Task Card_TapOnTheTrack_SendsNothing_AndTheShownValueDoesNotChange(double press, double release)
+  {
+    List<int> committed = [];
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40), onVolume: committed.Add);
+    SeekBar bar = cut.FindComponent<SeekBar>().Instance;
+
+    await cut.InvokeAsync(() => bar.OnDragMove(press));
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Contain("40");
+    cut.Find(".seek-bar-fill").GetAttribute("style").Should().Contain("40%");
+
+    await cut.InvokeAsync(() => bar.OnDragEnd(release));
+
+    committed.Should().BeEmpty();
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Contain("40");
+    cut.Find(".seek-bar-fill").GetAttribute("style").Should().Contain("40%");
+  }
+
+  [Fact]
+  public async Task Card_DragStartedOnTheTrack_MovesByTheFingersTravel_WithoutJumping()
+  {
+    List<int> committed = [];
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(volume: 40), onVolume: committed.Add);
+    SeekBar bar = cut.FindComponent<SeekBar>().Instance;
+
+    await cut.InvokeAsync(() => bar.OnDragMove(0.90));
+    await cut.InvokeAsync(() => bar.OnDragMove(0.80));
+    cut.Find("[data-testid='house-zone-level']").TextContent.Should().Contain("30");
+
+    await cut.InvokeAsync(() => bar.OnDragEnd(0.70));
+
+    committed.Should().Equal(20);
+  }
+
+  [Fact]
+  public void Card_BeingTuned_IsMarked()
+  {
+    Render(Zone()).Find("[data-testid='house-zone-card']").ClassList.Should().NotContain("is-tuned");
+
+    IRenderedComponent<HouseZoneCard> cut = RenderComponent<HouseZoneCard>(parameters => parameters
+      .Add(card => card.Zone, Zone())
+      .Add(card => card.Tuned, true));
+
+    cut.Find("[data-testid='house-zone-card']").ClassList.Should().Contain("is-tuned");
   }
 }

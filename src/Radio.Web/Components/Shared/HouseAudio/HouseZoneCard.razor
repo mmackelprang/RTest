@@ -1,13 +1,9 @@
-@using System.Globalization
-@using Radio.Web.Components.Shared
-
 @* One room on the House Audio tab. Presentational: every control raises a callback, and the panel
    owns the commands. The power button is what the owner uses to silence a room; the speaker mute is
    separate, and both act on one touch.
 
-   Volume uses SeekBar, the app's touch slider, so a drag is a captured pointer gesture with a real
-   end and a real cancel. SeekBar shows the finger rather than Zone.Volume from the first move until
-   the commit has finished, so an incoming poll cannot move the slider under the finger.
+   Volume uses HouseLevelSlider over SeekBar, the app's touch slider, so a drag is a captured pointer
+   gesture with a real end and a real cancel, and a tap on the bar does nothing.
 
    Source follows OutputPickerDropdown: a list of full-height rows over a tap-away layer. It opens
    over its own card, downward from the top row and upward from the bottom row, so six rows fit
@@ -21,7 +17,7 @@
       <span class="house-zone-stale" data-testid="house-zone-stale">Last known</span>
     }
     <button type="button" class="house-zone-tune" data-testid="house-zone-tune"
-            disabled="@(!OnTune.HasDelegate)" @onclick="OnTune">
+            @onclick="OnTune">
       Tune
     </button>
     <button type="button" class="house-zone-power" data-testid="house-zone-power"
@@ -37,16 +33,14 @@
             disabled="@(!Zone.Power)" @onclick="OnMute">
       <RadzenIcon Icon="@(Zone.Muted ? "volume_off" : "volume_up")" />
     </button>
-    <SeekBar Class="house-zone-slider"
-             Fraction="@(Zone.Power ? Zone.Volume / 100.0 : 0)"
-             Disabled="@(!Zone.Power)"
-             AriaLabel="@($"{Zone.Name} volume")"
-             AriaValueMin="0"
-             AriaValueMax="100"
-             AriaValueNow="@ShownVolume.ToString(CultureInfo.InvariantCulture)"
-             OnScrub="HandleScrub"
-             OnSeek="HandleSeekAsync" />
-    <span class="house-zone-level" data-testid="house-zone-level">@(Zone.Power ? ShownVolume.ToString(CultureInfo.InvariantCulture) : null)</span>
+    <HouseLevelSlider Class="house-zone-slider"
+                      Value="@Zone.Volume"
+                      Ceiling="@Zone.MaxVolume"
+                      Disabled="@(!Zone.Power)"
+                      TapSlop="@SliderTapSlop"
+                      AriaLabel="@($"{Zone.Name} volume")"
+                      LevelTestId="house-zone-level"
+                      OnCommitted="OnVolumeCommitted" />
   </div>
 
   <button type="button" class="house-zone-source" data-testid="house-zone-source"
@@ -81,6 +75,9 @@
 </article>
 
 @code {
+  // 12 px of a bar about 400 px long.
+  private const double SliderTapSlop = 0.03;
+
   [Parameter, EditorRequired] public HouseZone Zone { get; set; } = default!;
 
   [Parameter] public IReadOnlyList<HouseSource> Sources { get; set; } = [];
@@ -100,17 +97,16 @@
 
   [Parameter] public EventCallback OnTune { get; set; }
 
-  // The volume under the finger, from the first move until the commit has finished.
-  private int? _scrubVolume;
+  /// <summary>True while this room's settings are open.</summary>
+  [Parameter] public bool Tuned { get; set; }
 
   private bool _pickerOpen;
-
-  private int ShownVolume => _scrubVolume ?? Zone.Volume;
 
   private string CssClass =>
     "house-zone-card"
     + (Zone.Power ? string.Empty : " is-off")
-    + (Stale ? " is-stale" : string.Empty);
+    + (Stale ? " is-stale" : string.Empty)
+    + (Tuned ? " is-tuned" : string.Empty);
 
   private string SourceText
   {
@@ -139,21 +135,6 @@
   }
 
   private static string AriaBool(bool value) => value ? "true" : "false";
-
-  /// <summary>
-  /// The volume a fraction of the bar comes to, as the controller would keep it: it floors to even,
-  /// and clamps to the room's maximum. So the number shown is the number that lands.
-  /// </summary>
-  private int VolumeAt(double fraction)
-  {
-    int percent = (int)Math.Round(fraction * 100);
-    return Math.Min(percent, Zone.MaxVolume) / 2 * 2;
-  }
-
-  private void HandleScrub(double? fraction) =>
-    _scrubVolume = fraction is { } dragged ? VolumeAt(dragged) : null;
-
-  private Task HandleSeekAsync(double fraction) => OnVolumeCommitted.InvokeAsync(VolumeAt(fraction));
 
   private void ClosePicker() => _pickerOpen = false;
 

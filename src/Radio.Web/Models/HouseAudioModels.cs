@@ -21,6 +21,21 @@ public record HouseZone(
   bool DoNotDisturb,
   int PartyMode);
 
+/// <summary>The zone parameters the room settings set, by the controller's parameter IDs.</summary>
+public enum HouseZoneParameter
+{
+  Bass = 0,
+  Treble = 1,
+  Loudness = 2,
+  Balance = 3,
+  TurnOnVolume = 4,
+  DoNotDisturb = 6,
+  PartyMode = 7
+}
+
+/// <summary>A room setting and its new value. Loudness and Do Not Disturb are 1 or 0.</summary>
+public record HouseZoneSetting(HouseZoneParameter Parameter, int Value);
+
 /// <summary>One amp input, as <c>GET /sources</c> reports it. <c>Type</c> runs 0 to 19.</summary>
 public record HouseSource(int SourceId, string Name, int Type);
 

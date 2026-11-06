@@ -8502,7 +8502,8 @@ body:has(.icb-scrim) .encoder-selector-overlay {
 .house-zone-power,
 .house-zone-mute,
 .house-zone-source,
-.house-source-option {
+.house-source-option,
+.house-settings-button {
   min-height: var(--touch-preferred);
   border: none;
   border-radius: 8px;
@@ -8519,14 +8520,16 @@ body:has(.icb-scrim) .encoder-selector-overlay {
 .house-zone-power:active,
 .house-zone-mute:active:not(:disabled),
 .house-zone-source:active:not(:disabled),
-.house-source-option:active {
+.house-source-option:active,
+.house-settings-button:active:not(:disabled) {
   background: var(--surface-hover);
 }
 
 .house-audio-action:disabled,
 .house-zone-tune:disabled,
 .house-zone-mute:disabled,
-.house-zone-source:disabled {
+.house-zone-source:disabled,
+.house-settings-button:disabled {
   color: var(--text-low);
   cursor: default;
 }
@@ -8589,6 +8592,8 @@ body:has(.icb-scrim) .encoder-selector-overlay {
 }
 
 .house-zone-card.is-off .house-zone-name { color: var(--text-medium); }
+
+.house-zone-card.is-tuned { outline: 2px solid var(--accent-primary); }
 
 .house-zone-stale {
   flex: none;
@@ -8715,4 +8720,215 @@ body:has(.icb-scrim) .encoder-selector-overlay {
 .house-source-option.is-active {
   background: var(--accent-surface);
   color: var(--accent-primary);
+}
+
+/* ─── Room settings popover ──────────────────────────────────────────────────
+   Nine rows do not fit the tab's 504 px, nor the 536 px .page-transition gives its child, so this is
+   the one overlay here that must leave that box. The child's transform makes it the containing block
+   for anything fixed, and a stacking context under the dock, so the rule below lifts that while the
+   popover is open. It then sits under the top bar and over the dock, which the owner allows. */
+.page-transition > :has(.house-settings-popover) {
+  transform: none;
+  will-change: auto;
+}
+
+.house-settings-away {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Height is stated in rows, so the delete question can swap them out and the box does not move: a
+   tap that lands where a shrunken box used to be would otherwise close it. */
+.house-settings-popover {
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--sp-2));
+  right: var(--sp-4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  box-sizing: border-box;
+  width: 440px;
+  height: calc(9 * var(--touch-preferred) + 8 * var(--sp-1) + 2 * var(--sp-2) + 2px);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.house-settings-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--touch-preferred);
+}
+
+.house-settings-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-high);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Three lines at most: the longest message the panel builds, with the longest room name, measured. */
+.house-settings-error {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--signal-amber);
+}
+
+.house-settings-label {
+  flex: none;
+  width: 128px;
+  font-size: 15px;
+  color: var(--text-medium);
+}
+
+/* A well, not --surface-elevated, which all but vanishes on --surface-overlay (measured by eye). */
+.house-settings-button {
+  padding: 0 var(--sp-3);
+  background: var(--surface-base);
+  font-size: 15px;
+}
+
+.house-settings-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-preferred);
+  padding: 0;
+  background: transparent;
+}
+
+.house-settings-segments {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.house-settings-segments .house-settings-button {
+  flex: 1;
+  border-radius: 0;
+}
+
+.house-settings-segments .house-settings-button[aria-pressed="true"] {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+
+.house-settings-half {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.house-settings-half .house-settings-label { width: auto; }
+
+/* The whole 64 x 56 box is the target; the switch is drawn inside it. */
+.house-settings-switch {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: var(--touch-preferred);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.house-settings-switch::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: 4px;
+  left: 4px;
+  box-sizing: border-box;
+  height: 28px;
+  border: 1px solid var(--text-low);
+  border-radius: 14px;
+  background: var(--surface-base);
+}
+
+.house-settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 18px;
+  left: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--text-medium);
+}
+
+.house-settings-switch[aria-pressed="true"]::before {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+}
+
+.house-settings-switch[aria-pressed="true"]::after {
+  left: 36px;
+  background: var(--text-inverse);
+}
+
+.house-settings-stepper {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.house-settings-stepper .house-settings-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-preferred);
+  padding: 0;
+}
+
+.house-settings-value {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--text-high);
+  text-align: center;
+}
+
+.seek-bar.house-settings-slider {
+  flex: 1;
+  min-width: 0;
+  height: var(--touch-preferred);
+}
+
+.house-settings-choice { flex: 1; }
+
+.house-settings-danger { color: var(--signal-red); }
+
+.house-settings-prompt {
+  flex: none;
+  margin: 0;
+  padding: var(--sp-2) 0;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text-high);
 }

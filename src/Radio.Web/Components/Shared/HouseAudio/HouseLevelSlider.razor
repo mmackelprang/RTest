@@ -1,0 +1,62 @@
+@using System.Globalization
+@using Radio.Web.Components.Shared
+
+@* A level from 0 to 100, as a SeekBar and the number beside it. Renders both as siblings, for its
+   parent's row to lay out. Used for a room's volume, and for its Turn On Volume and Maximum Volume.
+
+   ⚠ Owner ruling: a tap must not jump a level, so the bar moves only by the finger's travel. SeekBar
+   shows the finger, not Value, from the first move until the commit has finished, so an incoming poll
+   cannot move it, and one value goes out on release. *@
+
+<SeekBar Class="@Class"
+         Fraction="@(Disabled ? 0 : Value / 100.0)"
+         Disabled="@Disabled"
+         RelativeDragSlop="@TapSlop"
+         AriaLabel="@AriaLabel"
+         AriaValueMin="0"
+         AriaValueMax="100"
+         AriaValueNow="@Shown.ToString(CultureInfo.InvariantCulture)"
+         OnScrub="HandleScrub"
+         OnSeek="HandleSeekAsync" />
+<span class="house-zone-level" data-testid="@LevelTestId">@(Disabled ? null : Shown.ToString(CultureInfo.InvariantCulture))</span>
+
+@code {
+  [Parameter] public int Value { get; set; }
+
+  /// <summary>The highest level this can land on.</summary>
+  [Parameter] public int Ceiling { get; set; } = 100;
+
+  [Parameter] public bool Disabled { get; set; }
+
+  /// <summary>How far a finger travels before it counts as a drag, as a fraction of this bar.</summary>
+  [Parameter] public double TapSlop { get; set; }
+
+  [Parameter] public string? AriaLabel { get; set; }
+
+  [Parameter] public string? Class { get; set; }
+
+  [Parameter] public string? LevelTestId { get; set; }
+
+  /// <summary>Raised once per gesture, on release. Nothing reaches it during a drag, or for a tap.</summary>
+  [Parameter] public EventCallback<int> OnCommitted { get; set; }
+
+  // The level under the finger, from the first move until the commit has finished.
+  private int? _scrub;
+
+  private int Shown => _scrub ?? Value;
+
+  /// <summary>
+  /// The level a fraction of the bar comes to, as the amp would keep it: it holds levels in steps of
+  /// two. So the number shown is the number that lands.
+  /// </summary>
+  private int LevelAt(double fraction)
+  {
+    int percent = (int)Math.Round(fraction * 100);
+    return Math.Min(percent, Ceiling) / 2 * 2;
+  }
+
+  private void HandleScrub(double? fraction) =>
+    _scrub = fraction is { } dragged ? LevelAt(dragged) : null;
+
+  private Task HandleSeekAsync(double fraction) => OnCommitted.InvokeAsync(LevelAt(fraction));
+}

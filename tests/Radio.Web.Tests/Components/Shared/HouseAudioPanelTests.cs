@@ -1,6 +1,7 @@
 using System.Net;
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
@@ -67,18 +68,48 @@ public class HouseAudioPanelTests : TestContext
   private static void Tap(IRenderedComponent<HouseAudioPanel> cut, string zone, string control) =>
     Card(cut, zone).QuerySelector($"[data-testid='{control}']")!.Click();
 
-  /// <summary>A finger sets the volume: the same path the slider's own script takes.</summary>
-  private static Task SetVolumeAsync(IRenderedComponent<HouseAudioPanel> cut, string zone, double fraction)
+  /// <summary>A finger drags the volume: the same path the slider's own script takes.</summary>
+  private static Task SetVolumeAsync(IRenderedComponent<HouseAudioPanel> cut, string zone, double fraction) =>
+    DragAsync(cut, $"{zone} volume", fraction);
+
+  /// <summary>Presses the thumb, moves it to <paramref name="fraction"/>, and lets go.</summary>
+  private static Task DragAsync(IRenderedComponent<HouseAudioPanel> cut, string label, double fraction)
   {
-    Radio.Web.Components.Shared.SeekBar bar = cut.FindComponents<Radio.Web.Components.Shared.SeekBar>()
-      .Single(component => component.Find(".seek-bar").GetAttribute("aria-label")!.StartsWith(zone, StringComparison.Ordinal))
-      .Instance;
+    IRenderedComponent<Radio.Web.Components.Shared.SeekBar> found = cut.FindComponents<Radio.Web.Components.Shared.SeekBar>()
+      .Single(component => component.Find(".seek-bar").GetAttribute("aria-label") == label);
+    Radio.Web.Components.Shared.SeekBar bar = found.Instance;
+    double thumb = double.Parse(
+      found.Find(".seek-bar").GetAttribute("aria-valuenow")!, System.Globalization.CultureInfo.InvariantCulture) / 100;
 
     return cut.InvokeAsync(async () =>
     {
+      await bar.OnDragMove(thumb);
       await bar.OnDragMove(fraction);
       await bar.OnDragEnd(fraction);
     });
+  }
+
+  private static AngleSharp.Dom.IElement Setting(IRenderedComponent<HouseAudioPanel> cut, string control) =>
+    cut.Find($"[data-testid='house-settings-popover'] [data-testid='{control}']");
+
+  /// <summary>
+  /// Taps a setting, and completes when its command has. Finding and clicking happen on the render
+  /// thread, because a command finishing between the two re-renders the button, and bUnit then refuses
+  /// the click on the old element.
+  /// </summary>
+  private static Task TapSettingAsync(IRenderedComponent<HouseAudioPanel> cut, string control) =>
+    cut.InvokeAsync(() => Setting(cut, control).ClickAsync(new MouseEventArgs()));
+
+  private static string SettingText(IRenderedComponent<HouseAudioPanel> cut, string control) =>
+    Setting(cut, control).TextContent.Trim();
+
+  private async Task<IRenderedComponent<HouseAudioPanel>> OpenSettingsAsync(string zone)
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render();
+    WaitForMarkup(cut, zone);
+    await cut.InvokeAsync(() => Tap(cut, zone, "house-zone-tune"));
+    cut.Find("[data-testid='house-settings-popover']").GetAttribute("aria-label").Should().Be($"{zone} settings");
+    return cut;
   }
 
   [Fact]
@@ -95,8 +126,8 @@ public class HouseAudioPanelTests : TestContext
     IRenderedComponent<HouseAudioPanel> cut = Render();
     WaitForMarkup(cut, "Kitchen");
 
-    cut.Find("[data-testid='house-mute-all']").Click();
-    cut.Find("[data-testid='house-all-off']").Click();
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-mute-all']").Click());
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-all-off']").Click());
     await _controller.Handler.WaitForAsync(IsWrite, 2);
 
     _controller.Seen.Where(seen => seen.Method == HttpMethod.Put).Select(seen => seen.Uri.AbsolutePath)
@@ -123,15 +154,18 @@ public class HouseAudioPanelTests : TestContext
     IRenderedComponent<HouseAudioPanel> cut = Render();
     WaitForMarkup(cut, "Kitchen");
 
-    Tap(cut, "Den", "house-zone-power");
+    await cut.InvokeAsync(() => Tap(cut, "Den", "house-zone-power"));
     await _controller.Handler.WaitForAsync(IsWrite, 1);
-    Tap(cut, "Kitchen", "house-zone-mute");
+    await cut.InvokeAsync(() => Tap(cut, "Kitchen", "house-zone-mute"));
     await _controller.Handler.WaitForAsync(IsWrite, 2);
     await SetVolumeAsync(cut, "Kitchen", 0.5);
     await _controller.Handler.WaitForAsync(IsWrite, 3);
 
-    Tap(cut, "Kitchen", "house-zone-source");
-    Card(cut, "Kitchen").QuerySelectorAll("[data-testid='house-source-option']")[0].Click();
+    await cut.InvokeAsync(() =>
+    {
+      Tap(cut, "Kitchen", "house-zone-source");
+      Card(cut, "Kitchen").QuerySelectorAll("[data-testid='house-source-option']")[0].Click();
+    });
     await _controller.Handler.WaitForAsync(IsWrite, 4);
 
     _controller.Seen.Where(seen => seen.Method == HttpMethod.Put).Select(seen => seen.Uri.AbsolutePath)
@@ -228,13 +262,14 @@ public class HouseAudioPanelTests : TestContext
     Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-source']")!.TextContent.Should().Contain("muted");
 
     // Unmuting shows at once, and the room's own volume comes back with the next report.
-    Tap(cut, "Kitchen", "house-zone-mute");
+    await cut.InvokeAsync(() => Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.ClickAsync(new MouseEventArgs()));
+    Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("false");
+
     await _controller.Handler.WaitForAsync(IsWrite, 1);
     _controller.SetMuted("Kitchen", false);
     await NextPollAsync();
 
     WaitForLevel(cut, "Kitchen", "50");
-    Card(cut, "Kitchen").QuerySelector("[data-testid='house-zone-mute']")!.GetAttribute("aria-pressed").Should().Be("false");
   }
 
   [Fact]
@@ -335,5 +370,182 @@ public class HouseAudioPanelTests : TestContext
     cut.WaitForAssertion(() => cut.Find("[data-testid='house-audio-command-error']").TextContent.Should().Contain("amp"), Patience);
     cut.FindAll("[data-testid='house-zone-power']").Should()
       .OnlyContain(button => button.GetAttribute("aria-pressed") == "true");
+  }
+
+  [Fact]
+  public async Task Panel_Tune_OpensThatRoomsSettings_AndClosing_Leaves()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+
+    Card(cut, "Kitchen").ClassList.Should().Contain("is-tuned");
+    Card(cut, "Den").ClassList.Should().NotContain("is-tuned");
+
+    cut.Find("[data-testid='house-settings-away']").Click();
+
+    cut.FindAll("[data-testid='house-settings-popover']").Should().BeEmpty();
+    Card(cut, "Kitchen").ClassList.Should().NotContain("is-tuned");
+  }
+
+  [Fact]
+  public async Task Panel_Settings_ShowWhatTheRoomReports()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+
+    Setting(cut, "house-party-master").GetAttribute("aria-pressed").Should().Be("true");
+    Setting(cut, "house-loudness").GetAttribute("aria-pressed").Should().Be("true");
+    Setting(cut, "house-dnd").GetAttribute("aria-pressed").Should().Be("true");
+    SettingText(cut, "house-bass-value").Should().Be("-3");
+    SettingText(cut, "house-treble-value").Should().Be("+4");
+    SettingText(cut, "house-balance-value").Should().Be("-1");
+    SettingText(cut, "house-turn-on-level").Should().Be("30");
+    SettingText(cut, "house-max-level").Should().Be("80");
+  }
+
+  [Fact]
+  public async Task Panel_Settings_CallTheRoutes_ForThatRoom()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+
+    await TapSettingAsync(cut, "house-party-on");
+    await TapSettingAsync(cut, "house-loudness");
+    await TapSettingAsync(cut, "house-bass-up");
+    await TapSettingAsync(cut, "house-treble-down");
+    await TapSettingAsync(cut, "house-balance-up");
+    await TapSettingAsync(cut, "house-dnd");
+    await DragAsync(cut, "Kitchen Turn On Volume", 0.5);
+    await DragAsync(cut, "Kitchen Maximum Volume", 0.7);
+    await _controller.Handler.WaitForAsync(IsWrite, 8);
+
+    _controller.Seen.Where(seen => seen.Method == HttpMethod.Put).Select(seen => seen.Uri.AbsolutePath).Should().Equal(
+      "/Kitchen/parameter/7/1", "/Kitchen/parameter/2/0", "/Kitchen/parameter/0/-2", "/Kitchen/parameter/1/3",
+      "/Kitchen/parameter/3/0", "/Kitchen/parameter/6/0", "/Kitchen/parameter/4/50", "/Kitchen/maxvolume/70");
+  }
+
+  [Fact]
+  public async Task Panel_Settings_HeldCommand_KeepsTheControl_ThroughAPoll()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+    _controller.WriteGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    Task clicked = TapSettingAsync(cut, "house-party-on");
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+    Setting(cut, "house-party-on").GetAttribute("aria-pressed").Should().Be("true");
+
+    // Poll 3 beginning means poll 2 has been raised, still reporting Master.
+    await NextPollAsync();
+    await NextPollAsync();
+    await cut.InvokeAsync(() => { });
+
+    Setting(cut, "house-party-on").GetAttribute("aria-pressed").Should().Be("true", "a poll must not snap the control back");
+    _controller.WriteGate.SetResult();
+    await clicked;
+  }
+
+  [Fact]
+  public async Task Panel_Settings_FailedCommand_ReturnsTheControl_AndShowsIt()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+    _controller.WriteStatus = HttpStatusCode.BadRequest;
+
+    await TapSettingAsync(cut, "house-bass-up");
+
+    cut.WaitForAssertion(() => SettingText(cut, "house-settings-error").Should().Contain("Kitchen Bass").And.Contain("refused"), Patience);
+    SettingText(cut, "house-bass-value").Should().Be("-3");
+  }
+
+  [Fact]
+  public async Task Panel_Settings_MaxVolume_BelowTheRoomsVolume_ShowsTheCardComingDown()
+  {
+    _controller.SetVolume("Kitchen", 60);
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+    WaitForLevel(cut, "Kitchen", "60");
+    _controller.WriteGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    Task dragged = DragAsync(cut, "Kitchen Maximum Volume", 0.4);
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+
+    // The controller lowers a room's volume to a new maximum.
+    WaitForLevel(cut, "Kitchen", "40");
+    _controller.WriteGate.SetResult();
+    await dragged;
+  }
+
+  [Fact]
+  public async Task Panel_DeleteZone_SendsOnlyOnceConfirmed_AndCloses()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+
+    await TapSettingAsync(cut, "house-delete-zone");
+    _controller.Seen.Should().NotContain(seen => seen.Method == HttpMethod.Delete);
+
+    await TapSettingAsync(cut, "house-delete-confirm");
+
+    _controller.Seen.Single(seen => seen.Method == HttpMethod.Delete).Uri.AbsolutePath.Should().Be("/Kitchen");
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-settings-popover']").Should().BeEmpty(), Patience);
+  }
+
+  [Fact]
+  public async Task Panel_DeleteZone_Refused_StaysOpen_AndShowsIt()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+    _controller.WriteStatus = HttpStatusCode.NotFound;
+    await TapSettingAsync(cut, "house-delete-zone");
+
+    await TapSettingAsync(cut, "house-delete-confirm");
+
+    cut.WaitForAssertion(() => SettingText(cut, "house-settings-error").Should().Contain("Kitchen was not deleted"), Patience);
+    cut.FindAll("[data-testid='house-party-on']").Should().ContainSingle("the settings are back, not the question");
+  }
+
+  [Fact]
+  public async Task Panel_Settings_WhenTheirRoomDisappears_Close()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+
+    _controller.RemoveZone("Kitchen");
+    await NextPollAsync();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-settings-popover']").Should().BeEmpty(), Patience);
+    cut.FindAll("[data-testid='house-zone-card']").Should().ContainSingle();
+
+    // Its name coming back is not a request to open it again.
+    _controller.RestoreZone("Kitchen");
+    await NextPollAsync();
+    WaitForMarkup(cut, "Kitchen");
+    cut.FindAll("[data-testid='house-settings-popover']").Should().BeEmpty();
+  }
+
+  [Fact]
+  public async Task Panel_Settings_RoomDisappearing_WithACommandInFlight_ThrowsNothing()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+    _controller.WriteGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    Task clicked = TapSettingAsync(cut, "house-bass-up");
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+    _controller.RemoveZone("Kitchen");
+    await NextPollAsync();
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-settings-popover']").Should().BeEmpty(), Patience);
+
+    _controller.WriteGate.SetResult();
+
+    await clicked;
+  }
+
+  [Fact]
+  public async Task Panel_LeavingTheTab_WithSettingsOpen_AndACommandInFlight_ThrowsNothing()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = await OpenSettingsAsync("Kitchen");
+    _controller.WriteGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    _controller.WriteStatus = HttpStatusCode.Conflict;
+    await TapSettingAsync(cut, "house-delete-zone");
+
+    Task clicked = TapSettingAsync(cut, "house-delete-confirm");
+    await _controller.Handler.WaitForAsync(IsWrite, 1);
+
+    DisposeComponents();
+    _controller.WriteGate.SetResult();
+
+    await clicked;
   }
 }

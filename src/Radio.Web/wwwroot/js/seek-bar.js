@@ -10,7 +10,8 @@
 //                           pointerup). No seek.
 //
 // A tap is a pointerdown followed by a pointerup, so it arrives as one OnDragMove and one OnDragEnd:
-// tap-to-seek and drag-to-seek are the same path, and a tap still seeks exactly once.
+// tap-to-seek and drag-to-seek are the same path, and a tap still seeks exactly once. A SeekBar with
+// RelativeDragSlop set tells them apart itself, from these same calls, and a tap there does nothing.
 //
 // Moves are coalesced to at most one invoke per animation frame. The final OnDragEnd carries the
 // release position itself, so a coalesced (dropped) move can never lose the position that is committed.

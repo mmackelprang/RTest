@@ -748,6 +748,7 @@ public class SystemConfigPageTests : TestContext
 
     cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().ContainSingle());
     cut.Find("a[role='tab'][aria-selected='true']").TextContent.Should().Contain("Diagnostics");
+    _housePollersCreated.Should().Be(0, "this route opens Diagnostics, so House Audio must cost nothing");
   }
 
   /// <summary>
@@ -795,7 +796,7 @@ public class SystemConfigPageTests : TestContext
     SelectTab(cut, "System Stats");
 
     await _houseController.RequestCancelled.Task.WaitAsync(RecordingHandler.RendezvousTimeout);
-    cut.Markup.Should().NotContain("Mackelhome Controller");
+    cut.WaitForAssertion(() => cut.Markup.Should().NotContain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
 
     // Coming back is a new panel with its own poller, never a shared or reused one.
     _houseController.SystemGate = null;

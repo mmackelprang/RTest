@@ -28,6 +28,7 @@ public sealed class FakeHouseController
   private readonly Dictionary<string, int> _zoneVolumes = new() { ["Kitchen"] = 20, ["Den"] = 20 };
   private readonly HashSet<string> _zonesOff = [];
   private readonly HashSet<string> _zonesMuted = [];
+  private readonly HashSet<string> _zonesRemoved = [];
 
   public FakeHouseController()
   {
@@ -117,6 +118,23 @@ public sealed class FakeHouseController
       {
         _zonesMuted.Remove(zone);
       }
+    }
+  }
+
+  /// <summary>Takes a zone out of what <c>GET /zones</c> reports, as a delete from elsewhere does.</summary>
+  public void RemoveZone(string zone)
+  {
+    lock (_sync)
+    {
+      _zonesRemoved.Add(zone);
+    }
+  }
+
+  public void RestoreZone(string zone)
+  {
+    lock (_sync)
+    {
+      _zonesRemoved.Remove(zone);
     }
   }
 
@@ -251,6 +269,7 @@ public sealed class FakeHouseController
     lock (_sync)
     {
       IEnumerable<KeyValuePair<string?, int>> zones = _zoneVolumes
+        .Where(zone => !_zonesRemoved.Contains(zone.Key))
         .Select(zone => new KeyValuePair<string?, int>(zone.Key, zone.Value));
       if (HasUnnamedZone)
       {
