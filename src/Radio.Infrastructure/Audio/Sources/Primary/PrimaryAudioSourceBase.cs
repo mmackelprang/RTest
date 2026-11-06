@@ -92,6 +92,12 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   {
   }
 
+  /// <summary>
+  /// Called by the audio manager just before it stops this source because another is replacing it.
+  /// Must not throw and must not take long: it holds up the switch, and the switch must happen.
+  /// </summary>
+  internal virtual Task PrepareForSwitchAwayAsync() => Task.CompletedTask;
+
   /// <inheritdoc/>
   public override AudioSourceCategory Category => AudioSourceCategory.Primary;
 

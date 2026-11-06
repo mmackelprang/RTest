@@ -471,6 +471,32 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   // Returns whether the command reached a MediaPlayer1, so the caller can tell the difference
   // between "the phone was asked" and "there was nobody to ask" — the latter must not be reported
   // as a successful pause.
+  /// <inheritdoc/>
+  /// <remarks>
+  /// The path is part of the answer. On 2026-11-06 the transport that stayed idle was
+  /// <c>…/fd13</c>, with no <c>sepN</c>, and the one that worked was <c>…/sep4/fd14</c>.
+  /// </remarks>
+  public async Task<string?> GetMediaTransportStateAsync(CancellationToken cancellationToken = default)
+  {
+    var transport = _mediaTransport;
+    var path = _mediaTransportPath;
+    if (transport == null)
+    {
+      return "none attached";
+    }
+
+    try
+    {
+      var state = await transport.GetAsync<string>("State").WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+      return $"{state} at {path}";
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+      // Removed transports are not detached, so this also reads "that one has gone".
+      return $"unreadable at {path}";
+    }
+  }
+
   private async Task<bool> SendMediaCommandAsync(string name, Func<Linux.IMediaPlayer1, Task> command)
   {
     var player = _mediaPlayer;

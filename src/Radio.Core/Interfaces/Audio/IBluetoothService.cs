@@ -198,6 +198,13 @@ public interface IBluetoothService : IAsyncDisposable
   /// </summary>
   Task<bool> PlayMediaAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
 
+  /// <summary>
+  /// The A2DP transport's state and where it is, for a diagnostic line, or null where the platform
+  /// has no such thing. Text, because it is only ever shown to a person.
+  /// </summary>
+  Task<string?> GetMediaTransportStateAsync(CancellationToken cancellationToken = default) =>
+    Task.FromResult<string?>(null);
+
   /// <summary>Skip to next track via AVRCP.</summary>
   Task NextTrackAsync(CancellationToken cancellationToken = default);
 
