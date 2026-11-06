@@ -30,7 +30,7 @@
      @onclick="OnClose" @onclick:stopPropagation="true"
      @ontouchend="OnClose" @ontouchend:stopPropagation="true" @ontouchend:preventDefault="true"></div>
 
-<aside class="house-controller-panel" role="dialog" aria-label="Controller settings"
+<aside class="house-controller-panel @(Closing ? "is-closing" : null)" role="dialog" aria-label="Controller settings"
        data-testid="house-controller-panel">
   <div class="house-settings-row">
     <span class="house-settings-name">Controller settings</span>
@@ -245,6 +245,9 @@
   [Parameter] public EventCallback<Func<HouseAudioSnapshot, HouseAudioSnapshot>> OnSaved { get; set; }
 
   [Parameter] public EventCallback OnClose { get; set; }
+
+  /// <summary>True while the panel slides this out, before it removes it.</summary>
+  [Parameter] public bool Closing { get; set; }
 
   private EntryKind _entry;
   private PickerKind? _picking;

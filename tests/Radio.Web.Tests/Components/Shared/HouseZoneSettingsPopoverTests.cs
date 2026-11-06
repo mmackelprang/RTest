@@ -26,11 +26,13 @@ public class HouseZoneSettingsPopoverTests : TestContext
     new(0, 0, "Screen Porch", true, 40, 0, false, maxVolume, bass, treble, loudness, balance, turnOnVolume,
       doNotDisturb, partyMode);
 
-  private IRenderedComponent<HouseZoneSettingsPopover> Render(HouseZone zone, string? error = null, bool stale = false) =>
+  private IRenderedComponent<HouseZoneSettingsPopover> Render(
+    HouseZone zone, string? error = null, bool stale = false, bool closing = false) =>
     RenderComponent<HouseZoneSettingsPopover>(parameters => parameters
       .Add(popover => popover.Zone, zone)
       .Add(popover => popover.Error, error)
       .Add(popover => popover.Stale, stale)
+      .Add(popover => popover.Closing, closing)
       .Add(popover => popover.OnSetting, EventCallback.Factory.Create<HouseZoneSetting>(this, _settings.Add))
       .Add(popover => popover.OnMaxVolume, EventCallback.Factory.Create<int>(this, _maxVolumes.Add))
       .Add(popover => popover.OnDelete, EventCallback.Factory.Create(this, () => _deletes++))
@@ -255,6 +257,25 @@ public class HouseZoneSettingsPopoverTests : TestContext
     _deletes.Should().Be(0);
     cut.FindAll("[data-testid='house-delete-prompt']").Should().BeEmpty();
     cut.FindAll("[data-testid='house-party-on']").Should().ContainSingle();
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void Popover_Closing_SlidesItOut(bool closing)
+  {
+    IRenderedComponent<HouseZoneSettingsPopover> cut = Render(Zone(), closing: closing);
+
+    cut.Find("[data-testid='house-settings-popover']").ClassList.Contains("is-closing").Should().Be(closing);
+  }
+
+  [Fact]
+  public void Popover_SlideDurations_MatchThePanels()
+  {
+    string css = File.ReadAllText(DesignSystemCssPath());
+
+    css.Should().Contain("house-slide-out 200ms", "HouseAudioPanel removes the panel after DefaultSlideDuration");
+    HouseAudioPanel.DefaultSlideDuration.Should().Be(TimeSpan.FromMilliseconds(200));
   }
 
   [Fact]

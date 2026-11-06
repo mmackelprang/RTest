@@ -1,6 +1,7 @@
 @* One room on the House Audio tab. Presentational: every control raises a callback, and the panel
    owns the commands. The power button is what the owner uses to silence a room; the speaker mute is
-   separate, and both act on one touch.
+   separate, and both act on one touch. Whether a room is on is shown by that button's colour, with no
+   word for it anywhere on the card, as the owner asked. aria-pressed says it for a screen reader.
 
    Volume uses HouseLevelSlider over SeekBar, the app's touch slider, so a drag is a captured pointer
    gesture with a real end and a real cancel, and a tap on the bar does nothing.
@@ -17,13 +18,12 @@
       <span class="house-zone-stale" data-testid="house-zone-stale">Last known</span>
     }
     <button type="button" class="house-zone-tune" data-testid="house-zone-tune"
-            @onclick="OnTune">
-      Tune
+            aria-label="@($"{Zone.Name} settings")" @onclick="OnTune">
+      <RadzenIcon Icon="tune" />
     </button>
     <button type="button" class="house-zone-power" data-testid="house-zone-power"
             aria-label="@($"{Zone.Name} power")" aria-pressed="@AriaBool(Zone.Power)" @onclick="OnPower">
       <RadzenIcon Icon="power_settings_new" />
-      <span>@(Zone.Power ? "On" : "Off")</span>
     </button>
   </div>
 
@@ -112,15 +112,10 @@
   {
     get
     {
-      if (!Zone.Power)
-      {
-        return "Off";
-      }
-
       // sourceID is zero-based; the amp's inputs are numbered from 1.
       string name = Sources.FirstOrDefault(source => source.SourceId == Zone.SourceId)?.Name
         ?? $"Input {Zone.SourceId + 1}";
-      return Zone.Muted ? $"{name} · muted" : name;
+      return Zone.Power && Zone.Muted ? $"{name} · muted" : name;
     }
   }
 

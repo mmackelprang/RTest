@@ -1,6 +1,6 @@
 @using System.Globalization
 
-@* One room's settings, opened from Tune on its card. Presentational: every control raises a callback,
+@* One room's settings, opened from the adjustment icon on its card. Presentational: every control raises a callback,
    and the panel owns the commands, so a setting is held and taken back exactly as a card's control is.
    Zone is what the panel shows, so a command shows here at once and a failed one returns here too.
 
@@ -18,7 +18,7 @@
      @onclick="OnClose" @onclick:stopPropagation="true"
      @ontouchend="OnClose" @ontouchend:stopPropagation="true" @ontouchend:preventDefault="true"></div>
 
-<aside class="house-settings-popover" role="dialog" aria-label="@($"{Zone.Name} settings")"
+<aside class="house-settings-popover @(Closing ? "is-closing" : null)" role="dialog" aria-label="@($"{Zone.Name} settings")"
        data-testid="house-settings-popover">
   <div class="house-settings-row">
     @if (Error is { } error)
@@ -134,6 +134,9 @@
   [Parameter] public EventCallback OnDelete { get; set; }
 
   [Parameter] public EventCallback OnClose { get; set; }
+
+  /// <summary>True while the panel slides this out, before it removes it.</summary>
+  [Parameter] public bool Closing { get; set; }
 
   private bool _confirmingDelete;
   private bool _deleting;

@@ -1,6 +1,7 @@
 @page "/system"
 @page "/diagnostics"
 @rendermode InteractiveServer
+@using System.Globalization
 @using Radio.Web.Components.Shared.HouseAudio
 @using Radio.Web.Models
 @inject SystemApiService SystemApi
@@ -20,6 +21,9 @@
 <PageTitle>System Configuration</PageTitle>
 
 <div style="height: 100%; display: flex; overflow: hidden;">
+  @* Held until the remembered tab is known, or the first tab would flash up and mount its body. *@
+  @if (_tabRestored)
+  {
   <RadzenTabs TabPosition="TabPosition.Left" SelectedIndex="@_activeTab" Change="@OnTopLevelTabChanged"
               Style="height: 100%; width: 100%;" class="system-config-tabs">
     <Tabs>
@@ -1934,10 +1938,19 @@
 
     </Tabs>
   </RadzenTabs>
+  }
 </div>
 
 @code {
   private int _activeTab = 0;
+
+  // The tab last chosen, kept in the browser, so each screen remembers its own: a laptop does not move
+  // the panel's, and a tap writes nothing to the box's configuration store. The deploy clears the kiosk
+  // profile's cache directories only, so this survives one. A position, as RadzenTabs knows a tab by
+  // position: inserting a tab moves what an old value opens, once, which costs a tap.
+  private const string RememberedTabKey = "radio.settings.tab";
+  private static readonly TimeSpan RememberedTabTimeout = TimeSpan.FromSeconds(2);
+  private bool _tabRestored;
 
   // Where the Rotary Encoders panel lives, as a pair of tab indices. RadzenTabs identifies a tab by
   // its position, so inserting a tab above either of these moves the panel and both constants have to
@@ -2204,6 +2217,7 @@
   {
     // Decided before any await so the first render already shows the right tab.
     SelectTabForRoute();
+    await RestoreTabAsync();
 
     // Load initial data
     await LoadSystemStatsAsync();
@@ -4190,11 +4204,56 @@
     return string.Equals(path, "diagnostics", StringComparison.OrdinalIgnoreCase);
   }
 
-  private void OnTopLevelTabChanged(int index)
+  private async Task OnTopLevelTabChanged(int index)
   {
     _activeTab = index;
     UpdateEncoderPolling();
+    await RememberTabAsync(index);
   }
+
+  /// <summary>
+  /// Opens the tab last chosen, unless the route has already picked one. Memory is a convenience, so a
+  /// browser that refuses it, or a value that is not a tab, opens the first tab.
+  /// </summary>
+  private async Task RestoreTabAsync()
+  {
+    if (_activeTab == 0)
+    {
+      try
+      {
+        using CancellationTokenSource timeout = new(RememberedTabTimeout);
+        string? stored = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", timeout.Token, RememberedTabKey);
+
+        // Diagnostics is the last tab. The route can still have moved while this was read.
+        if (!_disposed && _activeTab == 0
+          && int.TryParse(stored, NumberStyles.None, CultureInfo.InvariantCulture, out int index)
+          && index <= DiagnosticsTabIndex)
+        {
+          _activeTab = index;
+          UpdateEncoderPolling();
+        }
+      }
+      catch (Exception ex) when (IsStorageFailure(ex))
+      {
+      }
+    }
+
+    _tabRestored = true;
+  }
+
+  private async Task RememberTabAsync(int index)
+  {
+    try
+    {
+      await JSRuntime.InvokeVoidAsync("localStorage.setItem", RememberedTabKey, index.ToString(CultureInfo.InvariantCulture));
+    }
+    catch (Exception ex) when (IsStorageFailure(ex))
+    {
+    }
+  }
+
+  private static bool IsStorageFailure(Exception ex) =>
+    ex is JSException or JSDisconnectedException or OperationCanceledException or InvalidOperationException;
 
   private void OnIntegrationsSubTabChanged(int index)
   {

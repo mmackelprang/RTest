@@ -1462,8 +1462,13 @@ Priority guidelines:
 
 The **House Audio** tab on `/system`, second under System Stats, controls the whole-house Russound amp through the
 `rnet-pi` controller, so a room can be changed from the panel instead of a phone. Rooms are cards with power,
-mute, volume, source, and Tune for the room's settings. **Controller settings** holds the controller's name, its
-password, its sources (name, type, edit, add, delete), and About. The amp is a CAA66: six inputs, six zones.
+mute, volume, source, and the adjustment icon for the room's settings. The power button's colour says whether a room
+is on: amber on, grey off, with no word for it. **Controller settings** holds the controller's name, its password,
+its sources (name, type, edit, add, delete), and About. Both settings panels slide in and out at the right edge. The
+amp is a CAA66: six inputs, six zones.
+
+Settings reopens on the left-nav tab last chosen, in each browser separately (`localStorage`, `radio.settings.tab`).
+`/diagnostics` still opens Diagnostics, and doesn't count as a choice.
 
 🚧 **`UI-37`: held for owner UAT, not merged and not deployed.**
 

@@ -665,6 +665,20 @@ public class HouseControllerSettingsPanelTests : TestContext
     Test(cut, "house-about-connection").TextContent.Should().Contain("Not connected");
   }
 
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void Closing_SlidesThePanelOut(bool closing)
+  {
+    Services.AddSingleton(_controller.CreateClient(_passwords));
+    Services.AddSingleton(_passwords);
+    IRenderedComponent<HouseControllerSettingsPanel> cut = RenderComponent<HouseControllerSettingsPanel>(parameters => parameters
+      .Add(panel => panel.Snapshot, Snapshot())
+      .Add(panel => panel.Closing, closing));
+
+    Test(cut, "house-controller-panel").ClassList.Contains("is-closing").Should().Be(closing);
+  }
+
   [Fact]
   public void Close_RaisesOnClose()
   {

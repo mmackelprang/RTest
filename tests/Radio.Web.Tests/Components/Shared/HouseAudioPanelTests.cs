@@ -31,13 +31,16 @@ public class HouseAudioPanelTests : TestContext
     JSInterop.Mode = JSRuntimeMode.Loose;
   }
 
-  private IRenderedComponent<HouseAudioPanel> Render()
+  private IRenderedComponent<HouseAudioPanel> Render(TimeSpan? slideDuration = null)
   {
     HouseAudioApiService api = _controller.CreateClient(_passwords);
     Services.AddSingleton(api);
     Services.AddSingleton(_passwords);
     Services.AddSingleton<Func<HouseAudioPoller>>(() => new HouseAudioPoller(api, _time, Interval));
-    return RenderComponent<HouseAudioPanel>();
+
+    // Zero unless a test is about the slide: nothing else here should wait on a real timer.
+    return RenderComponent<HouseAudioPanel>(parameters => parameters
+      .Add(panel => panel.SlideDuration, slideDuration ?? TimeSpan.Zero));
   }
 
   private static bool IsSystemPoll(HttpMethod method, string path) => method == HttpMethod.Get && path == "/system";
@@ -466,7 +469,36 @@ public class HouseAudioPanelTests : TestContext
     EveryRoomShowsOff();
 
     void EveryRoomShowsOff() => cut.FindAll("[data-testid='house-zone-power']").Should().HaveCount(2)
-      .And.OnlyContain(button => button.GetAttribute("aria-pressed") == "false" && button.QuerySelector("span")!.TextContent == "Off");
+      .And.OnlyContain(button => button.GetAttribute("aria-pressed") == "false");
+  }
+
+  // The next two hold the slide for longer than any run, so the panel is still there to look at. Nothing
+  // here waits on that timer: it can only keep the assertion true.
+  [Fact]
+  public async Task Panel_ClosingARoomsSettings_StaysUpToSlideOut()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render(TimeSpan.FromHours(1));
+    WaitForMarkup(cut, "Kitchen");
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-zone-tune']").Click());
+    cut.Find("[data-testid='house-settings-popover']").ClassList.Should().NotContain("is-closing");
+
+    await cut.InvokeAsync(() => { _ = cut.Find("[data-testid='house-settings-close']").ClickAsync(new MouseEventArgs()); });
+
+    cut.WaitForAssertion(() =>
+      cut.Find("[data-testid='house-settings-popover']").ClassList.Should().Contain("is-closing"));
+  }
+
+  [Fact]
+  public async Task Panel_ClosingControllerSettings_StaysUpToSlideOut()
+  {
+    IRenderedComponent<HouseAudioPanel> cut = Render(TimeSpan.FromHours(1));
+    WaitForMarkup(cut, "Kitchen");
+    await cut.InvokeAsync(() => cut.Find("[data-testid='house-controller-settings']").ClickAsync(new MouseEventArgs()));
+
+    await cut.InvokeAsync(() => { _ = cut.Find("[data-testid='house-controller-close']").ClickAsync(new MouseEventArgs()); });
+
+    cut.WaitForAssertion(() =>
+      cut.Find("[data-testid='house-controller-panel']").ClassList.Should().Contain("is-closing"));
   }
 
   [Fact]

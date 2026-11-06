@@ -11,7 +11,11 @@
    each card and the room settings show after that, and its tests state the rules. The settings are
    tracked by room id, not as a copy of the room, so they show what the cards show, and close by
    themselves if the room goes. RNET traffic stays in this process, off
-   the audio path. Nothing here logs: a room name is not for the journal (CLAUDE.md, radio-web). *@
+   the audio path. Nothing here logs: a room name is not for the journal (CLAUDE.md, radio-web).
+
+   Both settings panels slide in and out at the right edge. Opening is all CSS. Closing needs the panel
+   to outlive the close by SlideDuration, so the panel marks it closing, waits, then removes it. A
+   timer, not animationend: an animation that never runs would otherwise leave the panel up for good. *@
 
 @{
   IReadOnlyList<HouseZone> zones = _ledger.Zones;
@@ -77,22 +81,30 @@
     <HouseZoneSettingsPopover @key="@((tuned.ControllerId, tuned.ZoneId))"
                               Zone="@tuned"
                               Stale="@stale"
+                              Closing="@_tunedClosing"
                               Error="@_commandError"
                               OnSetting="@(setting => SetSettingAsync(tuned, setting))"
                               OnMaxVolume="@(maxVolume => SetMaxVolumeAsync(tuned, maxVolume))"
                               OnDelete="@(() => DeleteZoneAsync(tuned))"
-                              OnClose="@(() => _tunedZone = null)" />
+                              OnClose="CloseTunedAsync" />
   }
 
   @if (_controllerSettingsOpen)
   {
     <HouseControllerSettingsPanel Snapshot="@_snapshot"
+                                  Closing="@_controllerClosing"
                                   OnSaved="ApplySaved"
-                                  OnClose="@(() => _controllerSettingsOpen = false)" />
+                                  OnClose="CloseControllerSettingsAsync" />
   }
 </section>
 
 @code {
+  /// <summary>How long a closing panel stays up. <c>house-slide-out</c> in design-system.css runs this long.</summary>
+  internal static readonly TimeSpan DefaultSlideDuration = TimeSpan.FromMilliseconds(200);
+
+  /// <summary>Zero removes a closing panel at once.</summary>
+  [Parameter] public TimeSpan SlideDuration { get; set; } = DefaultSlideDuration;
+
   private readonly HouseAudioCommandLedger _ledger = new();
   private HouseAudioPoller _poller = default!;
   private HouseAudioSnapshot? _snapshot;
@@ -104,7 +116,9 @@
 
   // The room whose settings are open. Ids, because two zones can share a name.
   private (int ControllerId, int ZoneId)? _tunedZone;
+  private bool _tunedClosing;
   private bool _controllerSettingsOpen;
+  private bool _controllerClosing;
 
   // With no rooms and a failed poll, the health line already says what is wrong.
   private string? EmptyText => _snapshot?.Health switch
@@ -164,9 +178,50 @@
     if (_tunedZone is not null && !_ledger.Zones.Any(IsTuned))
     {
       _tunedZone = null;
+      _tunedClosing = false;
     }
 
     StateHasChanged();
+  }
+
+  private async Task CloseTunedAsync()
+  {
+    if (_tunedClosing)
+    {
+      return;
+    }
+
+    (int ControllerId, int ZoneId)? closing = _tunedZone;
+    _tunedClosing = true;
+    await WaitForSlideAsync();
+
+    // The room can go, and another room's settings open, while this one slides out.
+    if (_tunedZone == closing)
+    {
+      _tunedZone = null;
+      _tunedClosing = false;
+    }
+  }
+
+  private async Task CloseControllerSettingsAsync()
+  {
+    if (_controllerClosing)
+    {
+      return;
+    }
+
+    _controllerClosing = true;
+    await WaitForSlideAsync();
+    _controllerSettingsOpen = false;
+    _controllerClosing = false;
+  }
+
+  private async Task WaitForSlideAsync()
+  {
+    if (SlideDuration > TimeSpan.Zero)
+    {
+      await Task.Delay(SlideDuration);
+    }
   }
 
   // Shows a saved name or source until the next poll replaces it with what the controller reports.
@@ -217,7 +272,7 @@
     // Another room's settings may have been opened while this was in flight.
     if (deleted && IsTuned(zone))
     {
-      _tunedZone = null;
+      await CloseTunedAsync();
     }
   }
 

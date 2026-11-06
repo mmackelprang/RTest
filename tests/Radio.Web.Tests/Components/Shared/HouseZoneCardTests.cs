@@ -48,16 +48,16 @@ public class HouseZoneCardTests : TestContext
     cut.InvokeAsync(() => bar.OnDragMove(fraction));
 
   [Theory]
-  [InlineData(true, "On", "true")]
-  [InlineData(false, "Off", "false")]
-  public void Card_PowerButton_IsOneTouch_AndShowsOnOrOff(bool power, string label, string pressed)
+  [InlineData(true, "true")]
+  [InlineData(false, "false")]
+  public void Card_PowerButton_IsOneTouch_AndShowsItsStateWithoutWords(bool power, string pressed)
   {
     int presses = 0;
     IRenderedComponent<HouseZoneCard> cut = Render(Zone(power: power), onPower: () => presses++);
 
     AngleSharp.Dom.IElement button = cut.Find("[data-testid='house-zone-power']");
-    button.TextContent.Should().Contain(label);
-    button.GetAttribute("aria-pressed").Should().Be(pressed);
+    button.TextContent.Trim().Should().Be("power_settings_new", "the colour says on or off, not a word");
+    button.GetAttribute("aria-pressed").Should().Be(pressed, "a screen reader cannot see the colour");
 
     button.Click();
 
@@ -89,7 +89,7 @@ public class HouseZoneCardTests : TestContext
     cut.Find("[data-testid='house-zone-power']").HasAttribute("disabled").Should().BeFalse();
     cut.Find("[data-testid='house-zone-mute']").HasAttribute("disabled").Should().BeTrue();
     cut.Find("[data-testid='house-zone-source']").HasAttribute("disabled").Should().BeTrue();
-    cut.Find("[data-testid='house-zone-source']").TextContent.Should().Contain("Off");
+    cut.Find("[data-testid='house-zone-source']").TextContent.Should().Contain("Audiocast 1").And.NotContain("Off");
     cut.Find(".seek-bar").GetAttribute("aria-disabled").Should().Be("true");
   }
 
@@ -150,6 +150,23 @@ public class HouseZoneCardTests : TestContext
     cut.Find("[data-testid='house-source-away']").Click();
 
     cut.FindAll("[data-testid='house-source-option']").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Card_OffAndMuted_DoesNotSayMuted()
+  {
+    IRenderedComponent<HouseZoneCard> cut = Render(Zone(power: false, muted: true));
+
+    cut.Find("[data-testid='house-zone-source']").TextContent.Should().NotContain("muted");
+  }
+
+  [Fact]
+  public void Card_TuneButton_IsTheAdjustmentIcon_AndNamedForScreenReaders()
+  {
+    AngleSharp.Dom.IElement button = Render(Zone()).Find("[data-testid='house-zone-tune']");
+
+    button.TextContent.Trim().Should().Be("tune");
+    button.GetAttribute("aria-label").Should().Be("Screen Porch settings");
   }
 
   [Fact]

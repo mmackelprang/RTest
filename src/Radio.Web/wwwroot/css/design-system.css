@@ -8534,6 +8534,28 @@ body:has(.icb-scrim) .encoder-selector-overlay {
   cursor: default;
 }
 
+/* Both settings panels leave and enter past the screen's right edge. The opening rule ends at no
+   transform at all: a transform left on a panel would capture anything fixed inside it. */
+@keyframes house-slide-in {
+  from { transform: translateX(calc(100% + var(--sp-4))); }
+}
+
+@keyframes house-slide-out {
+  to { transform: translateX(calc(100% + var(--sp-4))); }
+}
+
+.house-settings-popover,
+.house-controller-panel {
+  animation: house-slide-in 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* HouseAudioPanel.DefaultSlideDuration keeps a closing panel up for this long. */
+.house-settings-popover.is-closing,
+.house-controller-panel.is-closing {
+  animation: house-slide-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
 .house-audio-action {
   flex: none;
   padding: 0 var(--sp-5);
@@ -8601,25 +8623,18 @@ body:has(.icb-scrim) .encoder-selector-overlay {
   color: var(--signal-amber);
 }
 
-.house-zone-tune {
-  flex: none;
-  min-width: 72px;
-  padding: 0 var(--sp-3);
-  font-size: 14px;
-}
-
-/* The control the owner silences a room with, so on and off differ in more than a shade. */
+.house-zone-tune,
 .house-zone-power {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-1);
-  min-width: 88px;
-  padding: 0 var(--sp-3);
-  font-size: 14px;
-  font-weight: 600;
+  min-width: var(--touch-preferred);
+  padding: 0;
 }
+
+/* The control the owner silences a room with, and the only thing that says a room is on, so on and
+   off differ in more than a shade. */
 
 .house-zone-power[aria-pressed="true"] {
   background: var(--signal-amber);

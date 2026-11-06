@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.JSInterop;
 using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Models;
@@ -756,6 +757,109 @@ public class SystemConfigPageTests : TestContext
   /// Encoders panel unfilled. No route selects this tab: the toast at <c>MainLayout.razor:1643</c>
   /// lands on <c>/system</c>.
   /// </summary>
+  // ─── The Settings tab comes back as it was left ───────────────────────────
+  private const string RememberedTabKey = "radio.settings.tab";
+
+  private void RememberTab(string? stored) =>
+    JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey).SetResult(stored);
+
+  private static string SelectedTab(IRenderedComponent<SystemConfigPage> cut) =>
+    cut.FindAll("a[role='tab'][aria-selected='true']")
+      .First(tab => tab.Closest(".rz-tabview-panels") is null).TextContent;
+
+  [Fact]
+  public void ChoosingATab_RemembersIt()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectTab(cut, "House Audio");
+
+    JSInterop.VerifyInvoke("localStorage.setItem").Arguments.Should().Equal(RememberedTabKey, "1");
+  }
+
+  [Fact]
+  public async Task TheRememberedTab_OpensWhenThePageDoes()
+  {
+    RememberTab("1");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("House Audio");
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-panel']").Should().ContainSingle());
+    _housePollersCreated.Should().Be(1);
+    await Task.CompletedTask;
+  }
+
+  [Fact]
+  public void WhileTheMemoryIsBeingRead_NoTabShows()
+  {
+    // A first paint of System Stats would flash up and cost its body a mount.
+    JSRuntimeInvocationHandler<string?> read = JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey);
+
+    var cut = RenderComponent<SystemConfigPage>();
+    cut.FindAll("a[role='tab']").Should().BeEmpty();
+
+    read.SetResult("1");
+
+    cut.WaitForAssertion(() => SelectedTab(cut).Should().Contain("House Audio"));
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("")]
+  [InlineData("not a tab")]
+  [InlineData("-1")]
+  [InlineData("10")]
+  public void AMissingOrUnusableMemory_OpensTheFirstTab(string? stored)
+  {
+    RememberTab(stored);
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("System Stats");
+  }
+
+  [Fact]
+  public void WhenStorageIsBlocked_ThePageStillOpens()
+  {
+    JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey).SetException(new JSException("blocked"));
+    JSInterop.SetupVoid("localStorage.setItem", _ => true).SetException(new JSException("blocked"));
+
+    var cut = RenderComponent<SystemConfigPage>();
+    SelectedTab(cut).Should().Contain("System Stats");
+
+    SelectTab(cut, "House Audio");
+
+    SelectedTab(cut).Should().Contain("House Audio");
+  }
+
+  [Fact]
+  public void TheDiagnosticsRoute_BeatsTheMemory()
+  {
+    RememberTab("1");
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().NavigateTo("/diagnostics");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("Diagnostics");
+    _housePollersCreated.Should().Be(0);
+    JSInterop.Invocations.Should().NotContain(call => call.Identifier == "localStorage.setItem",
+      "a route is not a choice, so /system still opens on the tab last chosen");
+  }
+
+  [Fact]
+  public async Task RememberingIntegrations_StartsTheEncoderPoll()
+  {
+    int before = _integrationsApi.Count(IsEncoderPoll);
+    RememberTab("8");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("Integrations");
+    await _integrationsApi.WaitForAsync(IsEncoderPoll, before + 1);
+    SelectTab(cut, "System Stats");
+  }
+
   [Fact]
   public async Task IntegrationsTab_StartsTheEncoderPoll()
   {
