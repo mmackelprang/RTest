@@ -407,6 +407,45 @@ builder.Services.AddHttpClient<DiagnosticsApiService>(client =>
   return handler;
 });
 
+// House Audio: the RNET controller on the LAN, reached from here rather than through Radio.API, so
+// polling stays out of the process that hosts the audio engine, and from the server rather than the
+// kiosk browser.
+//
+// ⚠ RemoveAllLoggers is required. The default logging for a named client writes each request URL at
+// Information, and Radio.Web's Console sink has no level restriction, so journald would carry it but
+// for the one System.Net.Http.HttpClient override in appsettings.json. This client's safety should not
+// rest on that line. Requests carry the password only in a header, so the URL does not hold it; this
+// stops a URL that did from being written down, and keeps room names out of the journal.
+//
+// ApiConnectionLoggingHandler is left off for the same reason, and because its throttle is static and
+// shared: a dead controller would read as a Radio.API outage, and its recovery as "API connection
+// restored". Redirects are off so a redirect cannot carry the password header to another host.
+builder.Services.AddSingleton<HouseAudioPasswordStore>();
+builder.Services.AddTransient<Radio.Web.Services.Http.HouseAudioAuthHandler>();
+builder.Services.AddHttpClient<HouseAudioApiService>((services, client) =>
+{
+  // Read here rather than beside the other base URLs: the SQLite bridge is added further down.
+  client.BaseAddress = HouseAudioSettings.BaseUrl(services.GetRequiredService<IConfiguration>());
+  client.Timeout = TimeSpan.FromSeconds(5);
+})
+.AddHttpMessageHandler<Radio.Web.Services.Http.HouseAudioAuthHandler>()
+.RemoveAllLoggers()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler { AllowAutoRedirect = false };
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
+// One poller per panel, which creates, owns and disposes it. A Func rather than a registered service:
+// the container would hold every transient IAsyncDisposable it created until the circuit ended, and a
+// kiosk circuit lasts for weeks. Not a singleton, because circuits must not share one (UI-33).
+builder.Services.AddScoped<Func<HouseAudioPoller>>(services => () => new HouseAudioPoller(
+  services.GetRequiredService<HouseAudioApiService>(),
+  TimeProvider.System,
+  HouseAudioSettings.PollInterval(services.GetRequiredService<IConfiguration>()),
+  services.GetRequiredService<ILogger<HouseAudioPoller>>()));
+
 // Register SignalR hub services as singletons (Phase 1 Task 1.3, Phase 10)
 builder.Services.AddSingleton<AudioStateHubService>();
 builder.Services.AddSingleton<AudioVisualizationHubService>();

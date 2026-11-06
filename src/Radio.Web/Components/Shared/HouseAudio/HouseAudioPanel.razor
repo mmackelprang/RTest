@@ -1,0 +1,354 @@
+@implements IAsyncDisposable
+@inject Func<HouseAudioPoller> CreatePoller
+@inject HouseAudioApiService Api
+
+@* The House Audio tab: the controller's rooms, as cards. SystemConfigPage's RadzenTabs is in its default
+   Server render mode, which renders only the selected tab's body, so this component exists only while
+   its tab shows. Polling follows its lifetime: an unopened tab costs the box nothing, and leaving the
+   tab disposes the poller.
+
+   Commands apply immediately and the card shows them at once. HouseAudioCommandLedger decides what
+   each card and the room settings show after that, and its tests state the rules. The settings are
+   tracked by room id, not as a copy of the room, so they show what the cards show, and close by
+   themselves if the room goes. RNET traffic stays in this process, off
+   the audio path. Nothing here logs: a room name is not for the journal (CLAUDE.md, radio-web).
+
+   Both settings panels slide in and out at the right edge. Opening is all CSS. Closing needs the panel
+   to outlive the close by SlideDuration, so the panel marks it closing, waits, then removes it. A
+   timer, not animationend: an animation that never runs would otherwise leave the panel up for good. *@
+
+@{
+  IReadOnlyList<HouseZone> zones = _ledger.Zones;
+  IReadOnlyList<HouseZone> powered = zones.Where(zone => zone.Power).ToList();
+  bool allMuted = powered.Count > 0 && powered.All(zone => zone.Muted);
+  bool stale = _snapshot?.Stale ?? false;
+  HouseZone? tuned = zones.FirstOrDefault(IsTuned);
+}
+
+<section class="house-audio-panel" data-testid="house-audio-panel">
+  <header class="house-audio-header">
+    <span class="house-audio-name">@(_snapshot?.System?.Name ?? "House Audio")</span>
+    <span class="house-audio-status-slot">
+      @if (HealthText is { } health)
+      {
+        <span class="house-audio-status" role="alert" data-testid="house-audio-status">@health</span>
+      }
+      @if (_commandError is { } error)
+      {
+        <span class="house-audio-status" role="alert" data-testid="house-audio-command-error">@error</span>
+      }
+    </span>
+    <button type="button" class="house-audio-action" data-testid="house-mute-all"
+            disabled="@(powered.Count == 0)" @onclick="@(() => SetAllMutedAsync(powered, !allMuted))">
+      @(allMuted ? "Unmute all" : "Mute all")
+    </button>
+    <button type="button" class="house-audio-action" data-testid="house-all-off"
+            disabled="@(powered.Count == 0)" @onclick="@(() => TurnAllOffAsync(zones))">
+      All off
+    </button>
+    @* Never disabled: this is where a missing or wrong password gets entered. *@
+    <button type="button" class="house-audio-action" data-testid="house-controller-settings"
+            @onclick="@(() => _controllerSettingsOpen = true)">
+      Controller settings
+    </button>
+  </header>
+
+  @if (zones.Count > 0)
+  {
+    <div class="house-zone-grid">
+      @foreach (HouseZone zone in zones)
+      {
+        <HouseZoneCard @key="@((zone.ControllerId, zone.ZoneId))"
+                       Zone="@zone"
+                       Sources="@(_snapshot?.Sources ?? [])"
+                       Stale="@stale"
+                       Tuned="@IsTuned(zone)"
+                       OnPower="@(() => SetPowerAsync(zone))"
+                       OnMute="@(() => SetMutedAsync(zone))"
+                       OnVolumeCommitted="@(volume => SetVolumeAsync(zone, volume))"
+                       OnSource="@(sourceId => SetSourceAsync(zone, sourceId))"
+                       OnTune="@(() => _tunedZone = (zone.ControllerId, zone.ZoneId))" />
+      }
+    </div>
+  }
+  else if (EmptyText is { } empty)
+  {
+    <div class="house-audio-empty" data-testid="house-audio-empty">@empty</div>
+  }
+
+  @if (tuned is not null)
+  {
+    <HouseZoneSettingsPopover @key="@((tuned.ControllerId, tuned.ZoneId))"
+                              Zone="@tuned"
+                              Stale="@stale"
+                              Closing="@_tunedClosing"
+                              Error="@_commandError"
+                              OnSetting="@(setting => SetSettingAsync(tuned, setting))"
+                              OnMaxVolume="@(maxVolume => SetMaxVolumeAsync(tuned, maxVolume))"
+                              OnDelete="@(() => DeleteZoneAsync(tuned))"
+                              OnClose="CloseTunedAsync" />
+  }
+
+  @if (_controllerSettingsOpen)
+  {
+    <HouseControllerSettingsPanel Snapshot="@_snapshot"
+                                  Closing="@_controllerClosing"
+                                  OnSaved="ApplySaved"
+                                  OnClose="CloseControllerSettingsAsync" />
+  }
+</section>
+
+@code {
+  /// <summary>How long a closing panel stays up. <c>house-slide-out</c> in design-system.css runs this long.</summary>
+  internal static readonly TimeSpan DefaultSlideDuration = TimeSpan.FromMilliseconds(200);
+
+  /// <summary>Zero removes a closing panel at once.</summary>
+  [Parameter] public TimeSpan SlideDuration { get; set; } = DefaultSlideDuration;
+
+  private readonly HouseAudioCommandLedger _ledger = new();
+  private HouseAudioPoller _poller = default!;
+  private HouseAudioSnapshot? _snapshot;
+
+  // Shown beside the health line, never instead of it. Clears at the next command or the next
+  // non-stale snapshot, which comes from a poll begun after the command ended.
+  private string? _commandError;
+  private bool _disposed;
+
+  // The room whose settings are open. Ids, because two zones can share a name.
+  private (int ControllerId, int ZoneId)? _tunedZone;
+  private bool _tunedClosing;
+  private bool _controllerSettingsOpen;
+  private bool _controllerClosing;
+
+  // With no rooms and a failed poll, the health line already says what is wrong.
+  private string? EmptyText => _snapshot?.Health switch
+  {
+    null => "Connecting to the controller.",
+    HouseAudioHealth.Ok => "No rooms to show.",
+    _ => null
+  };
+
+  private string? HealthText => _snapshot?.Health switch
+  {
+    null or HouseAudioHealth.Ok => null,
+    HouseAudioHealth.Unreachable or HouseAudioHealth.AmpDisconnected => $"{Reason(_snapshot.Health)} Retrying.",
+    _ => Reason(_snapshot.Health)
+  };
+
+  private bool IsTuned(HouseZone zone) => _tunedZone == (zone.ControllerId, zone.ZoneId);
+
+  internal static string Reason(HouseAudioHealth health) => health switch
+  {
+    HouseAudioHealth.Ok => "The controller refused it.",
+    HouseAudioHealth.AmpDisconnected => "The controller can't reach the amp.",
+    HouseAudioHealth.WrongPassword => "The controller refused the password. Enter it in Controller settings.",
+    HouseAudioHealth.NoPassword => "No controller password is saved. Enter it in Controller settings.",
+    _ => "Can't reach the controller."
+  };
+
+  protected override void OnInitialized()
+  {
+    _poller = CreatePoller();
+    _poller.Updated += snapshot =>
+    {
+      // Runs under the poller's lock, so this read cannot pass a release. It must be here, not in the
+      // queued work, or a snapshot raised before a release and handled after it would pass for new.
+      long releases = _ledger.Releases;
+      _ = InvokeAsync(() => ShowSnapshot(snapshot, releases));
+    };
+
+    _poller.Start();
+  }
+
+  private void ShowSnapshot(HouseAudioSnapshot snapshot, long releases)
+  {
+    // Queued before this component was disposed.
+    if (_disposed || !_ledger.Accept(snapshot, releases))
+    {
+      return;
+    }
+
+    _snapshot = snapshot;
+    if (!snapshot.Stale)
+    {
+      _commandError = null;
+    }
+
+    // Closed for good, so the room's return is not a request to reopen it.
+    if (_tunedZone is not null && !_ledger.Zones.Any(IsTuned))
+    {
+      _tunedZone = null;
+      _tunedClosing = false;
+    }
+
+    StateHasChanged();
+  }
+
+  private async Task CloseTunedAsync()
+  {
+    if (_tunedClosing)
+    {
+      return;
+    }
+
+    (int ControllerId, int ZoneId)? closing = _tunedZone;
+    _tunedClosing = true;
+    await WaitForSlideAsync();
+
+    // The room can go, and another room's settings open, while this one slides out.
+    if (_tunedZone == closing)
+    {
+      _tunedZone = null;
+      _tunedClosing = false;
+    }
+  }
+
+  private async Task CloseControllerSettingsAsync()
+  {
+    if (_controllerClosing)
+    {
+      return;
+    }
+
+    _controllerClosing = true;
+    await WaitForSlideAsync();
+    _controllerSettingsOpen = false;
+    _controllerClosing = false;
+  }
+
+  private async Task WaitForSlideAsync()
+  {
+    if (SlideDuration > TimeSpan.Zero)
+    {
+      await Task.Delay(SlideDuration);
+    }
+  }
+
+  // Shows a saved name or source until the next poll replaces it with what the controller reports.
+  private void ApplySaved(Func<HouseAudioSnapshot, HouseAudioSnapshot> change)
+  {
+    if (_snapshot is not null)
+    {
+      _snapshot = change(_snapshot);
+    }
+  }
+
+  private Task SetPowerAsync(HouseZone zone)
+  {
+    bool on = !zone.Power;
+    return RunAsync([zone.Name], shown => shown with { Power = on }, $"{zone.Name} power was not changed.",
+      () => Api.SetPowerAsync(zone.Name, on));
+  }
+
+  private Task SetMutedAsync(HouseZone zone)
+  {
+    bool muted = !zone.Muted;
+    return RunAsync([zone.Name], shown => shown with { Muted = muted }, $"{zone.Name} mute was not changed.",
+      () => Api.SetMuteAsync(zone.Name, muted));
+  }
+
+  private Task SetVolumeAsync(HouseZone zone, int volume) =>
+    RunAsync([zone.Name], shown => shown with { Volume = volume }, $"{zone.Name} volume was not changed.",
+      () => Api.SetVolumeAsync(zone.Name, volume));
+
+  private Task SetSourceAsync(HouseZone zone, int sourceId) =>
+    RunAsync([zone.Name], shown => shown with { SourceId = sourceId }, $"{zone.Name} source was not changed.",
+      () => Api.SetSourceAsync(zone.Name, sourceId));
+
+  private Task SetSettingAsync(HouseZone zone, HouseZoneSetting setting) =>
+    RunAsync([zone.Name], shown => Apply(shown, setting), $"{zone.Name} {Label(setting.Parameter)} was not changed.",
+      () => Api.SetParameterAsync(zone.Name, (int)setting.Parameter, setting.Value));
+
+  // The controller brings a room's volume down to a new maximum, so the card comes down with it.
+  private Task SetMaxVolumeAsync(HouseZone zone, int maxVolume) =>
+    RunAsync([zone.Name], shown => shown with { MaxVolume = maxVolume, Volume = Math.Min(shown.Volume, maxVolume) },
+      $"{zone.Name} Maximum Volume was not changed.", () => Api.SetMaxVolumeAsync(zone.Name, maxVolume));
+
+  // The card stays until a poll reports the room gone, as the controller is the record of what exists.
+  private async Task DeleteZoneAsync(HouseZone zone)
+  {
+    bool deleted = await RunAsync([zone.Name], shown => shown, $"{zone.Name} was not deleted.", () => Api.DeleteZoneAsync(zone.Name));
+
+    // Another room's settings may have been opened while this was in flight.
+    if (deleted && IsTuned(zone))
+    {
+      await CloseTunedAsync();
+    }
+  }
+
+  private static HouseZone Apply(HouseZone zone, HouseZoneSetting setting) => setting.Parameter switch
+  {
+    HouseZoneParameter.Bass => zone with { Bass = setting.Value },
+    HouseZoneParameter.Treble => zone with { Treble = setting.Value },
+    HouseZoneParameter.Loudness => zone with { Loudness = setting.Value != 0 },
+    HouseZoneParameter.Balance => zone with { Balance = setting.Value },
+    HouseZoneParameter.TurnOnVolume => zone with { TurnOnVolume = setting.Value },
+    HouseZoneParameter.DoNotDisturb => zone with { DoNotDisturb = setting.Value != 0 },
+    HouseZoneParameter.PartyMode => zone with { PartyMode = setting.Value },
+    _ => zone
+  };
+
+  private static string Label(HouseZoneParameter parameter) => parameter switch
+  {
+    HouseZoneParameter.TurnOnVolume => "Turn On Volume",
+    HouseZoneParameter.DoNotDisturb => "Do Not Disturb",
+    HouseZoneParameter.PartyMode => "Party Mode",
+    _ => parameter.ToString()
+  };
+
+  // The controller's all-room mute acts only on powered rooms, so that is what is held and shown.
+  private Task SetAllMutedAsync(IReadOnlyList<HouseZone> powered, bool muted) =>
+    RunAsync(powered.Select(zone => zone.Name).ToList(), shown => shown with { Muted = muted },
+      $"The rooms were not {(muted ? "muted" : "unmuted")}.", () => Api.SetAllMuteAsync(muted));
+
+  private Task TurnAllOffAsync(IReadOnlyList<HouseZone> zones) =>
+    RunAsync(zones.Select(zone => zone.Name).ToList(), shown => shown with { Power = false },
+      "The rooms were not turned off.", () => Api.SetAllPowerAsync(false));
+
+  /// <summary>
+  /// Sends one command with its rooms held, and returns whether the controller accepted it. The hold
+  /// ends in <c>finally</c>, as a leaked one freezes the room. A command is not cancelled by leaving
+  /// the tab or the page: it may already have reached the amp, and it ends on the client's own timeout.
+  /// </summary>
+  private async Task<bool> RunAsync(
+    IReadOnlyList<string> zoneNames,
+    Func<HouseZone, HouseZone> change,
+    string failure,
+    Func<Task<HouseAudioResult<bool>>> send)
+  {
+    _commandError = null;
+    HouseAudioCommand command = _ledger.Begin(zoneNames, change);
+    List<IDisposable> holds = zoneNames.Select(_poller.HoldZone).ToList();
+
+    HouseAudioResult<bool> result;
+    try
+    {
+      result = await send();
+    }
+    finally
+    {
+      holds.ForEach(hold => hold.Dispose());
+      _ledger.Release(command);
+    }
+
+    if (result is { Health: HouseAudioHealth.Ok, Value: true })
+    {
+      return true;
+    }
+
+    _ledger.Fail(command);
+    if (!_disposed)
+    {
+      _commandError = $"{failure} {Reason(result.Health)}";
+      StateHasChanged();
+    }
+
+    return false;
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    _disposed = true;
+    await _poller.DisposeAsync();
+  }
+}

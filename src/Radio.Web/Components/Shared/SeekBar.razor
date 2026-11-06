@@ -3,13 +3,18 @@
 
 @* SeekBar — drag-to-seek with SEEK ON RELEASE (AUD-28 owner ruling 2026-09-25; UI-16 by analogy).
 
-   ⛔ OnSeek fires ONCE per gesture, when the pointer is released. Nothing during the drag reaches it,
-   and there is no debounce or throttle — option (2) in archive/queue/AUD-28.md was declined by the owner.
+   ⛔ OnSeek fires AT MOST ONCE per gesture, when the pointer is released, and not at all if the bar turned
+   Disabled during the drag. Nothing during the drag reaches it, and there is no debounce or throttle — option (2) in archive/queue/AUD-28.md was declined by the owner.
    The accepted cost is silence-then-jump: no audible response while dragging, and no scrub preview.
 
    OnScrub is the readout channel: it carries the fraction under the finger while the drag is live, so a
    parent can move its time text with the thumb, and null once the drag is over (committed or
    cancelled). It is display-only — a parent must never seek from it.
+
+   With RelativeDragSlop set, the bar moves only by the finger's travel, so a tap anywhere does nothing
+   and a drag can start anywhere without the thumb jumping to it (owner ruling for the House Audio
+   sliders, where a stray tap must not jump a room's volume). Without it, a tap seeks, as a media scrubber
+   should.
 
    The hit area (.seek-bar) is a padded box around the thin visible track; the geometry and the gesture
    live in js/seek-bar.js because only the browser has the rendered box. *@
@@ -35,13 +40,19 @@
   /// <summary>Playback position as a fraction in [0, 1]. Ignored while a drag or its commit is in flight.</summary>
   [Parameter] public double Fraction { get; set; }
 
-  /// <summary>When true the gesture is ignored (the JS reads aria-disabled at pointerdown) and no thumb renders.</summary>
+  /// <summary>
+  /// When true the gesture is ignored (the JS reads aria-disabled at pointerdown) and no thumb renders.
+  /// A drag already under way when this turns true ends without a seek.
+  /// </summary>
   [Parameter] public bool Disabled { get; set; }
 
   /// <summary>Fraction under the finger while dragging; null when the drag ends. Display only — never seek from it.</summary>
   [Parameter] public EventCallback<double?> OnScrub { get; set; }
 
-  /// <summary>The single commit for a gesture, raised on release with the release fraction in [0, 1].</summary>
+  /// <summary>
+  /// The commit for a gesture, raised on release with the release fraction in [0, 1]. Not raised for a
+  /// drag during which the bar turned <see cref="Disabled"/>, or, with <see cref="RelativeDragSlop"/>, for a tap.
+  /// </summary>
   [Parameter] public EventCallback<double> OnSeek { get; set; }
 
   [Parameter] public string? AriaLabel { get; set; }
@@ -49,6 +60,13 @@
   [Parameter] public string? AriaValueMax { get; set; }
   [Parameter] public string? AriaValueNow { get; set; }
   [Parameter] public string? AriaValueText { get; set; }
+
+  /// <summary>
+  /// When set, the bar moves by the finger's travel from wherever it pressed, and a press that travels
+  /// less than this fraction of the bar before release is a tap, which does nothing. Decided here, not
+  /// in the script, because the script reports a tap and a drag the same way.
+  /// </summary>
+  [Parameter] public double? RelativeDragSlop { get; set; }
 
   /// <summary>Extra classes on the hit-area element.</summary>
   [Parameter] public string? Class { get; set; }
@@ -65,6 +83,12 @@
   // re-render with the pre-seek position (the 1 Hz layout tick, a poll) cannot yank the thumb back
   // before the seek has been sent. Cleared once OnSeek has completed.
   private double? _dragFraction;
+
+  // Relative drag only: where the finger pressed, and where the bar was once the finger passed the slop.
+  // A null start means it has not, so this is still a tap, and the press has changed nothing the bar
+  // shows: Fraction, or an earlier drag's value while its commit is in flight.
+  private double _pressFraction;
+  private double? _dragStartFraction;
 
   private string CssClass =>
     "seek-bar"
@@ -113,13 +137,36 @@
       return;
     }
 
+    if (RelativeDragSlop is { } slop)
+    {
+      if (!_dragging)
+      {
+        _dragging = true;
+        _pressFraction = fraction;
+        _dragStartFraction = null;
+        return;
+      }
+
+      if (_dragStartFraction is null)
+      {
+        if (Math.Abs(fraction - _pressFraction) < slop)
+        {
+          return;
+        }
+
+        _dragStartFraction = DisplayFraction;
+      }
+
+      fraction = RelativeTarget(fraction);
+    }
+
     _dragging = true;
     _dragFraction = Math.Clamp(fraction, 0, 1);
     StateHasChanged();
     await OnScrub.InvokeAsync(_dragFraction);
   });
 
-  /// <summary>Pointer released: the one seek for this gesture.</summary>
+  /// <summary>Pointer released: the gesture's seek, if it has one.</summary>
   [JSInvokable]
   public Task OnDragEnd(double fraction) => InvokeAsync(async () =>
   {
@@ -130,6 +177,21 @@
     }
 
     _dragging = false;
+
+    // Disabled under the finger, as a room turned off mid-drag is, or still a tap: no seek. The bar may
+    // still be holding a value, which ends here: this drag's own, if it moved before the bar was
+    // disabled, or an earlier commit's, whose finally left that to this press because it had started.
+    if (Disabled || (RelativeDragSlop is not null && _dragStartFraction is null))
+    {
+      await EndHoldAsync();
+      return;
+    }
+
+    if (RelativeDragSlop is not null && !double.IsNaN(fraction))
+    {
+      fraction = RelativeTarget(fraction);
+    }
+
     var target = Math.Clamp(double.IsNaN(fraction) ? _dragFraction ?? 0 : fraction, 0, 1);
     _dragFraction = target;
     StateHasChanged();
@@ -143,9 +205,7 @@
       // A new drag may have started while the seek was in flight; it owns the display now.
       if (!_dragging)
       {
-        _dragFraction = null;
-        StateHasChanged();
-        await OnScrub.InvokeAsync(null);
+        await EndHoldAsync();
       }
     }
   });
@@ -160,10 +220,23 @@
     }
 
     _dragging = false;
+    await EndHoldAsync();
+  });
+
+  private double RelativeTarget(double fraction) => (_dragStartFraction ?? 0) + fraction - _pressFraction;
+
+  // The bar goes back to Fraction. A tap that held nothing has nothing to tell the parent.
+  private async Task EndHoldAsync()
+  {
+    if (_dragFraction is null)
+    {
+      return;
+    }
+
     _dragFraction = null;
     StateHasChanged();
     await OnScrub.InvokeAsync(null);
-  });
+  }
 
   public async ValueTask DisposeAsync()
   {

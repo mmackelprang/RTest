@@ -8441,3 +8441,688 @@ body:has(.icb-scrim) .encoder-selector-overlay {
     transform: none;
   }
 }
+
+
+/* ─── House Audio (Settings tab) ──────────────────────────────────────────────
+   Components/Shared/HouseAudio. Six rooms, three across, in what the tab really gets: the content
+   area is 600 px, but .has-dock takes 64 px of that on /system, and the tab strip takes its padding
+   from the rest, leaving 504 px (measured). So the grid divides the height it is given rather than
+   assuming one, and every control sits at --touch-preferred. Nothing here reacts to hover: this is
+   a touch panel. */
+
+/* Radzen sizes a tab panel to its content, so height: 100% below would otherwise resolve to nothing. */
+.rz-tabview-panel:has(> .house-audio-panel) {
+  height: 100%;
+}
+
+.house-audio-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.house-audio-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--touch-preferred);
+}
+
+.house-audio-name {
+  flex: none;
+  max-width: 420px;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-high);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Takes the free width even when empty, so a message never moves the buttons. */
+.house-audio-status-slot {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--sp-2);
+}
+
+.house-audio-status {
+  display: block;
+  font-size: 14px;
+  line-height: 1.25;
+  color: var(--signal-amber);
+}
+
+.house-audio-action,
+.house-zone-tune,
+.house-zone-power,
+.house-zone-mute,
+.house-zone-source,
+.house-source-option,
+.house-settings-button {
+  min-height: var(--touch-preferred);
+  border: none;
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  color: var(--text-medium);
+  font-family: var(--font-body);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.house-audio-action:active:not(:disabled),
+.house-zone-tune:active:not(:disabled),
+.house-zone-power:active,
+.house-zone-mute:active:not(:disabled),
+.house-zone-source:active:not(:disabled),
+.house-source-option:active,
+.house-settings-button:active:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.house-audio-action:disabled,
+.house-zone-tune:disabled,
+.house-zone-mute:disabled,
+.house-zone-source:disabled,
+.house-settings-button:disabled {
+  color: var(--text-low);
+  cursor: default;
+}
+
+/* Both settings panels leave and enter past the screen's right edge. The opening rule ends at no
+   transform at all: a transform left on a panel would capture anything fixed inside it. */
+@keyframes house-slide-in {
+  from { transform: translateX(calc(100% + var(--sp-4))); }
+}
+
+@keyframes house-slide-out {
+  to { transform: translateX(calc(100% + var(--sp-4))); }
+}
+
+.house-settings-popover,
+.house-controller-panel {
+  animation: house-slide-in 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* HouseAudioPanel.DefaultSlideDuration keeps a closing panel up for this long. */
+.house-settings-popover.is-closing,
+.house-controller-panel.is-closing {
+  animation: house-slide-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+.house-audio-action {
+  flex: none;
+  padding: 0 var(--sp-5);
+  font-size: 15px;
+}
+
+.house-audio-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-medium);
+}
+
+/* ⚠ overflow stays visible: the source list must be able to cross into the next row. The amp has
+   six zones, so two rows always hold them. */
+.house-zone-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  min-height: 0;
+}
+
+.house-zone-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--sp-1);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.house-zone-head,
+.house-zone-volume {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.house-zone-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-high);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.house-zone-card.is-off .house-zone-name { color: var(--text-medium); }
+
+.house-zone-card.is-tuned { outline: 2px solid var(--accent-primary); }
+
+.house-zone-stale {
+  flex: none;
+  font-size: 13px;
+  color: var(--signal-amber);
+}
+
+.house-zone-tune,
+.house-zone-power {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--touch-preferred);
+  padding: 0;
+}
+
+/* The control the owner silences a room with, and the only thing that says a room is on, so on and
+   off differ in more than a shade. */
+
+.house-zone-power[aria-pressed="true"] {
+  background: var(--signal-amber);
+  color: var(--text-inverse);
+}
+
+.house-zone-power[aria-pressed="true"]:active { background: var(--signal-amber); opacity: 0.8; }
+
+.house-zone-mute {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-preferred);
+  padding: 0;
+}
+
+.house-zone-mute[aria-pressed="true"] {
+  background: var(--signal-amber);
+  color: var(--text-inverse);
+}
+
+.seek-bar.house-zone-slider {
+  flex: 1;
+  min-width: 0;
+  height: var(--touch-preferred);
+}
+
+.house-zone-level {
+  flex: none;
+  width: 36px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--text-medium);
+  text-align: right;
+}
+
+.house-zone-source {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 0 var(--sp-3);
+  font-size: 15px;
+  color: var(--accent-primary);
+  text-align: left;
+}
+
+.house-zone-source-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Same tiers as OutputPickerDropdown's layer and popover. */
+.house-source-away {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.house-source-list {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* The bottom row opens upward, so the list stays inside the grid. */
+.house-zone-card:nth-child(n + 4) .house-source-list {
+  top: auto;
+  bottom: 0;
+}
+
+.house-source-option {
+  flex: none;
+  padding: 0 var(--sp-4);
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px;
+  color: var(--text-high);
+  text-align: left;
+}
+
+.house-source-option.is-active {
+  background: var(--accent-surface);
+  color: var(--accent-primary);
+}
+
+/* ─── Room settings popover ──────────────────────────────────────────────────
+   Nine rows do not fit the tab's 504 px, nor the 536 px .page-transition gives its child, so this is
+   the one overlay here that must leave that box. The child's transform makes it the containing block
+   for anything fixed, and a stacking context under the dock, so the rule below lifts that while the
+   popover is open. It then sits under the top bar and over the dock, which the owner allows. */
+.page-transition > :has(.house-settings-popover),
+.page-transition > :has(.house-controller-panel) {
+  transform: none;
+  will-change: auto;
+}
+
+.house-settings-away {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Height is stated in rows, so the delete question can swap them out and the box does not move: a
+   tap that lands where a shrunken box used to be would otherwise close it. */
+.house-settings-popover {
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--sp-2));
+  right: var(--sp-4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  box-sizing: border-box;
+  width: 440px;
+  height: calc(9 * var(--touch-preferred) + 8 * var(--sp-1) + 2 * var(--sp-2) + 2px);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.house-settings-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--touch-preferred);
+}
+
+.house-settings-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-high);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Three lines at most: the longest message the panel builds, with the longest room name, measured. */
+.house-settings-error {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--signal-amber);
+}
+
+.house-settings-label {
+  flex: none;
+  width: 128px;
+  font-size: 15px;
+  color: var(--text-medium);
+}
+
+/* A well, not --surface-elevated, which all but vanishes on --surface-overlay (measured by eye). */
+.house-settings-button {
+  padding: 0 var(--sp-3);
+  background: var(--surface-base);
+  font-size: 15px;
+}
+
+.house-settings-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-preferred);
+  padding: 0;
+  background: transparent;
+}
+
+.house-settings-segments {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.house-settings-segments .house-settings-button {
+  flex: 1;
+  border-radius: 0;
+}
+
+.house-settings-segments .house-settings-button[aria-pressed="true"] {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+
+.house-settings-half {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.house-settings-half .house-settings-label { width: auto; }
+
+/* The whole 64 x 56 box is the target; the switch is drawn inside it. */
+.house-settings-switch {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: var(--touch-preferred);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.house-settings-switch::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: 4px;
+  left: 4px;
+  box-sizing: border-box;
+  height: 28px;
+  border: 1px solid var(--text-low);
+  border-radius: 14px;
+  background: var(--surface-base);
+}
+
+.house-settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 18px;
+  left: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--text-medium);
+}
+
+.house-settings-switch[aria-pressed="true"]::before {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+}
+
+.house-settings-switch[aria-pressed="true"]::after {
+  left: 36px;
+  background: var(--text-inverse);
+}
+
+.house-settings-stepper {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.house-settings-stepper .house-settings-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-preferred);
+  padding: 0;
+}
+
+.house-settings-value {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--text-high);
+  text-align: center;
+}
+
+.seek-bar.house-settings-slider {
+  flex: 1;
+  min-width: 0;
+  height: var(--touch-preferred);
+}
+
+.house-settings-choice { flex: 1; }
+
+.house-settings-danger { color: var(--signal-red); }
+
+.house-settings-prompt {
+  flex: none;
+  margin: 0;
+  padding: var(--sp-2) 0;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text-high);
+}
+
+/* ─── Controller settings ────────────────────────────────────────────────────
+   Two columns, because six sources of 56 px, the rows above them and About do not fit one. No text
+   field here, and none may be added: the keyboard covers everything below y = 348. Fields live in the
+   entry card below, which .kiosk-entry-overlay (§20a) hangs from the top of the screen. That needs the
+   lifted transform above: under it, the overlay would be bounded by the content area and the card
+   would start at y = 144, with room for only the shortest form above the keyboard. */
+.house-controller-panel {
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--sp-2));
+  right: var(--sp-4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  box-sizing: border-box;
+  width: 880px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.house-controller-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.house-controller-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.house-controller-heading {
+  flex: none;
+  padding-top: var(--sp-1);
+  font-size: 13px;
+  line-height: 20px;
+  letter-spacing: 0.06em;
+  color: var(--text-medium);
+  text-transform: uppercase;
+}
+
+.house-controller-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+}
+
+.house-controller-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-high);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.house-controller-row:disabled .house-controller-text,
+.house-controller-row:disabled .house-controller-edit {
+  color: var(--text-low);
+}
+
+.house-controller-input {
+  flex: none;
+  width: 58px;
+  font-size: 14px;
+  color: var(--text-medium);
+}
+
+.house-controller-type {
+  flex: none;
+  max-width: 124px;
+  overflow: hidden;
+  font-size: 14px;
+  color: var(--text-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.house-controller-edit,
+.house-controller-add { color: var(--accent-primary); }
+
+.house-controller-edit { flex: none; font-size: 14px; }
+
+.house-controller-fact {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  height: 28px;
+  font-size: 14px;
+  color: var(--text-medium);
+}
+
+.house-controller-fact span:last-child { color: var(--text-high); }
+
+.house-controller-fact span.is-down { color: var(--signal-amber); }
+
+.house-controller-note {
+  padding: var(--sp-2) 0;
+  font-size: 15px;
+  color: var(--text-medium);
+}
+
+/* A source form with a two-line error still ends above y = 348, so its buttons stay clear too. */
+.kiosk-entry-card.house-entry-card {
+  box-sizing: border-box;
+  width: 560px;
+  max-width: 560px;
+  padding: var(--sp-4);
+}
+
+/* Twenty types, four across: five rows of 56 px. The keyboard has gone by then, as focus left the field. */
+.kiosk-entry-card.house-entry-card.is-picking {
+  width: 780px;
+  max-width: 780px;
+}
+
+.house-entry-card input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--touch-preferred);
+}
+
+.house-entry-pickers {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.house-entry-picker {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  color: var(--text-high);
+}
+
+.house-entry-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-1);
+}
+
+.house-entry-option { color: var(--text-high); }
+
+.house-entry-option.is-active {
+  background: var(--accent-surface);
+  color: var(--accent-primary);
+}
+
+.house-entry-error {
+  overflow-wrap: anywhere;
+  margin: var(--sp-2) 0 0;
+  font-size: 14px;
+  line-height: 1.25;
+  color: var(--signal-amber);
+}
+
+.house-entry-prompt {
+  overflow-wrap: anywhere;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text-high);
+}
+
+.house-entry-left.rz-button { margin-right: auto; }
