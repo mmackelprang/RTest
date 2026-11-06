@@ -767,7 +767,8 @@ policy behaves: [fingerprinting.md § Call policy](fingerprinting.md#call-policy
 | `ScanStepDelayMs` | `int` | `100` | Time to wait between frequency steps during scanning (milliseconds) |
 | `DefaultDeviceVolume` | `int` | `50` | Default device volume (0-100) |
 | `AutoGain` | `bool` | `false` | Whether the SDR tuner starts on automatic gain. Off because automatic gain overloaded the device on strong FM stations. Applies to every tuner band, not AM or Shortwave. The panel's switch lasts until the next restart |
-| `TunerGainDb` | `float` | `30` | SDR tuner gain in dB when `AutoGain` is false. Signal readings scale with it, so a change moves every station against `ScanStopThreshold` |
+| `TunerGainDb` | `float` | `30` | SDR tuner gain in dB when `AutoGain` is false. Signal readings scale with it, so a change moves every station against `ScanStopThreshold` and `SquelchThreshold` |
+| `SquelchThreshold` | `float` | `0` | Squelch threshold (0-1), on the signal strength's linear scale. 0 leaves it open. A closed squelch is exact digital silence, and at a fixed gain weak stations read low |
 
 ---
 

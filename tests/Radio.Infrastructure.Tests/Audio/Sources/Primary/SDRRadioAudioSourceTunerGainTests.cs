@@ -39,6 +39,24 @@ public class SDRRadioAudioSourceTunerGainTests
     Assert.Equal(22f, receiver.Gain);
   }
 
+  // At 30 dB weak stations read under the receiver's own 0.1 default, and a closed squelch is exact
+  // digital silence. Under automatic gain it was effectively never closed, so it stays open.
+  [Fact]
+  public void ByDefault_TheSquelchIsOpen()
+  {
+    (_, RadioReceiver receiver) = Build(new RadioOptions());
+
+    Assert.Equal(0f, receiver.SquelchThreshold);
+  }
+
+  [Fact]
+  public void TheConfiguredSquelch_ReachesTheReceiver()
+  {
+    (_, RadioReceiver receiver) = Build(new RadioOptions { SquelchThreshold = 0.2f });
+
+    Assert.Equal(0.2f, receiver.SquelchThreshold);
+  }
+
   [Fact]
   public void AutomaticGain_CanBeConfiguredBackOn()
   {

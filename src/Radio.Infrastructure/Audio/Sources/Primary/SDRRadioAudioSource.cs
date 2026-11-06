@@ -110,6 +110,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     // the panel lasts until the next restart.
     _radioReceiver.Gain = options.TunerGainDb;
     _radioReceiver.AutoGainEnabled = options.AutoGain;
+    _radioReceiver.SquelchThreshold = options.SquelchThreshold;
 
     // Subscribe to RTLSDRCore events and translate to Radio.Core events
     _radioReceiver.FrequencyChanged += OnRTLSDRFrequencyChanged;

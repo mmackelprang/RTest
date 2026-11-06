@@ -81,8 +81,19 @@ public class RadioOptions
   /// </summary>
   /// <remarks>
   /// 30 was measured on the appliance: the overload clears on 97.7 MHz, and stereo and RDS hold. It
-  /// suits that antenna and those stations. Signal readings scale with it, so a change here moves
-  /// every station against <see cref="ScanStopThreshold"/>.
+  /// suits that antenna, and it was only measured on that station. Signal readings scale with it,
+  /// so a change here moves every station against <see cref="ScanStopThreshold"/> and
+  /// <see cref="SquelchThreshold"/>.
   /// </remarks>
   public float TunerGainDb { get; set; } = 30f;
+
+  /// <summary>
+  /// Gets or sets the squelch threshold (0-1), on the same linear scale as the signal strength. 0
+  /// leaves the squelch open.
+  /// </summary>
+  /// <remarks>
+  /// Open, because a closed squelch is exact digital silence with nothing on the panel to say why,
+  /// and at a fixed gain weak stations read below the receiver's own 0.1 default.
+  /// </remarks>
+  public float SquelchThreshold { get; set; }
 }

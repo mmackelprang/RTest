@@ -1514,8 +1514,10 @@ namespace RTLSDRCore;
       /// the RMS covers f−180…f+60 kHz rather than f±120 kHz. On the in-channel scale the 0.1
       /// default would sit at −54 dBFS, and on the box (2026-10-12) empty Aircraft channels read
       /// −18 to −26 dBFS in the channel with the tuner's AGC holding the noise up. On the wideband
-      /// scale 121.5 MHz read 0.25 and the channels a seek passed 0.22-0.25, also above 0.1: the squelch is open on empty
-      /// channels either way (see archive/queue/AUD-101.md, box UAT).
+      /// scale 121.5 MHz read 0.25 and the channels a seek passed 0.22-0.25, also above 0.1: under
+      /// automatic gain the squelch was open on empty channels either way (see
+      /// archive/queue/AUD-101.md, box UAT). The appliance now starts at a fixed gain, with the
+      /// squelch set from <c>RadioOptions.SquelchThreshold</c>, so those readings are history.
       /// </para>
       /// </remarks>
       private bool SquelchApplies => !HfBands.Requires(Volatile.Read(ref _currentBand).Type);
@@ -2436,8 +2438,8 @@ namespace RTLSDRCore;
           }
 
           // AUD-101: the in-channel dB scale on the HF bands (AM, Shortwave) only. Aircraft keeps
-          // the wideband RMS even though its audio goes through the AM chain: in tuner mode the
-          // tuner's AGC holds the noise high, and on the box an empty Aircraft channel read
+          // the wideband RMS even though its audio goes through the AM chain: under automatic gain
+          // the tuner's AGC holds the noise high, and on the box an empty Aircraft channel read
           // -18 to -26 dBFS in the channel, over the -30 dBFS that the 50 % seek stop means on the
           // dB scale and far over the -54 dBFS of the 0.1 squelch.
           _lastSignalStrength = am != null && hfBand ? am.Strength : WidebandSignalStrength(samples);
