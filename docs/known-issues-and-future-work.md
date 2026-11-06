@@ -31,7 +31,7 @@ open. Live work items are tracked in [BUILDER_QUEUE.md](BUILDER_QUEUE.md).
 
 **Queued rows:** `AUD-19` (pre-GA by owner ruling; built and held for UAT), `PHN-7`, `PHN-8`, `PHN-9`,
 `AUD-18`, `AUD-20`, `AUD-25`, `AUD-83`, `AUD-86`, `AUD-88`, `AUD-89`, `AUD-90`, `AUD-92`, `AUD-93`, `AUD-95`,
-`UI-18`, `UI-19`, `UI-33`, `TEST-10`, `OPS-10`, `AUD-4` and `GV-7`. Each has a dossier in `queue/<ID>.md`.
+`UI-18`, `UI-19`, `UI-33`, `OPS-10`, `AUD-4` and `GV-7`. Each has a dossier in `queue/<ID>.md`.
 
 **Waiting on owner decisions:** `TEST-11` part 2 (map `pipewire-0.3` to `.so.0` in production), `UX-2` (what
 the skeleton shimmer is for), `AUD-75` (the file player's media root on the box), and `PHN-13` M3 (caller-name
@@ -3022,7 +3022,7 @@ state.
 
 ---
 
-## 33. `BluetoothAutoSwitchServiceTests.NodeArrivesAfterProbe_SwitchesViaEvent` races a wall clock
+## 33. ✅ CLOSED by `TEST-10` (2026-11-05) — `BluetoothAutoSwitchServiceTests.NodeArrivesAfterProbe_SwitchesViaEvent` raced a wall clock
 
 **Found by `GV-12`'s full-suite run, 2026-09-08.** Unrelated to that row — `Radio.Infrastructure.Tests`
 has no project reference to `Radio.Web`, so the diff could not reach it. Failed once under load,

@@ -1795,9 +1795,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       return null;
     }
 
-    var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-    var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
-    await process.WaitForExitAsync(cancellationToken);
+    var (output, stderr) = await ReadToExitAsync(process, cancellationToken);
 
     if (process.ExitCode != 0 || output.Length == 0)
     {
@@ -1808,6 +1806,34 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     }
 
     return output;
+  }
+
+  /// <summary>
+  /// Reads a redirected process to completion. Cancelling ends the process as well: disposing a
+  /// <see cref="Process"/> only releases the managed handle.
+  /// </summary>
+  internal static async Task<(string Stdout, string Stderr)> ReadToExitAsync(
+    Process process, CancellationToken cancellationToken)
+  {
+    try
+    {
+      var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+      var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+      await process.WaitForExitAsync(cancellationToken);
+      return (stdout, stderr);
+    }
+    catch (OperationCanceledException)
+    {
+      try
+      {
+        process.Kill();
+      }
+      catch (Exception)
+      {
+        // Best effort: a failed kill must not replace the cancellation the caller is waiting for.
+      }
+      throw;
+    }
   }
 
   /// <summary>
@@ -1956,7 +1982,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// parked generator (<see cref="RebindParkedCaptureAsync"/>). ⚠ The path an earlier plan named for
   /// this — NodeAppeared → CaptureNodeAvailable → BluetoothAutoSwitchService — does NOT re-arm it:
   /// that service only acts after a connect, and only when Bluetooth is NOT already the active
-  /// source (BluetoothAutoSwitchService.WaitForNodeOrTimeoutAsync). On a resume it already is.
+  /// source (BluetoothAutoSwitchService.SwitchIfStillNeededAsync). On a resume it already is.
   /// </remarks>
   internal void OnRegistryNodeDisappeared(object? sender, BtNodeRegistryEventArgs e)
   {

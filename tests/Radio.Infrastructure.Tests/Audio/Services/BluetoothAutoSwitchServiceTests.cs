@@ -35,6 +35,17 @@ public class BluetoothAutoSwitchServiceTests
 
     public int CaptureNodeAvailableSubscriberCount { get; private set; }
 
+    /// <summary>
+    /// Replaces the canned <see cref="IsCaptureNodeAvailable"/> answer, so a test can make the
+    /// probe do what the real one does: stay inside a <c>pw-cli</c> read, and throw when its
+    /// token fires.
+    /// </summary>
+    public Func<string, CancellationToken, Task<bool>>? ProbeHandler { get; set; }
+
+    /// <summary>Completes when the last CaptureNodeAvailable subscriber leaves.</summary>
+    public TaskCompletionSource AllUnsubscribed { get; } =
+      new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged
     { add { } remove { } }
     public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
@@ -68,6 +79,10 @@ public class BluetoothAutoSwitchServiceTests
         if (value != null && _captureHandlers.Remove(value))
         {
           CaptureNodeAvailableSubscriberCount = _captureHandlers.Count;
+          if (_captureHandlers.Count == 0)
+          {
+            AllUnsubscribed.TrySetResult();
+          }
         }
       }
     }
@@ -102,7 +117,7 @@ public class BluetoothAutoSwitchServiceTests
       => Task.FromResult<object?>(null);
     public void StopAudioCapture() { }
     public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
-      => Task.FromResult(IsCaptureNodeAvailable);
+      => ProbeHandler?.Invoke(deviceAddress, cancellationToken) ?? Task.FromResult(IsCaptureNodeAvailable);
     public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
     public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task PreviousTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -136,14 +151,51 @@ public class BluetoothAutoSwitchServiceTests
   {
     public bool GetOrCreateCalled { get; set; }
     public bool SwitchedToBluetooth { get; set; }
+    public int SwitchCount { get; set; }
+    public TaskCompletionSource Switched { get; } =
+      new(TaskCreationOptions.RunContinuationsAsynchronously);
   }
+
+  /// <summary>
+  /// Records the service's deferred/abandoned metrics as signals. These tests wait on what the
+  /// service reports rather than on elapsed time (<c>TEST-10</c>; <c>CLAUDE.md</c> § Test Timing).
+  /// </summary>
+  private sealed class MetricSignals
+  {
+    public Mock<IMetricsCollector> Mock { get; } = new();
+    public TaskCompletionSource Deferred { get; } =
+      new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource Abandoned { get; } =
+      new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public MetricSignals()
+    {
+      Mock.Setup(m => m.Increment(It.IsAny<string>(), It.IsAny<double>(), It.IsAny<IDictionary<string, string>?>()))
+        .Callback((string key, double _, IDictionary<string, string>? _) =>
+        {
+          if (key == "bluetooth.autoswitch_deferred_total")
+          {
+            Deferred.TrySetResult();
+          }
+          else if (key == "bluetooth.autoswitch_abandoned_total")
+          {
+            Abandoned.TrySetResult();
+          }
+        });
+    }
+  }
+
+  // Bounds a rendezvous that should complete almost at once. It only decides how long a BROKEN
+  // build takes to fail; a passing run never waits it out, so it can be generous.
+  private static readonly TimeSpan Rendezvous = TimeSpan.FromSeconds(10);
 
   private static BluetoothAutoSwitchService CreateService(
     FakeBluetoothService bt,
     Mock<IAudioManager> audioMock,
     int probeMs = 200,
     int maxWaitMs = 1000,
-    bool autoSwitchEnabled = true)
+    bool autoSwitchEnabled = true,
+    IMetricsCollector? metrics = null)
   {
     var optionsMock = new Mock<IOptionsMonitor<BluetoothOptions>>();
     optionsMock.Setup(o => o.CurrentValue).Returns(new BluetoothOptions
@@ -159,7 +211,7 @@ public class BluetoothAutoSwitchServiceTests
       bt,
       optionsMock.Object,
       () => audioMock.Object,
-      metricsCollector: null);
+      metricsCollector: metrics);
   }
 
   private static Mock<IAudioManager> MakeAudioMock(FakeAudioManagerCounters counters, AudioSourceType? activeType = null)
@@ -182,6 +234,8 @@ public class BluetoothAutoSwitchServiceTests
         if (t == AudioSourceType.Bluetooth && switchTo)
         {
           counters.SwitchedToBluetooth = true;
+          counters.SwitchCount++;
+          counters.Switched.TrySetResult();
         }
       })
       .ReturnsAsync((IAudioSource?)null);
@@ -236,12 +290,11 @@ public class BluetoothAutoSwitchServiceTests
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
     var counters = new FakeAudioManagerCounters();
     var audioMock = MakeAudioMock(counters);
-    using var svc = CreateService(bt, audioMock, probeMs: 1000, maxWaitMs: 30000);
+    using var svc = CreateService(bt, audioMock, probeMs: 60000, maxWaitMs: 60000);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    // Allow async-void handler to complete its probe — probe returns true on the first
-    // iteration because IsCaptureNodeAvailable is set.
-    await Task.Delay(150);
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+    await bt.AllUnsubscribed.Task.WaitAsync(Rendezvous);
 
     Assert.True(counters.SwitchedToBluetooth);
     Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
@@ -253,21 +306,138 @@ public class BluetoothAutoSwitchServiceTests
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = false };
     var counters = new FakeAudioManagerCounters();
     var audioMock = MakeAudioMock(counters);
-    using var svc = CreateService(bt, audioMock, probeMs: 200, maxWaitMs: 5000);
+    var metrics = new MetricSignals();
+    // maxWaitMs is far longer than any rendezvous: the deferred wait must end on the event.
+    using var svc = CreateService(bt, audioMock, probeMs: 50, maxWaitMs: 60000, metrics: metrics.Mock.Object);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
 
-    // Wait long enough for the probe window to expire and the event subscription to be active.
-    await Task.Delay(500);
+    // The probe window has expired once the service reports the deferral (TEST-10).
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
     Assert.False(counters.SwitchedToBluetooth);
-    Assert.True(bt.CaptureNodeAvailableSubscriberCount >= 1, "Expected event subscription active");
+    Assert.Equal(1, bt.CaptureNodeAvailableSubscriberCount);
 
     bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
-    // Allow async continuation to complete the switch.
-    await Task.Delay(150);
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+    await bt.AllUnsubscribed.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
+  }
+
+  [Fact]
+  public async Task ProbeCancelledInsidePwCli_FallsBackToTheEventWait()
+  {
+    // The real probe sits in a pw-cli read that honours the token, so a window expiring there
+    // brings OperationCanceledException out of the probe call itself.
+    var bt = new FakeBluetoothService
+    {
+      ProbeHandler = async (_, ct) =>
+      {
+        await Task.Delay(Timeout.Infinite, ct);
+        return false;
+      }
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, maxWaitMs: 60000, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
+
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
 
     Assert.True(counters.SwitchedToBluetooth);
-    Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
+  }
+
+  [Fact]
+  public async Task NodeArrivesDuringProbe_SwitchesWithoutWaitingOutTheFallback()
+  {
+    // The node appears while a probe is in flight, and that probe's answer predates it.
+    // Nothing raises the event again, so missing it costs the whole 60 s fallback.
+    var bt = new FakeBluetoothService();
+    bt.ProbeHandler = (address, _) =>
+    {
+      bt.RaiseCaptureNodeAvailable(address);
+      return Task.FromResult(false);
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    // A window longer than the rendezvous: the event has to end the probe, not the window.
+    using var svc = CreateService(bt, audioMock, probeMs: 60000, maxWaitMs: 60000, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.True(counters.SwitchedToBluetooth);
+    Assert.False(metrics.Deferred.Task.IsCompleted, "A node found during the probe is not a deferral");
+  }
+
+  [Fact]
+  public async Task NodeEventForAnotherDevice_DoesNotEndTheWait()
+  {
+    var bt = new FakeBluetoothService();
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, maxWaitMs: 60000, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
+
+    bt.RaiseCaptureNodeAvailable("11:22:33:44:55:66");
+    // Bounded negative check: starvation can only weaken it, never fail it (CLAUDE.md § Test Timing).
+    await Task.Delay(100);
+    Assert.False(counters.SwitchedToBluetooth);
+
+    bt.RaiseCaptureNodeAvailable("aa:bb:cc:dd:ee:ff"); // address match ignores case
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+  }
+
+  [Fact]
+  public async Task BluetoothBecomesActiveDuringProbe_DoesNotSwitchAgain()
+  {
+    // Seen on the box 2026-11-05: the Bluetooth source was picked by hand within seconds of the
+    // phone connecting. A probe that started before that must not run a second switch after it.
+    var activeSource = new Mock<IAudioSource>();
+    activeSource.Setup(s => s.Type).Returns(AudioSourceType.Bluetooth);
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var bt = new FakeBluetoothService();
+    bt.ProbeHandler = (_, _) =>
+    {
+      audioMock.Setup(m => m.ActiveSource).Returns(activeSource.Object);
+      return Task.FromResult(true);
+    };
+    using var svc = CreateService(bt, audioMock, probeMs: 60000, maxWaitMs: 60000);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await bt.AllUnsubscribed.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(0, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task BluetoothBecomesActiveDuringDeferredWait_DoesNotSwitchAgain()
+  {
+    var activeSource = new Mock<IAudioSource>();
+    activeSource.Setup(s => s.Type).Returns(AudioSourceType.Bluetooth);
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    var bt = new FakeBluetoothService();
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, maxWaitMs: 60000, metrics: metrics.Mock.Object);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await metrics.Deferred.Task.WaitAsync(Rendezvous);
+
+    audioMock.Setup(m => m.ActiveSource).Returns(activeSource.Object);
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+    await bt.AllUnsubscribed.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(0, counters.SwitchCount);
   }
 
   [Fact]
@@ -276,11 +446,12 @@ public class BluetoothAutoSwitchServiceTests
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = false };
     var counters = new FakeAudioManagerCounters();
     var audioMock = MakeAudioMock(counters);
-    using var svc = CreateService(bt, audioMock, probeMs: 100, maxWaitMs: 300);
+    var metrics = new MetricSignals();
+    using var svc = CreateService(bt, audioMock, probeMs: 50, maxWaitMs: 100, metrics: metrics.Mock.Object);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    // Wait for probe (100ms) + timeout (300ms) + slack.
-    await Task.Delay(700);
+    await metrics.Abandoned.Task.WaitAsync(Rendezvous);
+    await bt.AllUnsubscribed.Task.WaitAsync(Rendezvous);
 
     Assert.False(counters.SwitchedToBluetooth);
     Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
