@@ -59,7 +59,7 @@ public class BluetoothAutoSwitchServiceTests
     public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected;
     public event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered
     { add { } remove { } }
-    public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+    public event EventHandler? CaptureStreamRecovered;
     public event EventHandler<CaptureTargetLostEventArgs>? CaptureTargetLost { add { } remove { } }
     public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged
     { add { } remove { } }
@@ -157,6 +157,8 @@ public class BluetoothAutoSwitchServiceTests
         Reason = BluetoothDisconnectReason.Unknown
       });
     }
+
+    public void RaiseCaptureStreamRecovered() => CaptureStreamRecovered?.Invoke(this, EventArgs.Empty);
 
     public void RaiseCaptureNodeAvailable(string address)
     {
@@ -768,6 +770,89 @@ public class BluetoothAutoSwitchServiceTests
     await counters.Switched.Task.WaitAsync(Rendezvous);
 
     Assert.Equal(2, bt.CaptureRequests);
+  }
+
+  [Fact]
+  public async Task NodeEventDuringABindThatFails_IsNotLost()
+  {
+    // The bind can take 20 s, and nothing raises the event again for a node that stays up.
+    var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
+    bt.CaptureHandler = _ =>
+    {
+      if (bt.CaptureRequests == 1)
+      {
+        bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+        return Task.FromResult<object?>(null);
+      }
+      return Task.FromResult<object?>(new object());
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock, probeMs: 60000);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(1, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task BindThatFailsAndIsThenLandedByThePipelineMonitor_StillSwitches()
+  {
+    // The monitor binds a node without any node event, and a bound node stays up. Without this the
+    // phone would stream into a generator nothing reads, with the radio still playing.
+    var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
+    var bindFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    bt.CaptureHandler = _ =>
+    {
+      if (bt.CaptureRequests == 1)
+      {
+        bindFailed.TrySetResult();
+        return Task.FromResult<object?>(null);
+      }
+      return Task.FromResult<object?>(new object());
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock, probeMs: 60000);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await bindFailed.Task.WaitAsync(Rendezvous);
+    await Task.Delay(50); // so the wait is armed; starvation only makes the check weaker
+
+    bt.RaiseCaptureStreamRecovered();
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(1, counters.SwitchCount);
+  }
+
+  [Fact]
+  public async Task BindThatThrows_LeavesTheRadio_AndTheNextNodeStillSwitches()
+  {
+    var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
+    var bindThrew = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    bt.CaptureHandler = _ =>
+    {
+      if (bt.CaptureRequests == 1)
+      {
+        bindThrew.TrySetResult();
+        throw new InvalidOperationException("teardown failed");
+      }
+      return Task.FromResult<object?>(new object());
+    };
+    var counters = new FakeAudioManagerCounters();
+    var audioMock = MakeAudioMock(counters);
+    using var svc = CreateService(bt, audioMock, probeMs: 60000);
+
+    bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+    await bindThrew.Task.WaitAsync(Rendezvous);
+    await Task.Delay(50); // so the wait is armed; starvation only makes the check weaker
+    Assert.Equal(0, counters.SwitchCount);
+
+    bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
+    await counters.Switched.Task.WaitAsync(Rendezvous);
+
+    Assert.Equal(1, counters.SwitchCount);
   }
 
   [Fact]

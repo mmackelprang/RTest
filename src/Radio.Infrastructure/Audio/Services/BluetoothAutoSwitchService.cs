@@ -198,7 +198,12 @@ public class BluetoothAutoSwitchService : IDisposable
       }
     };
 
+    // The pipeline monitor can bind a node with no node event, and a bound node stays up, so this is
+    // the only signal there will be until the phone next pauses.
+    EventHandler recovered = (_, _) => Volatile.Read(ref nodeArrived).TrySetResult();
+
     _bluetoothService.CaptureNodeAvailable += handler;
+    _bluetoothService.CaptureStreamRecovered += recovered;
     try
     {
       var probeWindowMs = _bluetoothOptions.CurrentValue.AutoSwitchProbeWindowMs;
@@ -217,21 +222,32 @@ public class BluetoothAutoSwitchService : IDisposable
         await nodeArrived.Task;
       }
 
-      while (!await SwitchIfStillNeededAsync(address, deviceLeft))
+      while (true)
       {
-        // Only the next node event ends this, not another probe: a node the bind could not take
-        // while it was present must not turn into a search that repeats for as long as it stays.
+        // A new signal before each bind, so one that arrives while a bind runs and fails is kept.
+        // Interlocked for the full fence: the disconnect's callback reads this after setting the
+        // token, and this reads the token after the swap, so one of the two sees the other.
+        var next = NewSignal();
+        Interlocked.Exchange(ref nodeArrived, next);
+        deviceLeft.ThrowIfCancellationRequested();
+
+        if (await SwitchIfStillNeededAsync(address, deviceLeft))
+        {
+          return;
+        }
+
+        // Waits for a signal, not for another probe: a node the bind could not take while it was
+        // present must not turn into a search that repeats for as long as the node stays.
         _logger.LogInformation(
           "BT auto-switch: no capture could be bound for {Address}; leaving the current source and waiting for its next node",
           address);
-        Volatile.Write(ref nodeArrived, NewSignal());
-        deviceLeft.ThrowIfCancellationRequested();
-        await nodeArrived.Task;
+        await next.Task;
       }
     }
     finally
     {
       _bluetoothService.CaptureNodeAvailable -= handler;
+      _bluetoothService.CaptureStreamRecovered -= recovered;
     }
   }
 
@@ -307,13 +323,26 @@ public class BluetoothAutoSwitchService : IDisposable
   /// </summary>
   /// <remarks>
   /// This does not put anything in the mixer. The stream feeds a generator that nothing plays until
-  /// the switch starts the Bluetooth source, which picks up this same capture and routes it.
+  /// the switch starts the Bluetooth source, which picks up this capture and routes it. If the node
+  /// goes during the old source's stop, the source searches for a capture of its own instead.
   /// </remarks>
   /// <returns>Whether a capture is bound, or the platform routes the audio itself.</returns>
   private async Task<bool> BindCaptureBeforeTheSwitchAsync(CancellationToken deviceLeft)
   {
-    return _bluetoothService.IsAudioManagedByPlatform
-      || await _bluetoothService.GetAudioCaptureDeviceAsync(deviceLeft) != null;
+    if (_bluetoothService.IsAudioManagedByPlatform)
+    {
+      return true;
+    }
+
+    try
+    {
+      return await _bluetoothService.GetAudioCaptureDeviceAsync(deviceLeft) != null;
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+      _logger.LogWarning(ex, "BT auto-switch: binding the capture failed; leaving the current source");
+      return false;
+    }
   }
 
   public void Dispose()

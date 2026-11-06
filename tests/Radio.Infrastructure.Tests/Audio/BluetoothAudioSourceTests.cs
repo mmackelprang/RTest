@@ -1964,6 +1964,43 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   [Fact]
+  public async Task Play_WithAnArtistButNoTitle_ShowsTheDeviceName()
+  {
+    // A track key can exist with no title, so the key does not say whether a title is showing.
+    var btMock = BuildBtMock(NewSoundComponentMock(), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    btMock.Raise(b => b.MetadataChanged += null, btMock.Object,
+      new BluetoothPlaybackMetadata { Title = "", Artist = "The Cars" });
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.Equal("Test Phone", source.Metadata[StandardMetadataKeys.Title]);
+  }
+
+  [Fact]
+  public async Task Route_WithPrimingOff_StartsFromTheSilenceCushion_NotFromAnEmptyBuffer()
+  {
+    // CaptureTargetBufferMs = 0 restores the old 0.5 s silence pre-fill, and that cushion is the
+    // only margin this mode has.
+    var format = new global::SoundFlow.Structs.AudioFormat
+    {
+      SampleRate = 48000, Channels = 2, Format = global::SoundFlow.Enums.SampleFormat.F32
+    };
+    var generator = new Radio.Infrastructure.Audio.SoundFlow.BufferedSoundGenerator<float>(
+      null!, format, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+    generator.AddSamples(new float[96000]);
+    var btMock = BuildBtMock(generator, new CaptureAcquisitionProbe());
+    using var playback = Radio.Infrastructure.Tests.Audio.SoundFlow.DeviceFreePlaybackService.Create();
+    IAudioSource? active = null;
+    await using var source = BuildSourceWithActive(btMock, () => active, playback);
+    active = source;
+
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.Equal(48000, generator.GetDiagnostics().BufferCount);
+  }
+
+  [Fact]
   public async Task Route_DropsAudioBufferedBeforeIt()
   {
     // The bound stream feeds a generator nothing reads until this route, which can be seconds: as
@@ -1976,6 +2013,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     };
     var generator = new Radio.Infrastructure.Audio.SoundFlow.BufferedSoundGenerator<float>(
       null!, format, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+    generator.ConfigurePriming(0.1f);
     generator.AddSamples(new float[96000]);
     Assert.True(generator.GetDiagnostics().BufferCount > 0);
     var btMock = BuildBtMock(generator, new CaptureAcquisitionProbe());

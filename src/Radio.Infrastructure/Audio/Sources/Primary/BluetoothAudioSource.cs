@@ -579,9 +579,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
     var connected = _bluetoothService.ConnectedDevice;
     var connectedName = connected?.Name ?? DefaultDeviceName;
 
-    // A placeholder for when there is no track. A takeover's first acquisition lands here with the
+    // A placeholder for when no title is showing. A takeover's first acquisition lands here with the
     // phone's track already shown, and the phone sends Track only when it changes.
-    if (_currentTrackKey == null)
+    var shownTitle = MetadataInternal.GetValueOrDefault(StandardMetadataKeys.Title) as string;
+    if (string.IsNullOrEmpty(shownTitle) || shownTitle == DefaultTitle)
     {
       MetadataInternal[StandardMetadataKeys.Title] = connectedName;
     }
@@ -817,8 +818,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
         return;
       }
 
-      // M7: while another source is active, this path acquires nothing. The auto-switch binds the
-      // node and the switch starts this source, and only then is the capture routed.
+      // M7: while another source is active, this path acquires nothing. Capture reaches the mixer
+      // when this source is started: by the auto-switch, or by the owner selecting it.
       if (!IsActiveSource)
       {
         Logger.LogDebug("BluetoothAudioSource: not the active source, leaving capture to the switch");
@@ -940,8 +941,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
         //
         // Nothing has read this generator yet, and a capture bound ahead of a takeover has been
         // filling it for as long as the old source took to stop. Played from the oldest sample,
-        // that backlog would stay as seconds of latency, so start from the phone's present.
-        generator.RearmPriming();
+        // that backlog would stay as seconds of latency, so it is dropped. The same two arms as the
+        // AUD-10 re-bind: with priming off, the 0.5 s silence cushion is that mode's only margin.
+        if (generator.IsPrimingEnabled)
+        {
+          generator.RearmPriming();
+        }
+        else
+        {
+          generator.ResetWithSilence(0.5f);
+        }
         _playbackId = Id;
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, generator, Volume, CancellationToken.None);

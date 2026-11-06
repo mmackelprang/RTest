@@ -1450,7 +1450,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public async Task JumpToFullPlaylistIndexAsync(int index, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
-    ForgetKeptPlace();
 
     var fullList = GetFullPlaylistInOrder();
     if (index < 0 || index >= fullList.Count)
@@ -1466,6 +1465,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Logger.LogWarning("Cannot jump to error file: {File}", Path.GetFileName(targetFile));
       return;
     }
+
+    ForgetKeptPlace();
 
     Logger.LogInformation("Jumping to full playlist index {Index}: {Track}", index, Path.GetFileName(targetFile));
 
@@ -1761,7 +1762,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public async Task JumpToIndexAsync(int index, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
-    ForgetKeptPlace();
 
     var allTracks = GetAllTracksInOrder();
 
@@ -1769,6 +1769,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
     }
+
+    ForgetKeptPlace();
 
     var targetFile = allTracks[index];
 

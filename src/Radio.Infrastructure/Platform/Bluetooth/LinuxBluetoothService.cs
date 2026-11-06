@@ -1544,8 +1544,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     BluetoothDeviceInfo connected, CancellationToken cancellationToken)
   {
     // A fresh acquisition supersedes any parked capture (AUD-10): it builds a NEW generator, and
-    // the parked one is abandoned. Whoever routes the new one reads it from this service: the asker,
-    // or for BluetoothAutoSwitchService's bind ahead of a switch, the source that switch starts.
+    // the parked one is abandoned. The asker routes the new one, except for BluetoothAutoSwitchService's
+    // bind ahead of a switch: there it is read from here by the source that switch starts, provided that
+    // source holds no older capture of its own.
     _parkedCapture = null;
 
     // Cleanup previous capture

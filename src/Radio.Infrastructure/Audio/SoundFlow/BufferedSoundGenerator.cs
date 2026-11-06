@@ -1071,7 +1071,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
     /// <summary>
     /// Discards everything buffered and re-arms priming — the fresh-start state of a priming generator,
-    /// for one that has already been used (AUD-10 re-bind after a pause).
+    /// for one already used (AUD-10 re-bind after a pause) or one that has been filling unread (a capture
+    /// bound ahead of a takeover).
     /// </summary>
     public void RearmPriming()
     {

@@ -529,6 +529,26 @@ public class FilePlayerAudioSourceTests : IDisposable
     Assert.Equal(TimeSpan.Zero, source.Position);
   }
 
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task TakeoverStop_ThenARejectedJump_KeepsThePlace(bool fullPlaylist)
+  {
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+      fullPlaylist ? source.JumpToFullPlaylistIndexAsync(99) : source.JumpToIndexAsync(99));
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.FromMinutes(2.5), source.Position);
+  }
+
   [Fact]
   public async Task TakeoverStop_ThenPrevious_StartsThatFileFromTheTop()
   {
