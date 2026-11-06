@@ -2314,6 +2314,51 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await WaitForStallRecoveryAsync();
 
     btMock.Verify(b => b.PlayMediaAsync(It.IsAny<CancellationToken>()), Times.Never);
+
+    // And that recovery did not spend it: coming back still resumes.
+    await rig.Manager.SwitchSourceAsync(source);
+    btMock.Verify(b => b.PlayMediaAsync(It.IsAny<CancellationToken>()), Times.Once);
+  }
+
+  [Fact]
+  public async Task AConnectWithNoDisconnectSeen_EndsOurPause()
+  {
+    // Evicting a Device1 raises no disconnect, so the connect is what says this is a new session.
+    await using var rig = new SwitchRig();
+    var btMock = BuildBtMock(NewSoundComponentMock(), new CaptureAcquisitionProbe());
+    await using var source = BuildSwitchableSource(btMock, rig);
+    await rig.Manager.SwitchSourceAsync(source);
+    RaisePlaying(btMock);
+    await rig.Manager.SwitchSourceAsync(rig.RadioSource.Object);
+
+    RaiseDeviceConnected(btMock);
+    await rig.Manager.SwitchSourceAsync(source);
+
+    btMock.Verify(b => b.PlayMediaAsync(It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task ADisconnectWhileThePauseIsInFlight_LeavesNothingForTheNextSession()
+  {
+    await using var rig = new SwitchRig();
+    var btMock = BuildBtMock(NewSoundComponentMock(), new CaptureAcquisitionProbe());
+    var phone = btMock.Object.ConnectedDevice!;
+    btMock.Setup(b => b.PauseMediaAsync(It.IsAny<CancellationToken>()))
+      .Returns(() =>
+      {
+        RaiseDeviceDisconnected(btMock);
+        btMock.Setup(b => b.ConnectedDevice).Returns((BluetoothDeviceInfo?)null);
+        return Task.FromResult(true);
+      });
+    await using var source = BuildSwitchableSource(btMock, rig);
+    await rig.Manager.SwitchSourceAsync(source);
+    RaisePlaying(btMock);
+
+    await rig.Manager.SwitchSourceAsync(rig.RadioSource.Object);
+    btMock.Setup(b => b.ConnectedDevice).Returns(phone);
+    await rig.Manager.SwitchSourceAsync(source);
+
+    btMock.Verify(b => b.PlayMediaAsync(It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
@@ -2357,6 +2402,67 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   private const string SilentLine = "no audio is arriving";
+
+  /// <summary>
+  /// A single Advance fires a periodic timer at one instant, so nothing appears to last. These tests
+  /// need the condition to persist, so they step by the check's own period.
+  /// </summary>
+  private static void AdvanceInTicks(FakeTimeProvider time, TimeSpan span)
+  {
+    var tick = TimeSpan.FromSeconds(15);
+    for (var elapsed = TimeSpan.Zero; elapsed < span; elapsed += tick)
+    {
+      time.Advance(tick);
+    }
+  }
+
+  [Fact]
+  public async Task AfterTheOwnerPressedStop_LogsNothing()
+  {
+    // Stop leaves the phone playing, by the ruling. That silence was asked for.
+    var time = new FakeTimeProvider(T0);
+    var btMock = BuildSilentPhoneMock();
+    await using var source = BuildSource(btMock, time);
+    await source.PlayAsync(CancellationToken.None);
+    RaisePlaying(btMock);
+
+    await source.StopAsync(CancellationToken.None);
+    AdvanceInTicks(time, TimeSpan.FromSeconds(120));
+
+    Assert.False(LoggedWarning(SilentLine));
+  }
+
+  [Fact]
+  public async Task WithNoPhoneConnected_LogsNothing()
+  {
+    // A late Playing can re-arm the AVRCP bit during a disconnect's teardown.
+    var time = new FakeTimeProvider(T0);
+    var btMock = BuildSilentPhoneMock();
+    btMock.Setup(b => b.ConnectedDevice).Returns((BluetoothDeviceInfo?)null);
+    await using var source = BuildSource(btMock, time);
+    await source.PlayAsync(CancellationToken.None);
+    RaisePlaying(btMock);
+
+    AdvanceInTicks(time, TimeSpan.FromSeconds(120));
+
+    Assert.False(LoggedWarning(SilentLine));
+  }
+
+  [Fact]
+  public async Task APipelineThatReportsNothing_LogsNothing()
+  {
+    // Windows hard-codes Inactive, so a healthy listener there would otherwise get this line.
+    var time = new FakeTimeProvider(T0);
+    var btMock = BuildSilentPhoneMock();
+    btMock.Setup(b => b.PipelineStatus).Returns(BluetoothPipelineStatus.Inactive);
+    await using var source = BuildSource(btMock, time);
+    await source.PlayAsync(CancellationToken.None);
+    RaisePlaying(btMock);
+
+    AdvanceInTicks(time, TimeSpan.FromSeconds(120));
+
+    Assert.False(LoggedWarning(SilentLine));
+  }
 
   [Fact]
   public async Task PhonePlayingWithNothingArriving_LogsTheTransport_AtWarning()
@@ -2408,7 +2514,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await source.PlayAsync(CancellationToken.None);
     RaisePlaying(btMock);
 
-    time.Advance(TimeSpan.FromSeconds(120));
+    AdvanceInTicks(time, TimeSpan.FromSeconds(120));
 
     Assert.False(LoggedWarning(SilentLine));
   }
@@ -2421,7 +2527,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await using var source = BuildSource(btMock, time);
     await source.PlayAsync(CancellationToken.None);
 
-    time.Advance(TimeSpan.FromSeconds(120));
+    AdvanceInTicks(time, TimeSpan.FromSeconds(120));
 
     Assert.False(LoggedWarning(SilentLine));
   }
@@ -2435,7 +2541,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await using var source = BuildSourceWithActive(btMock, () => radio, timeProvider: time);
     RaisePlaying(btMock);
 
-    time.Advance(TimeSpan.FromSeconds(120));
+    AdvanceInTicks(time, TimeSpan.FromSeconds(120));
 
     Assert.False(LoggedWarning(SilentLine));
   }

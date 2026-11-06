@@ -467,14 +467,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   public Task<bool> PlayMediaAsync(CancellationToken cancellationToken = default) =>
     SendMediaCommandAsync("Play", p => p.PlayAsync());
 
-  // AUD-40: the console's Pause/Play for a BT source is a request to the PHONE, like a car stereo's.
-  // Returns whether the command reached a MediaPlayer1, so the caller can tell the difference
-  // between "the phone was asked" and "there was nobody to ask" — the latter must not be reported
-  // as a successful pause.
   /// <inheritdoc/>
   /// <remarks>
   /// The path is part of the answer. On 2026-11-06 the transport that stayed idle was
-  /// <c>…/fd13</c>, with no <c>sepN</c>, and the one that worked was <c>…/sep4/fd14</c>.
+  /// <c>…/fd13</c>, with no <c>sepN</c>, and the one that worked was <c>…/sep4/fd14</c>. This is the
+  /// last transport attached, which on this one-phone box is that phone's.
   /// </remarks>
   public async Task<string?> GetMediaTransportStateAsync(CancellationToken cancellationToken = default)
   {
@@ -497,6 +494,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     }
   }
 
+  // AUD-40: the console's Pause/Play for a BT source is a request to the PHONE, like a car stereo's.
+  // Returns whether the command reached a MediaPlayer1, so the caller can tell the difference
+  // between "the phone was asked" and "there was nobody to ask" — the latter must not be reported
+  // as a successful pause.
   private async Task<bool> SendMediaCommandAsync(string name, Func<Linux.IMediaPlayer1, Task> command)
   {
     var player = _mediaPlayer;
@@ -2046,8 +2047,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// node.autoconnect exists, PipeWire may bind it to something. The only state in which the wrong
   /// jack is impossible is the state where there is no stream.
   ///
-  /// ⚠ AUD-10: this now fires on EVERY PAUSE (PipeWire destroys the A2DP node when the transport
-  /// goes idle), not rarely. So the teardown is cheap and logs nothing above Information.
+  /// ⚠ AUD-10: this can now fire on every pause (PipeWire destroys the A2DP node when the transport
+  /// goes idle), not rarely. So the teardown is cheap and logs nothing above Information. ⚠ Not every
+  /// connection does: on 2026-11-06 one transport stayed active through pauses, so its node stayed.
   ///
   /// ⚠ Re-acquisition is NOT started from here, and the retry loop is NOT kicked — the node
   /// genuinely is gone, and asking 20 more times does not change that

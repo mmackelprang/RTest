@@ -1300,9 +1300,10 @@ console has not already paused it. A failed, refused or unanswered pause never h
 command gets 2 s. It is only for a source switch: not a disconnect, and not console Stop, which leaves
 the phone alone as it always has.
 
-**On return:** picking Bluetooth resumes the phone only if that pause was ours and nothing has happened
-since. The phone playing again ends it, and so does a disconnect, so a reconnect never starts a phone.
-A pause made on the phone or from the console stays paused.
+**On return:** picking Bluetooth resumes the phone only if that pause was ours. The phone playing again
+ends it, and so does a disconnect or a new connect, so a reconnect never starts a phone. A pause made on
+the phone or from the console stays paused. ⚠ The phone reporting Stopped does not end it, because
+that can be the echo of our own pause, so an app closed while the console was away still gets a Play.
 
 ---
 

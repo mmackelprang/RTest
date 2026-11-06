@@ -394,8 +394,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     try
     {
-      _pausedBySwitch = await _bluetoothService.PauseMediaAsync()
-        .WaitAsync(PhoneCommandTimeout, _timeProvider);
+      var paused = await _bluetoothService.PauseMediaAsync().WaitAsync(PhoneCommandTimeout, _timeProvider);
+
+      // A disconnect during that await already ended the session this pause belonged to.
+      _pausedBySwitch = paused && _bluetoothService.ConnectedDevice != null;
     }
     catch (Exception ex)
     {
@@ -593,8 +595,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     try
     {
+      // Inactive is a pipeline that reports nothing, as on Windows, not one that is broken. A stop the
+      // owner asked for leaves the phone playing, and that silence is not a fault.
       var pipeline = _bluetoothService.PipelineStatus;
-      if (!IsActiveSource || !_avrcpReportsPlaying || pipeline == BluetoothPipelineStatus.Healthy
+      if (!IsActiveSource || !_avrcpReportsPlaying || _stopRequested
+          || _bluetoothService.ConnectedDevice == null
+          || pipeline is BluetoothPipelineStatus.Healthy or BluetoothPipelineStatus.Inactive
           || _bluetoothService.IsAudioManagedByPlatform)
       {
         _silentSince = null;
@@ -713,6 +719,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     MetadataInternal["Device"] = e.Device.Name;
     MetadataInternal["DeviceAddress"] = e.Device.Address;
     NeedsFingerprintingLookup = true;
+
+    // A connect is a new session, even if its disconnect was never reported.
+    _pausedBySwitch = false;
 
     // Attempt to acquire audio capture device now that a device is connected
     _ = TryAcquireAudioCaptureAsync();
