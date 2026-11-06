@@ -37,7 +37,8 @@ open. Live work items are tracked in [BUILDER_QUEUE.md](BUILDER_QUEUE.md).
 the skeleton shimmer is for), `AUD-75` (the file player's media root on the box), and `PHN-13` M3 (caller-name
 precedence).
 
-**Waiting on owner UAT:** `PHN-13` checks 2 and 3, and `PHN-14` (name resolution with no phone connected).
+**Waiting on owner UAT:** `PHN-13` checks 2 and 3, `PHN-14` (name resolution with no phone connected), and
+`UI-37` (the House Audio tab, held; not merged).
 
 **Not re-checked:** `TTS-1` part (iii), which validates the engine and voice on save.
 
@@ -3212,3 +3213,125 @@ token per `sourceId` rather than a bare dictionary write.
   deliberately did not go near it.
 
 **Priority: low.** Records a plan claim that does not hold, so nobody re-derives closure from it.
+
+---
+
+## 38. House Audio cannot detect a command the amp ignored
+
+**Deliberate, recorded by the `UI-37` design.** The controller's routes answer without an acknowledgement from
+the amp.
+
+### What exists
+
+`HouseAudioApiService` treats a 2xx as accepted. So a failed command means a failed HTTP call: the card then
+returns to the true state and says so. A command the controller accepted and the amp lost shows as a success.
+`HouseAudioCommandLedger` keeps the commanded value until the first non-stale snapshot after the command, and
+from then on the card shows what the controller reports.
+
+### What is needed
+
+An acknowledgement from the amp, or a re-read of the zone after a command, in `rnet-pi`, and a way to report a
+mismatch through `HouseAudioResult`. That is controller work first; the console has nothing to read today.
+
+### Gotchas
+
+- ⚠ **The next poll is not a check.** It reports the controller's cache, so it shows only what the controller
+  believes. Do not cite a card returning the commanded value as proof the amp acted.
+- The owner has no wall keypads, so every change passes through `rnet-pi` and its cache has no other writer. That
+  narrows this, and does not close it.
+
+**Priority: low.** The phone app has the same limit, and a person standing at the panel hears the result.
+
+---
+
+## 39. A commanded value is not carried across leaving the House Audio tab
+
+**Deliberate, from `UI-37`.** The ledger belongs to the panel, and the panel exists only while its tab shows.
+
+### What exists
+
+`HouseAudioPanel` owns one `HouseAudioCommandLedger` and one poller, and leaving the tab disposes both. A command
+in flight is not cancelled, as it may already have reached the amp, and it ends on the client's own timeout
+(`HouseAudioPanel.RunAsync`). Returning to the tab builds a new panel, which knows nothing of that command.
+
+### What is needed
+
+Nothing unless it is noticed. A fix would move the ledger to a scoped service that outlives the tab, with the
+poller's hold contract extended across the two panels' lifetimes.
+
+### Gotchas
+
+- The visible effect is a card that shows the pre-command value after a quick leave and return, until the next
+  poll after the command lands. The command itself is not lost.
+- ⚠ **A wider ledger lifetime is not free.** `HouseAudioCommandLedger` is render-thread only, and its release
+  counting assumes the poller it pairs with. Read `HouseAudioPoller.HoldZone`'s remarks first.
+
+**Priority: low.** Self-corrects within one poll interval or so.
+
+---
+
+## 40. Two rooms with the same name: commands, holds and Delete Zone all go by name
+
+**Found while building `UI-37`; read from code, not observed.** No duplicate exists on the owner's controller.
+
+### What exists
+
+Every zone route takes a name, and `rNet.findZoneByName` (`ts_src/rnet/rnet.ts:351`) returns the **first** match,
+compared **case-insensitively**. So with rooms `Den` and `den`, a command from the second card acts on the first
+room. `HouseAudioPoller` and `HouseAudioCommandLedger` key their holds and commands by name too, so both cards
+show a command made on either.
+
+### What is needed
+
+Id-based zone routes in `rnet-pi` (controller and zone id), used by `HouseAudioApiService`. Failing that, refuse
+a duplicate name when a room is named.
+
+### Gotchas
+
+- ⛔ **Delete Zone is the case that matters.** It would delete the first match, not the room whose card was tapped,
+  and this panel cannot add a room back.
+- The panel's own tracking is by id (`_tunedZone`, `@key`), so the settings popover opens on the right room and
+  still sends by name. Correct ids in the UI do not make the route correct.
+- Zones the controller reports with no name are dropped by `GetZonesAsync`, because every zone route needs one.
+
+**Priority: low.** Needs a duplicate that does not exist today; high consequence if it ever does.
+
+---
+
+## 41. Eleven more `DisposeComponents()` calls in `Radio.Web.Tests` have the shape of a House Audio flake
+
+**Found by `UI-37`.** `Panel_WhenDisposed_StopsPolling` timed out once in 200 runs under load, and was changed to
+`await cut.InvokeAsync(DisposeComponents)`. The explanation is the review's reading of bUnit: `DisposeComponents`
+queues its detach on the dispatcher unawaited and then clears its roots, so with the dispatcher busy nothing
+is disposed.
+
+### What exists
+
+Bare calls remain, unchanged, in nine files under `tests/Radio.Web.Tests/Components/`:
+
+| File | Line |
+|---|---|
+| `Pages/SystemConfigPageTests.cs` | 593, 630, 636 |
+| `Shared/DiagnosticsPanelTests.cs` | 145 |
+| `Shared/PresetBarKnobMirrorTests.cs` | 417 |
+| `Shared/PresetBarModuleLoadTests.cs` | 74 |
+| `Shared/PresetBarTests.cs` | 515 |
+| `Shared/RadioControlPanelTests.cs` | 861 |
+| `Shared/RdsScrollMarqueeTests.cs` | 462 |
+| `Shared/VisualizerPanelBandTests.cs` | 1042 |
+| `Shared/VisualizerPanelConnectionTests.cs` | 189 |
+
+### What is needed
+
+The same one-line change wherever the test then depends on disposal having happened, which matters most where
+a background loop can have the dispatcher busy. Then the file's next load run.
+
+### Gotchas
+
+- ⚠ **The mechanism was never demonstrated.** A probe that held the render thread was stopped for low memory
+  before it produced a result, and the original failure did not recur in 408 runs of its own class. So the
+  one-line change is reasoned, not proven, and it is not evidence the flake is gone. If
+  `Panel_WhenDisposed_StopsPolling` fails again, the panel's own disposal is the next suspect.
+- ⚠ **A test can pass while disposing nothing,** if what it asserts does not depend on disposal. Read each one.
+
+**Priority: low.** Tests only. No failure has been seen in any of these eleven.

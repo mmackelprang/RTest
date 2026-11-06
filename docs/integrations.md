@@ -1,6 +1,6 @@
 # Integrations Setup Guide
 
-This guide covers step-by-step setup for the three external integration systems: **Rotary Encoders**, **Phone Call Notifications**, and the **Announcement API**.
+This guide covers step-by-step setup for the external integration systems: **Rotary Encoders**, **Phone Call Notifications**, the **Announcement API**, and **House Audio**.
 
 The Radio Console operates fully without any of these. **They do not all default the same way, and the
 difference matters:** the **phone notification** and **announcement** integrations are opt-in and stay off until
@@ -1455,6 +1455,93 @@ Priority guidelines:
 | 4-6 | Medium importance (smart home events, reminders) |
 | 7-8 | High importance (doorbell, notifications) |
 | 9-10 | Critical (phone calls, alarms, security alerts) |
+
+---
+
+## 4. House Audio (RNET controller)
+
+The **House Audio** tab on `/system`, second under System Stats, controls the whole-house Russound amp through the
+`rnet-pi` controller, so a room can be changed from the panel instead of a phone. Rooms are cards with power,
+mute, volume, source, and Tune for the room's settings. **Controller settings** holds the controller's name, its
+password, its sources (name, type, edit, add, delete), and About. The amp is a CAA66: six inputs, six zones.
+
+🚧 **`UI-37`: held for owner UAT, not merged and not deployed.**
+
+### Prerequisites
+
+⚠ **The controller must run the `feat/house-audio-routes` build of `rnet-pi`.** The console depends on what that
+branch adds to the live code: `GET /system`, `PUT /system/name`, the source routes, and the `X-RNet-Password`
+header. Against an older build, `GET /system` has no route and the tab cannot work.
+
+### Configuration
+
+Both keys live in `Radio.Web`'s configuration, not `Radio.API`'s.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `HouseAudio:BaseUrl` | `http://homeaudio.local:3001` | The controller's web hook port. Not a valid absolute URL: the default is used |
+| `HouseAudio:PollSeconds` | `3` | How often an open tab polls. Unusable values fall back to the default |
+
+Polling runs only while the tab is open, one poller per open panel. **Live push does not exist on that port.** All
+RNET traffic is server-side, in `Radio.Web`, off the audio path. The browser never talks to the controller.
+
+### The password
+
+Enter it once, in **Controller settings > Password**. The button stays available while the password is missing or
+refused, because that is where it gets entered, and a saved password takes effect on the next poll with no reload.
+
+- **Write-only.** The field is never pre-filled, and the row reports only state: `Not set`, `Refused. Enter it
+  again.`, `Saved`. It is held in no component state: Save reads it from the browser's field.
+- **Encrypted with `Radio.Web`'s own key ring**, purpose `HouseAudio.Password`, and stored in the shared
+  configuration store as `HouseAudio:ProtectedPassword`. It is **not** in the Secrets tab: that tab belongs to
+  `Radio.API`, whose key ring `Radio.Web` deliberately does not share.
+- ⚠ **Losing `data/keys-web` means entering it again.** On the box that is `/opt/radio-console/data/keys-web`, which
+  deploys preserve. With the ring gone the stored value cannot be decrypted, so the tab shows no password and a
+  single warning is logged.
+- **Travels in the `X-RNet-Password` header, never a URL.** The controller also accepts `?pass=`, which this
+  client does not use, because `Radio.Web` logs at Information to the journal.
+- **ASCII only.** It has to travel in a header: printable ASCII, with no control characters.
+
+### Routes used
+
+| Route | Used for |
+|---|---|
+| `GET /system` | Name, address, `serialConnected`, version. Answers with the amp link down |
+| `PUT /system/name` | Rename. Also answers with the amp link down |
+| `GET /zones`, `GET /sources` | The poll |
+| `PUT /on`, `/off`, `/mute`, `/unmute` | All Off, Mute All |
+| `PUT /:zone/on`, `/off`, `/mute`, `/unmute`, `/volume/:volume`, `/source/:source` | A card's controls |
+| `PUT /:zone/parameter/:paramID/:value`, `/maxvolume/:volume` | Room settings |
+| `DELETE /:zone` | Delete Zone, which asks first |
+| `POST /sources`, `PUT /sources/:id`, `DELETE /sources/:id` | Sources. `sourceID` is 0 to 5, shown as inputs 1 to 6 |
+
+Routes answer without an acknowledgement from the amp, so a command the amp ignored is not detected
+([known-issues § 38](known-issues-and-future-work.md)). A failed command means a failed HTTP call.
+
+The controller refuses names that are blank, contain NUL, or are over 252 UTF-8 bytes, with a bare 400, so the
+panel checks and words that rule itself. A delete refused with 409 means a powered room is using the source.
+
+### Kiosk rules
+
+- ⛔ **No text field in the panel.** The on-screen keyboard covers everything below y = 348 and does not resize the
+  page ([`UI-24`](../archive/queue/UI-24.md)). The panel shows values, and a tap opens a `.kiosk-entry-overlay` card
+  at the top of the screen with the field focused, which is what opens the keyboard.
+- **Type and input are lists of 56 px options, not `RadzenDropDown`s**, whose inner input leaves the keyboard up.
+- 1920×720 touch, no page scroll, nothing depends on hover, no browser dialogs. Delete Zone and Delete Source
+  confirm in the app. The panel and popover overlay the dock, which needs `.page-transition`'s transform lifted
+  while they are open (`design-system.css` § House Audio).
+- A tap on a slider's track does nothing; only a drag moves it, and the value is sent once, on release.
+
+### What the tab shows when something is wrong
+
+| State | Shown |
+|---|---|
+| Controller unreachable | `Can't reach the controller. Retrying.` Nothing else on `/system` is affected |
+| Controller up, amp link down | `The controller can't reach the amp. Retrying.` |
+| Password missing or refused | Says so, and points at Controller settings |
+| A poll fails | The last state, marked `Last known`, and polling continues |
+| A command fails | The control returns to the true state, with the reason beside the health line |
+| A save fails | The entry card stays open with the edit intact |
 
 ---
 
