@@ -366,6 +366,10 @@ public static class AudioServiceExtensions
     services.Configure<FilePlayerOptions>(
       configuration.GetSection(FilePlayerOptions.SectionName));
 
+    // Bind the notification sounds location, which is separate from the music root
+    services.Configure<NotificationSoundsOptions>(
+      configuration.GetSection(NotificationSoundsOptions.SectionName));
+
     // Register File Browser service as scoped (IAudioFileRepository is scoped)
     services.AddScoped<FileBrowser>(sp =>
     {

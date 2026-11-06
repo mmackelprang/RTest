@@ -16,6 +16,7 @@ public class AudioFileEventSourceFactory
   private readonly ILogger<AudioFileEventSource> _sourceLogger;
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly SoundFlowPlaybackService? _playbackService;
+  private readonly IOptionsMonitor<NotificationSoundsOptions>? _notificationSounds;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="AudioFileEventSourceFactory"/> class.
@@ -24,16 +25,19 @@ public class AudioFileEventSourceFactory
   /// <param name="sourceLogger">The source logger.</param>
   /// <param name="options">The file player options.</param>
   /// <param name="playbackService">Optional SoundFlow playback service.</param>
+  /// <param name="notificationSounds">Optional location of the notification sounds.</param>
   public AudioFileEventSourceFactory(
     ILogger<AudioFileEventSourceFactory> logger,
     ILogger<AudioFileEventSource> sourceLogger,
     IOptionsMonitor<FilePlayerOptions> options,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    IOptionsMonitor<NotificationSoundsOptions>? notificationSounds = null)
   {
     _logger = logger;
     _sourceLogger = sourceLogger;
     _options = options;
     _playbackService = playbackService;
+    _notificationSounds = notificationSounds;
   }
 
   /// <summary>
@@ -152,7 +156,7 @@ public class AudioFileEventSourceFactory
   /// <returns>A list of subdirectory names.</returns>
   public IReadOnlyList<string> GetSubdirectories(string? subdirectory = null)
   {
-    var rootPath = _options.CurrentValue.RootDirectory;
+    var rootPath = NotificationSoundsRoot;
     var searchPath = subdirectory != null
       ? Path.Combine(rootPath, subdirectory)
       : rootPath;
@@ -183,7 +187,7 @@ public class AudioFileEventSourceFactory
   /// <returns>A list of available audio file paths (absolute paths).</returns>
   public IReadOnlyList<string> GetAvailableNotificationSounds(string? subdirectory = null)
   {
-    var rootPath = _options.CurrentValue.RootDirectory;
+    var rootPath = NotificationSoundsRoot;
     var searchPath = subdirectory != null
       ? Path.Combine(rootPath, subdirectory)
       : rootPath;
@@ -205,6 +209,11 @@ public class AudioFileEventSourceFactory
 
     return files.AsReadOnly();
   }
+
+  // Never FilePlayer:RootDirectory: on the appliance that is a NAS automount, and an unreachable NAS
+  // blocks each access for seconds, on a request thread.
+  private string NotificationSoundsRoot =>
+    _notificationSounds?.CurrentValue.Directory ?? new NotificationSoundsOptions().Directory;
 
   private string ResolveFilePath(string filePath)
   {
