@@ -1,0 +1,144 @@
+@* One room on the House Audio tab. Presentational: every control raises a callback, and the panel
+   owns the commands. The power button is what the owner uses to silence a room; the speaker mute is
+   separate, and both act on one touch. Whether a room is on is shown by that button's colour, with no
+   word for it anywhere on the card, as the owner asked. aria-pressed says it for a screen reader.
+
+   Volume uses HouseLevelSlider over SeekBar, the app's touch slider, so a drag is a captured pointer
+   gesture with a real end and a real cancel, and a tap on the bar does nothing.
+
+   Source follows OutputPickerDropdown: a list of full-height rows over a tap-away layer. It opens
+   over its own card, downward from the top row and upward from the bottom row, so six rows fit
+   without scrolling and nothing leaves the content area. Styles: design-system.css § House Audio. *@
+
+<article class="@CssClass" data-testid="house-zone-card" aria-label="@Zone.Name">
+  <div class="house-zone-head">
+    <span class="house-zone-name">@Zone.Name</span>
+    @if (Stale)
+    {
+      <span class="house-zone-stale" data-testid="house-zone-stale">Last known</span>
+    }
+    <button type="button" class="house-zone-tune" data-testid="house-zone-tune"
+            aria-label="@($"{Zone.Name} settings")" @onclick="OnTune">
+      <RadzenIcon Icon="tune" />
+    </button>
+    <button type="button" class="house-zone-power" data-testid="house-zone-power"
+            aria-label="@($"{Zone.Name} power")" aria-pressed="@AriaBool(Zone.Power)" @onclick="OnPower">
+      <RadzenIcon Icon="power_settings_new" />
+    </button>
+  </div>
+
+  <div class="house-zone-volume">
+    <button type="button" class="house-zone-mute" data-testid="house-zone-mute"
+            aria-label="@($"{Zone.Name} mute")" aria-pressed="@AriaBool(Zone.Muted)"
+            disabled="@(!Zone.Power)" @onclick="OnMute">
+      <RadzenIcon Icon="@(Zone.Muted ? "volume_off" : "volume_up")" />
+    </button>
+    <HouseLevelSlider Class="house-zone-slider"
+                      Value="@Zone.Volume"
+                      Ceiling="@Zone.MaxVolume"
+                      Disabled="@(!Zone.Power)"
+                      TapSlop="@SliderTapSlop"
+                      AriaLabel="@($"{Zone.Name} volume")"
+                      LevelTestId="house-zone-level"
+                      OnCommitted="OnVolumeCommitted" />
+  </div>
+
+  <button type="button" class="house-zone-source" data-testid="house-zone-source"
+          aria-haspopup="listbox" aria-expanded="@AriaBool(_pickerOpen)"
+          disabled="@(!Zone.Power)" @onclick="@(() => _pickerOpen = !_pickerOpen)">
+    <span class="house-zone-source-name">@SourceText</span>
+    @if (Zone.Power)
+    {
+      <RadzenIcon Icon="expand_more" />
+    }
+  </button>
+
+  @if (_pickerOpen)
+  {
+    @* preventDefault stops the browser turning this touch into a click, which could land on whatever
+       is under the layer once it has gone. *@
+    <div class="house-source-away" data-testid="house-source-away"
+         @onclick="ClosePicker" @onclick:stopPropagation="true"
+         @ontouchend="ClosePicker" @ontouchend:stopPropagation="true" @ontouchend:preventDefault="true"></div>
+    <div class="house-source-list" role="listbox" aria-label="@($"{Zone.Name} source")">
+      @foreach (HouseSource source in Sources)
+      {
+        <button type="button" role="option" data-testid="house-source-option"
+                class="house-source-option @(source.SourceId == Zone.SourceId ? "is-active" : null)"
+                aria-selected="@AriaBool(source.SourceId == Zone.SourceId)"
+                @onclick="@(() => PickSourceAsync(source))">
+          @source.Name
+        </button>
+      }
+    </div>
+  }
+</article>
+
+@code {
+  // 12 px of a bar about 400 px long.
+  private const double SliderTapSlop = 0.03;
+
+  [Parameter, EditorRequired] public HouseZone Zone { get; set; } = default!;
+
+  [Parameter] public IReadOnlyList<HouseSource> Sources { get; set; } = [];
+
+  /// <summary>True when the last poll failed, so this is the room's last known state.</summary>
+  [Parameter] public bool Stale { get; set; }
+
+  [Parameter] public EventCallback OnPower { get; set; }
+
+  [Parameter] public EventCallback OnMute { get; set; }
+
+  /// <summary>Raised at most once per gesture, on release. Nothing reaches it during a drag, or if the room goes off mid-drag.</summary>
+  [Parameter] public EventCallback<int> OnVolumeCommitted { get; set; }
+
+  /// <summary>Raised with the <c>SourceId</c> picked, and not for the source already playing.</summary>
+  [Parameter] public EventCallback<int> OnSource { get; set; }
+
+  [Parameter] public EventCallback OnTune { get; set; }
+
+  /// <summary>True while this room's settings are open.</summary>
+  [Parameter] public bool Tuned { get; set; }
+
+  private bool _pickerOpen;
+
+  private string CssClass =>
+    "house-zone-card"
+    + (Zone.Power ? string.Empty : " is-off")
+    + (Stale ? " is-stale" : string.Empty)
+    + (Tuned ? " is-tuned" : string.Empty);
+
+  private string SourceText
+  {
+    get
+    {
+      // sourceID is zero-based; the amp's inputs are numbered from 1.
+      string name = Sources.FirstOrDefault(source => source.SourceId == Zone.SourceId)?.Name
+        ?? $"Input {Zone.SourceId + 1}";
+      return Zone.Power && Zone.Muted ? $"{name} · muted" : name;
+    }
+  }
+
+  // A room turned off from elsewhere closes its list, as it has nothing to pick for, and the list
+  // does not come back with the room.
+  protected override void OnParametersSet()
+  {
+    if (!Zone.Power)
+    {
+      _pickerOpen = false;
+    }
+  }
+
+  private static string AriaBool(bool value) => value ? "true" : "false";
+
+  private void ClosePicker() => _pickerOpen = false;
+
+  private async Task PickSourceAsync(HouseSource source)
+  {
+    ClosePicker();
+    if (source.SourceId != Zone.SourceId)
+    {
+      await OnSource.InvokeAsync(source.SourceId);
+    }
+  }
+}

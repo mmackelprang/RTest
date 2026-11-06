@@ -1,0 +1,578 @@
+@using System.Security.Cryptography
+@using System.Text
+@using Radio.Core.Utilities
+@inject HouseAudioApiService Api
+@inject HouseAudioPasswordStore Passwords
+@inject IJSRuntime JS
+
+@* Controller settings: the controller's name, its password, its sources, and About. Opened from the House
+   Audio header, and open to a controller that has not answered, because this is where a missing or
+   wrong password gets entered.
+
+   ⚠ Nothing in the panel is a text field, unlike the mockup. The on-screen keyboard covers everything
+   below y = 348 and does not resize the page (archive/queue/UI-24.md), so the panel shows values, and a
+   tap opens a kiosk entry card at the top of the screen with the field focused, which is what opens the
+   keyboard. The card is a sibling of the panel, not a child: the panel's z-index makes it a stacking
+   context, and a card inside it could not rise over the top bar to reach y = 24.
+
+   Type and input are lists of 56 px options, not Radzen dropdowns. A .rz-dropdown's inner <input> takes
+   focus without opening the keyboard, and virtual-keyboard.js leaves one that is already up, which would
+   cover a list of twenty. A plain button moves focus off the field, so the keyboard goes and the options
+   have the screen.
+
+   ⚠ The password is not bound. It stays in the browser's field until Save reads it into a local of
+   SavePasswordAsync, so it is in no field of this component, and a failed save leaves the typed text
+   in the box to be saved again. The panel never reads it back: the row reports what the last poll found,
+   or "Saved. Checking it." from a save made here, until the next poll. Styles: design-system.css
+   § House Audio. *@
+
+<div class="house-settings-away" data-testid="house-controller-away"
+     @onclick="OnClose" @onclick:stopPropagation="true"
+     @ontouchend="OnClose" @ontouchend:stopPropagation="true" @ontouchend:preventDefault="true"></div>
+
+<aside class="house-controller-panel @(Closing ? "is-closing" : null)" role="dialog" aria-label="Controller settings"
+       data-testid="house-controller-panel">
+  <div class="house-settings-row">
+    <span class="house-settings-name">Controller settings</span>
+    @if (Snapshot is { Stale: true, System: not null })
+    {
+      <span class="house-zone-stale" data-testid="house-controller-stale">Last known</span>
+    }
+    <button type="button" class="house-settings-button house-settings-close" data-testid="house-controller-close"
+            aria-label="Close" @onclick="OnClose">
+      <RadzenIcon Icon="close" />
+    </button>
+  </div>
+
+  <div class="house-controller-columns">
+    <div class="house-controller-column">
+      <button type="button" class="house-settings-button house-controller-row" data-testid="house-controller-name"
+              disabled="@(System is null)" @onclick="OpenRename">
+        <span class="house-settings-label">Controller name</span>
+        <span class="house-controller-text">@(System?.Name ?? "Not known yet")</span>
+        <span class="house-controller-edit">Edit</span>
+      </button>
+
+      <button type="button" class="house-settings-button house-controller-row" data-testid="house-controller-password"
+              @onclick="OpenPassword">
+        <span class="house-settings-label">Password</span>
+        <span class="house-controller-text">@PasswordText</span>
+        <span class="house-controller-edit">Edit</span>
+      </button>
+
+      <div class="house-controller-heading">About</div>
+      <div class="house-controller-fact" data-testid="house-about-address">
+        <span>Controller address</span>
+        <span>@(System is null ? "Not known yet" : System.Address ?? "Not reported")</span>
+      </div>
+      <div class="house-controller-fact" data-testid="house-about-connection">
+        <span>Connection to amp</span>
+        <span class="@(System is { SerialConnected: false } ? "is-down" : null)">@ConnectionText</span>
+      </div>
+      <div class="house-controller-fact" data-testid="house-about-build">
+        <span>Console build</span>
+        <span>@ConsoleBuild</span>
+      </div>
+      <div class="house-controller-fact" data-testid="house-about-controller-version">
+        <span>Controller version</span>
+        <span>@(System?.Version ?? "Not known yet")</span>
+      </div>
+    </div>
+
+    <div class="house-controller-column">
+      <div class="house-controller-heading">Sources</div>
+      @if (SourcesKnown)
+      {
+        @foreach (HouseSource source in Sources)
+        {
+          <button type="button" class="house-settings-button house-controller-row" data-testid="house-source-row"
+                  @onclick="@(() => OpenEditSource(source))">
+            <span class="house-controller-input">Input @(source.SourceId + 1)</span>
+            <span class="house-controller-text">@source.Name</span>
+            <span class="house-controller-type">@HouseSourceTypes.Label(source.Type)</span>
+            <span class="house-controller-edit">Edit</span>
+          </button>
+        }
+
+        @if (FreeInputs.Count > 0)
+        {
+          <button type="button" class="house-settings-button house-controller-row house-controller-add"
+                  data-testid="house-source-add" @onclick="OpenAddSource">
+            + Add source
+          </button>
+        }
+      }
+      else
+      {
+        <div class="house-controller-note" data-testid="house-sources-unknown">
+          Sources show once the controller answers.
+        </div>
+      }
+    </div>
+  </div>
+</aside>
+
+@if (_entry != EntryKind.None)
+{
+  @* No tap-away: a stray touch beside the keyboard must not throw away an edit. *@
+  <div class="kiosk-entry-overlay" data-testid="house-entry-overlay">
+    <div class="kiosk-entry-card house-entry-card @(_picking is null ? null : "is-picking")"
+         role="dialog" aria-label="@EntryTitle">
+      @if (_picking is { } picking)
+      {
+        <h6>@(picking == PickerKind.Input ? "Input" : "Source type")</h6>
+        <div class="house-entry-options" role="listbox" aria-label="@(picking == PickerKind.Input ? "Input" : "Source type")">
+          @foreach ((int value, string label) in Options(picking))
+          {
+            <button type="button" role="option" data-testid="house-entry-option"
+                    class="house-settings-button house-entry-option @(value == Picked(picking) ? "is-active" : null)"
+                    aria-selected="@(value == Picked(picking) ? "true" : "false")"
+                    @onclick="@(() => Pick(picking, value))">
+              @label
+            </button>
+          }
+        </div>
+        <div class="kiosk-entry-actions">
+          <RadzenButton Variant="Variant.Text" Click="ClosePicker" Text="Cancel"
+                        data-testid="house-entry-pick-cancel" />
+        </div>
+      }
+      else if (_confirmingDelete)
+      {
+        <h6>@EntryTitle</h6>
+        <p class="house-entry-prompt" data-testid="house-delete-source-prompt">
+          Delete @_name from input @(_sourceId + 1)? Rooms can't pick it again until it is added back.
+        </p>
+        @* The answer is on the far side from the Delete that opened this, so a double tap cannot give it. *@
+        <div class="kiosk-entry-actions">
+          <RadzenButton Variant="Variant.Text" class="house-entry-left" Text="Cancel" Disabled="@_saving"
+                        Click="CancelDelete" data-testid="house-delete-source-cancel" />
+          <RadzenButton ButtonStyle="ButtonStyle.Danger" Variant="Variant.Filled" Text="Delete" Disabled="@_saving"
+                        Click="DeleteSourceAsync" data-testid="house-delete-source-confirm" />
+        </div>
+      }
+      else
+      {
+        <h6>@EntryTitle</h6>
+        @if (_entry == EntryKind.Password)
+        {
+          <input @ref="_passwordField" type="password" class="rz-textbox" aria-label="Controller password"
+                 placeholder="Controller password" autocomplete="new-password" />
+        }
+        else
+        {
+          <RadzenTextBox @ref="_nameBox" @bind-Value="_name" type="text" aria-label="@EntryTitle"
+                         Placeholder="@(_entry == EntryKind.Rename ? "Controller name" : "Source name")" />
+        }
+
+        @if (_entry is EntryKind.AddSource or EntryKind.EditSource)
+        {
+          <div class="house-entry-pickers">
+            @if (_entry == EntryKind.AddSource)
+            {
+              <button type="button" class="house-settings-button house-entry-picker" data-testid="house-entry-input"
+                      aria-haspopup="listbox" disabled="@_saving" @onclick="@(() => OpenPicker(PickerKind.Input))">
+                <span>Input @(_sourceId + 1)</span>
+                <RadzenIcon Icon="expand_more" />
+              </button>
+            }
+            <button type="button" class="house-settings-button house-entry-picker" data-testid="house-entry-type"
+                    aria-haspopup="listbox" disabled="@_saving" @onclick="@(() => OpenPicker(PickerKind.Type))">
+              <span>@HouseSourceTypes.Label(_type)</span>
+              <RadzenIcon Icon="expand_more" />
+            </button>
+          </div>
+        }
+
+        @if (_error is { } error)
+        {
+          <p class="house-entry-error" role="alert" data-testid="house-entry-error">@error</p>
+        }
+
+        <div class="kiosk-entry-actions">
+          @if (_entry == EntryKind.EditSource)
+          {
+            <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger" class="house-entry-left" Text="Delete"
+                          Disabled="@_saving" Click="AskToDelete" data-testid="house-entry-delete" />
+          }
+          <RadzenButton Variant="Variant.Text" Text="Cancel" Disabled="@_saving" Click="CloseEntry"
+                        data-testid="house-entry-cancel" />
+          <RadzenButton ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled" Text="Save" Disabled="@_saving"
+                        Click="SaveAsync" data-testid="house-entry-save" />
+        </div>
+      }
+    </div>
+  </div>
+}
+
+@code {
+  // The CAA66 has six inputs. sourceID runs 0 to 5, and people count them from 1.
+  private const int InputCount = 6;
+
+  // The controller answers a longer name with a bare 400 (MAX_NAME_BYTES in webHookServer.ts).
+  private const int MaxNameBytes = 252;
+
+  private const string PasswordNotSaved =
+    "The password wasn't saved. It can't contain accented letters or other non-ASCII characters, and the console has to be able to store it.";
+
+  // The SHA, not the version: nothing sets <Version>, so that reads 1.0.0 on every build.
+  private static readonly string ConsoleBuild =
+    AssemblyBuildInfo.For(typeof(HouseControllerSettingsPanel).Assembly).GitShaShort;
+
+  private enum EntryKind
+  {
+    None,
+    Rename,
+    Password,
+    AddSource,
+    EditSource
+  }
+
+  private enum PickerKind
+  {
+    Input,
+    Type
+  }
+
+  /// <summary>What the panel shows, and null until the first poll has been reported.</summary>
+  [Parameter] public HouseAudioSnapshot? Snapshot { get; set; }
+
+  /// <summary>
+  /// Raised after the controller accepts a change, with the change to the snapshot, so what was saved
+  /// shows at once rather than at the next poll. That poll then replaces it with what the controller
+  /// reports. A poll already in flight can show the old value for one interval.
+  /// </summary>
+  [Parameter] public EventCallback<Func<HouseAudioSnapshot, HouseAudioSnapshot>> OnSaved { get; set; }
+
+  [Parameter] public EventCallback OnClose { get; set; }
+
+  /// <summary>True while the panel slides this out, before it removes it.</summary>
+  [Parameter] public bool Closing { get; set; }
+
+  private EntryKind _entry;
+  private PickerKind? _picking;
+  private bool _confirmingDelete;
+  private bool _saving;
+  private string? _error;
+  private bool _focusField;
+
+  // The edit, kept here and not in the field so it survives a picker, a failed save and a poll.
+  private string _name = string.Empty;
+  private int _sourceId;
+  private int _type;
+
+  private RadzenTextBox? _nameBox;
+  private ElementReference _passwordField;
+
+  // The row says "checking" until a snapshot newer than the one the save was made under arrives.
+  private bool _passwordSaved;
+  private HouseAudioSnapshot? _passwordSavedUnder;
+
+  private HouseSystemInfo? System => Snapshot?.System;
+
+  private IReadOnlyList<HouseSource> Sources => Snapshot?.Sources ?? [];
+
+  // A stale snapshot with no sources has never read them: the amp link can be down while /system answers.
+  // Taking that for an empty controller would offer all six inputs.
+  private bool SourcesKnown => Snapshot is { Stale: false } || Sources.Count > 0;
+
+  private IReadOnlyList<int> FreeInputs =>
+    Enumerable.Range(0, InputCount).Except(Sources.Select(source => source.SourceId)).ToList();
+
+  private string ConnectionText => System switch
+  {
+    null => "Not known yet",
+    { SerialConnected: true } => "Connected",
+    _ => "Not connected"
+  };
+
+  private string PasswordText
+  {
+    get
+    {
+      if (_passwordSaved && ReferenceEquals(Snapshot, _passwordSavedUnder))
+      {
+        return "Saved. Checking it.";
+      }
+
+      return Snapshot?.Health switch
+      {
+        null => "Checking",
+        HouseAudioHealth.NoPassword => "Not set",
+        HouseAudioHealth.WrongPassword => "Refused. Enter it again.",
+        _ => "Saved"
+      };
+    }
+  }
+
+  private string EntryTitle => _entry switch
+  {
+    EntryKind.Rename => "Controller name",
+    EntryKind.Password => "Controller password",
+    EntryKind.AddSource => "Add source",
+    _ => $"Edit input {_sourceId + 1}"
+  };
+
+  private IEnumerable<(int Value, string Label)> Options(PickerKind picker) => picker == PickerKind.Input
+    ? FreeInputs.Select(input => (input, $"Input {input + 1}"))
+    : HouseSourceTypes.Labels.Select((label, type) => (type, label));
+
+  private int Picked(PickerKind picker) => picker == PickerKind.Input ? _sourceId : _type;
+
+  private void OpenPicker(PickerKind picker) => _picking = picker;
+
+  private void ClosePicker() => _picking = null;
+
+  private void Pick(PickerKind picker, int value)
+  {
+    if (picker == PickerKind.Input)
+    {
+      _sourceId = value;
+    }
+    else
+    {
+      _type = value;
+    }
+
+    ClosePicker();
+  }
+
+  private void AskToDelete()
+  {
+    _error = null;
+    _confirmingDelete = true;
+  }
+
+  private void CancelDelete() => _confirmingDelete = false;
+
+  // A focus that fails leaves a field the owner can still tap.
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (!_focusField)
+    {
+      return;
+    }
+
+    _focusField = false;
+    try
+    {
+      if (_entry == EntryKind.Password)
+      {
+        await _passwordField.FocusAsync();
+      }
+      else if (_nameBox is not null)
+      {
+        await _nameBox.FocusAsync();
+      }
+    }
+    catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+    {
+    }
+  }
+
+  private void OpenEntry(EntryKind entry, string name, int sourceId, int type)
+  {
+    _entry = entry;
+    _name = name;
+    _sourceId = sourceId;
+    _type = type;
+    _error = null;
+    _picking = null;
+    _confirmingDelete = false;
+    _focusField = true;
+  }
+
+  private void OpenRename() => OpenEntry(EntryKind.Rename, System?.Name ?? string.Empty, 0, 0);
+
+  private void OpenPassword() => OpenEntry(EntryKind.Password, string.Empty, 0, 0);
+
+  private void OpenAddSource() => OpenEntry(EntryKind.AddSource, string.Empty, FreeInputs[0], 0);
+
+  private void OpenEditSource(HouseSource source) =>
+    OpenEntry(EntryKind.EditSource, source.Name, source.SourceId, source.Type);
+
+  private void CloseEntry() => _entry = EntryKind.None;
+
+  private async Task SaveAsync()
+  {
+    _error = null;
+    _saving = true;
+    try
+    {
+      _error = _entry switch
+      {
+        EntryKind.Rename => await RenameAsync(),
+        EntryKind.Password => await SavePasswordAsync(),
+        EntryKind.AddSource => await AddSourceAsync(),
+        _ => await UpdateSourceAsync()
+      };
+
+      if (_error is null)
+      {
+        CloseEntry();
+      }
+    }
+    finally
+    {
+      _saving = false;
+    }
+  }
+
+  private async Task DeleteSourceAsync()
+  {
+    int sourceId = _sourceId;
+    _saving = true;
+    try
+    {
+      HouseAudioResult<bool> result = await Api.DeleteSourceAsync(sourceId);
+      if (Accepted(result))
+      {
+        await OnSaved.InvokeAsync(snapshot => snapshot with
+        {
+          Sources = snapshot.Sources.Where(source => source.SourceId != sourceId).ToList()
+        });
+        CloseEntry();
+        return;
+      }
+
+      // 409, as a rule. A 404 reads the same here, and means the source went from elsewhere after this
+      // row was last read, which an open dialog can put any distance back. The words are then wrong,
+      // though the next good poll takes the row away.
+      _confirmingDelete = false;
+      _error = Failure(result,
+        $"{_name} wasn't deleted: a room that's on is using it. Switch that room to another source or turn it off, then try again.");
+    }
+    finally
+    {
+      _saving = false;
+    }
+  }
+
+  private async Task<string?> RenameAsync()
+  {
+    string name = _name.Trim();
+    if (NameProblem(name) is { } problem)
+    {
+      return problem;
+    }
+
+    HouseAudioResult<bool> result = await Api.RenameControllerAsync(name);
+    if (!Accepted(result))
+    {
+      return Failure(result, $"The controller refused that name. It can't be blank, or over {MaxNameBytes} bytes.");
+    }
+
+    await OnSaved.InvokeAsync(snapshot => snapshot with
+    {
+      System = snapshot.System is { } system ? system with { Name = name } : null
+    });
+    return null;
+  }
+
+  private async Task<string?> AddSourceAsync()
+  {
+    string name = _name.Trim();
+    if (NameProblem(name) is { } problem)
+    {
+      return problem;
+    }
+
+    HouseSource added = new(_sourceId, name, _type);
+    HouseAudioResult<bool> result = await Api.AddSourceAsync(added.SourceId, added.Name, added.Type);
+    if (!Accepted(result))
+    {
+      // The name passed the same check the controller makes, which leaves 409: the input is occupied.
+      return Failure(result, $"Input {added.SourceId + 1} is already in use. Pick another input.");
+    }
+
+    await OnSaved.InvokeAsync(snapshot => snapshot with
+    {
+      // A poll can have reported the source already, while this save was finishing.
+      Sources = snapshot.Sources.Where(source => source.SourceId != added.SourceId)
+        .Append(added).OrderBy(source => source.SourceId).ToList()
+    });
+    return null;
+  }
+
+  private async Task<string?> UpdateSourceAsync()
+  {
+    string name = _name.Trim();
+    if (NameProblem(name) is { } problem)
+    {
+      return problem;
+    }
+
+    HouseSource updated = new(_sourceId, name, _type);
+    HouseAudioResult<bool> result = await Api.UpdateSourceAsync(updated.SourceId, updated.Name, updated.Type);
+    if (!Accepted(result))
+    {
+      return Failure(result, $"{updated.Name} wasn't saved. The controller refused it, or no longer has that source.");
+    }
+
+    await OnSaved.InvokeAsync(snapshot => snapshot with
+    {
+      Sources = snapshot.Sources.Select(source => source.SourceId == updated.SourceId ? updated : source).ToList()
+    });
+    return null;
+  }
+
+  private async Task<string?> SavePasswordAsync()
+  {
+    // Reflect.get reads the DOM property without a script of our own. See the note at the top.
+    string? password;
+    try
+    {
+      password = await JS.InvokeAsync<string?>("Reflect.get", _passwordField, "value");
+    }
+    catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+    {
+      return PasswordNotSaved;
+    }
+
+    if (string.IsNullOrEmpty(password))
+    {
+      return "Enter the password.";
+    }
+
+    try
+    {
+      if (!await Passwords.SetAsync(password, CancellationToken.None))
+      {
+        return PasswordNotSaved;
+      }
+    }
+    catch (CryptographicException)
+    {
+      // An unusable key ring, which the store leaves to its caller.
+      return PasswordNotSaved;
+    }
+
+    _passwordSaved = true;
+    _passwordSavedUnder = Snapshot;
+    return null;
+  }
+
+  private static bool Accepted(HouseAudioResult<bool> result) => result is { Health: HouseAudioHealth.Ok, Value: true };
+
+  // refused is for a controller that answered and said no; otherwise the health says why.
+  private static string Failure(HouseAudioResult<bool> result, string refused) =>
+    result.Health == HouseAudioHealth.Ok ? refused : $"Not saved. {HouseAudioPanel.Reason(result.Health)}";
+
+  // The controller's own rule on the trimmed name, which it reports only as a bare 400.
+  private static string? NameProblem(string name)
+  {
+    if (name.Length == 0)
+    {
+      return "Enter a name.";
+    }
+
+    if (name.Contains('\0'))
+    {
+      return "A name can't contain a NUL character.";
+    }
+
+    return Encoding.UTF8.GetByteCount(name) > MaxNameBytes
+      ? $"That name is too long. The limit is {MaxNameBytes} bytes: {MaxNameBytes} plain letters, fewer with accents or symbols."
+      : null;
+  }
+}

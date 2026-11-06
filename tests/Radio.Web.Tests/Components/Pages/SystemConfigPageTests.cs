@@ -4,9 +4,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Microsoft.JSInterop;
 using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Models;
+using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 using Radio.Web.Tests.TestHelpers;
@@ -20,7 +23,13 @@ namespace Radio.Web.Tests.Components.Pages;
 public class SystemConfigPageTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
+  private static readonly TimeSpan HousePollInterval = TimeSpan.FromSeconds(3);
+
   private readonly RoutedApiHandler _metricsApi = new();
+  private readonly RecordingHandler _integrationsApi = new();
+  private readonly FakeHouseController _houseController = new();
+  private readonly FakeTimeProvider _houseTime = new();
+  private int _housePollersCreated;
 
   public SystemConfigPageTests()
   {
@@ -67,6 +76,19 @@ public class SystemConfigPageTests : TestContext
       new("fingerprint.identification_successes", "Counter", 3, 3, null, null, 1, DateTimeOffset.UtcNow, 1),
     });
     
+    // Recording, so a test can see which tab the encoder poll runs on.
+    Services.AddSingleton(_ => new IntegrationsApiService(
+      new HttpClient(_integrationsApi, disposeHandler: false) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+      NullLogger<IntegrationsApiService>.Instance));
+
+    HouseAudioApiService houseApi = _houseController.CreateClient(FakeHouseController.StoreWithPassword());
+    Services.AddSingleton(houseApi);
+    Services.AddSingleton<Func<HouseAudioPoller>>(() =>
+    {
+      _housePollersCreated++;
+      return new HouseAudioPoller(houseApi, _houseTime, HousePollInterval);
+    });
+
     // Setup JSInterop for Radzen components
     JSInterop.Mode = JSRuntimeMode.Loose;
   }
@@ -691,6 +713,226 @@ public class SystemConfigPageTests : TestContext
     cut.FindAll("a[role='tab']").First(a => a.TextContent.Contains("System Stats")).Click();
 
     cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().BeEmpty());
+  }
+
+  // ─── House Audio: the second tab, which moved every index after it ─────────────────────────
+
+  private static bool IsEncoderPoll(HttpMethod method, string path) =>
+    method == HttpMethod.Get && path == "/api/integrations/encoder/provisioning";
+
+  private static IEnumerable<string> TabNames(IRenderedComponent<SystemConfigPage> cut) =>
+    cut.FindAll("a[role='tab']")
+      .Where(tab => tab.Closest(".rz-tabview-panels") is null)
+      .Select(tab => tab.TextContent.Trim());
+
+  private static void SelectTab(IRenderedComponent<SystemConfigPage> cut, string name) =>
+    cut.FindAll("a[role='tab']").First(tab => tab.TextContent.Contains(name)).Click();
+
+  [Fact]
+  public void Tab_IsSecond_AfterSystemStats()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+
+    TabNames(cut).ElementAt(0).Should().Contain("System Stats");
+    TabNames(cut).ElementAt(1).Should().Contain("House Audio");
+    TabNames(cut).ElementAt(1).Should().Contain("speaker_group");
+    TabNames(cut).ElementAt(2).Should().Contain("Configuration");
+    TabNames(cut).Last().Should().Contain("Diagnostics");
+  }
+
+  [Fact]
+  public void DiagnosticsRoute_StillOpensDiagnostics()
+  {
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().NavigateTo("/diagnostics");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().ContainSingle());
+    cut.Find("a[role='tab'][aria-selected='true']").TextContent.Should().Contain("Diagnostics");
+    _housePollersCreated.Should().Be(0, "this route opens Diagnostics, so House Audio must cost nothing");
+  }
+
+  /// <summary>
+  /// <c>IntegrationsTabIndex</c> decides when the encoder poll runs, so a stale value leaves the Rotary
+  /// Encoders panel unfilled. No route selects this tab: the toast at <c>MainLayout.razor:1643</c>
+  /// lands on <c>/system</c>.
+  /// </summary>
+  // ─── The Settings tab comes back as it was left ───────────────────────────
+  private const string RememberedTabKey = "radio.settings.tab";
+
+  private void RememberTab(string? stored) =>
+    JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey).SetResult(stored);
+
+  private static string SelectedTab(IRenderedComponent<SystemConfigPage> cut) =>
+    cut.FindAll("a[role='tab'][aria-selected='true']")
+      .First(tab => tab.Closest(".rz-tabview-panels") is null).TextContent;
+
+  [Fact]
+  public void ChoosingATab_RemembersIt()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectTab(cut, "House Audio");
+
+    JSInterop.VerifyInvoke("localStorage.setItem").Arguments.Should().Equal(RememberedTabKey, "1");
+  }
+
+  [Fact]
+  public async Task TheRememberedTab_OpensWhenThePageDoes()
+  {
+    RememberTab("1");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("House Audio");
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='house-audio-panel']").Should().ContainSingle());
+    _housePollersCreated.Should().Be(1);
+    await Task.CompletedTask;
+  }
+
+  [Fact]
+  public void WhileTheMemoryIsBeingRead_NoTabShows()
+  {
+    // A first paint of System Stats would flash up and cost its body a mount.
+    JSRuntimeInvocationHandler<string?> read = JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey);
+
+    var cut = RenderComponent<SystemConfigPage>();
+    cut.FindAll("a[role='tab']").Should().BeEmpty();
+
+    read.SetResult("1");
+
+    cut.WaitForAssertion(() => SelectedTab(cut).Should().Contain("House Audio"));
+  }
+
+  /// <summary>
+  /// The tabs wait for the memory, and only for that. ComponentBase renders at the first await and then
+  /// not again until OnInitializedAsync ends, so with the tabs held past that first await they stayed
+  /// hidden for the whole data load: 5.4 s on the box. The fake API here never answers, so the load
+  /// cannot end and only an explicit render can show them.
+  /// </summary>
+  [Fact]
+  public void TheTabs_ShowWhileThePageDataIsStillLoading()
+  {
+    using HttpClient neverAnswers = new(new NeverAnswers()) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
+    Services.AddSingleton(new SystemApiService(neverAnswers, NullLogger<SystemApiService>.Instance));
+    JSRuntimeInvocationHandler<string?> read = JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey);
+
+    var cut = RenderComponent<SystemConfigPage>();
+    read.SetResult("1");
+
+    cut.WaitForAssertion(() => SelectedTab(cut).Should().Contain("House Audio"));
+  }
+
+  private sealed class NeverAnswers : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+      new TaskCompletionSource<HttpResponseMessage>().Task;
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("")]
+  [InlineData("not a tab")]
+  [InlineData("-1")]
+  [InlineData("10")]
+  public void AMissingOrUnusableMemory_OpensTheFirstTab(string? stored)
+  {
+    RememberTab(stored);
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("System Stats");
+  }
+
+  [Fact]
+  public void WhenStorageIsBlocked_ThePageStillOpens()
+  {
+    JSInterop.Setup<string?>("localStorage.getItem", RememberedTabKey).SetException(new JSException("blocked"));
+    JSInterop.SetupVoid("localStorage.setItem", _ => true).SetException(new JSException("blocked"));
+
+    var cut = RenderComponent<SystemConfigPage>();
+    SelectedTab(cut).Should().Contain("System Stats");
+
+    SelectTab(cut, "House Audio");
+
+    SelectedTab(cut).Should().Contain("House Audio");
+  }
+
+  [Fact]
+  public void TheDiagnosticsRoute_BeatsTheMemory()
+  {
+    RememberTab("1");
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().NavigateTo("/diagnostics");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("Diagnostics");
+    _housePollersCreated.Should().Be(0);
+    JSInterop.Invocations.Should().NotContain(call => call.Identifier == "localStorage.setItem",
+      "a route is not a choice, so /system still opens on the tab last chosen");
+  }
+
+  [Fact]
+  public async Task RememberingIntegrations_StartsTheEncoderPoll()
+  {
+    int before = _integrationsApi.Count(IsEncoderPoll);
+    RememberTab("8");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    SelectedTab(cut).Should().Contain("Integrations");
+    await _integrationsApi.WaitForAsync(IsEncoderPoll, before + 1);
+    SelectTab(cut, "System Stats");
+  }
+
+  [Fact]
+  public async Task IntegrationsTab_StartsTheEncoderPoll()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+    int before = _integrationsApi.Count(IsEncoderPoll);
+
+    // Integrations first: visiting the tab at the old index on the way would start the poll, and a
+    // tick from that would satisfy this wait with the constant still wrong.
+    SelectTab(cut, "Integrations");
+    await _integrationsApi.WaitForAsync(IsEncoderPoll, before + 1);
+
+    SelectTab(cut, "System Stats");
+  }
+
+  /// <summary>
+  /// RadzenTabs renders only the selected tab's body, so the panel exists only while its tab shows.
+  /// This holds that end to end: nothing before the tab is opened, and leaving it ends the poller.
+  /// </summary>
+  [Fact]
+  public async Task HouseAudio_PollsOnlyWhileItsTabIsShowing()
+  {
+    static bool IsSystemPoll(HttpMethod method, string path) => method == HttpMethod.Get && path == "/system";
+
+    var cut = RenderComponent<SystemConfigPage>();
+    _housePollersCreated.Should().Be(0, "an unopened tab has no panel, and must cost the box nothing");
+
+    SelectTab(cut, "House Audio");
+    cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
+    _housePollersCreated.Should().Be(1);
+
+    // Parks a poll in flight. Only the poller's disposal can cancel it, so this waits on the fact
+    // rather than on a silence that a slow machine would also produce.
+    int polls = _houseController.Handler.Count(IsSystemPoll);
+    _houseController.SystemGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    _houseTime.Advance(HousePollInterval);
+    await _houseController.Handler.WaitForAsync(IsSystemPoll, polls + 1);
+
+    SelectTab(cut, "System Stats");
+
+    await _houseController.RequestCancelled.Task.WaitAsync(RecordingHandler.RendezvousTimeout);
+    cut.WaitForAssertion(() => cut.Markup.Should().NotContain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
+
+    // Coming back is a new panel with its own poller, never a shared or reused one.
+    _houseController.SystemGate = null;
+    SelectTab(cut, "House Audio");
+
+    cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mackelhome Controller"), RecordingHandler.RendezvousTimeout);
+    _housePollersCreated.Should().Be(2);
   }
 
   [Theory]

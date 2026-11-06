@@ -66,6 +66,9 @@ public sealed class RadioWebFactory : WebApplicationFactory<Program>
         // has to be made unreachable rather than un-started.
         ["RotaryPhone:HubUrl"] = "http://127.0.0.1:1/hub",
         ["RotaryPhone:ApiBaseUrl"] = "http://127.0.0.1:1",
+
+        // Same reason: the appsettings.json default is the live whole-house controller.
+        ["HouseAudio:BaseUrl"] = "http://127.0.0.1:1",
       });
     });
 

@@ -25,10 +25,11 @@ public class SeekBarTests : TestContext
     JSInterop.Mode = JSRuntimeMode.Loose;
   }
 
-  private IRenderedComponent<SeekBar> Render(double fraction = 0.1, bool disabled = false) =>
+  private IRenderedComponent<SeekBar> Render(double fraction = 0.1, bool disabled = false, double? slop = null) =>
     RenderComponent<SeekBar>(p => p
       .Add(x => x.Fraction, fraction)
       .Add(x => x.Disabled, disabled)
+      .Add(x => x.RelativeDragSlop, slop)
       .Add(x => x.OnSeek, EventCallback.Factory.Create<double>(this, f => _seeks.Add(f)))
       .Add(x => x.OnScrub, EventCallback.Factory.Create<double?>(this, f => _scrubs.Add(f))));
 
@@ -133,6 +134,128 @@ public class SeekBarTests : TestContext
     await cut.Instance.OnDragEnd(1.7);
 
     Assert.Equal([1.0], _seeks);
+  }
+
+  [Fact]
+  public async Task Relative_Tap_DoesNotSeek_OrScrub_OrMoveTheBar()
+  {
+    var cut = Render(fraction: 0.4, slop: 0.03);
+
+    await cut.Instance.OnDragMove(0.9);
+    await cut.Instance.OnDragMove(0.91);
+    Assert.Contains("width:40%", cut.Find(".seek-bar-fill").GetAttribute("style"));
+    await cut.Instance.OnDragEnd(0.91);
+
+    Assert.Empty(_seeks);
+    Assert.Empty(_scrubs);
+    Assert.Contains("width:40%", cut.Find(".seek-bar-fill").GetAttribute("style"));
+    Assert.DoesNotContain("is-dragging", cut.Find(".seek-bar").ClassName);
+  }
+
+  [Fact]
+  public async Task Relative_Drag_MovesByTheFingersTravel_FromTheBarsPosition()
+  {
+    var cut = Render(fraction: 0.4, slop: 0.03);
+
+    await cut.Instance.OnDragMove(0.9);
+    await cut.Instance.OnDragMove(0.8);
+
+    Assert.Contains("width:30%", cut.Find(".seek-bar-fill").GetAttribute("style"));
+
+    await cut.Instance.OnDragEnd(0.7);
+
+    Assert.Equal(new[] { 0.2 }, _seeks.Select(seek => Math.Round(seek, 6)));
+    Assert.Equal(new double?[] { 0.3, null }, _scrubs.Select(scrub => scrub is { } value ? Math.Round(value, 6) : (double?)null));
+  }
+
+  [Fact]
+  public async Task Relative_Press_LeavesTheBarFollowingItsParent_UntilTheFingerMoves()
+  {
+    var cut = Render(fraction: 0.4, slop: 0.03);
+
+    await cut.Instance.OnDragMove(0.9);
+    cut.SetParametersAndRender(p => p.Add(x => x.Fraction, 0.5));
+    Assert.Contains("width:50%", cut.Find(".seek-bar-fill").GetAttribute("style"));
+
+    // The travel counts from where the bar is when the finger starts moving, not where it was pressed.
+    await cut.Instance.OnDragMove(0.8);
+
+    Assert.Contains("width:40%", cut.Find(".seek-bar-fill").GetAttribute("style"));
+  }
+
+  [Fact]
+  public async Task Relative_Release_WithNoMoveReported_DoesNotSeek()
+  {
+    // A flick between two frames reports no move, so nothing has been shown to commit.
+    var cut = Render(fraction: 0.4, slop: 0.03);
+
+    await cut.Instance.OnDragMove(0.5);
+    await cut.Instance.OnDragEnd(0.9);
+
+    Assert.Empty(_seeks);
+  }
+
+  [Fact]
+  public async Task Relative_TapWhileACommitIsInFlight_DoesNotLeaveTheBarHeld()
+  {
+    TaskCompletionSource landed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    var cut = RenderComponent<SeekBar>(p => p
+      .Add(x => x.Fraction, 0.4)
+      .Add(x => x.RelativeDragSlop, 0.03)
+      .Add(x => x.OnScrub, EventCallback.Factory.Create<double?>(this, f => _scrubs.Add(f)))
+      .Add(x => x.OnSeek, EventCallback.Factory.Create<double>(this, () => landed.Task)));
+
+    await cut.Instance.OnDragMove(0.4);
+    await cut.Instance.OnDragMove(0.6);
+    Task commit = cut.Instance.OnDragEnd(0.6);
+
+    await cut.Instance.OnDragMove(0.9);
+    landed.SetResult();
+    await commit;
+    await cut.Instance.OnDragEnd(0.9);
+
+    Assert.DoesNotContain("is-dragging", cut.Find(".seek-bar").ClassName);
+    Assert.Contains("width:40%", cut.Find(".seek-bar-fill").GetAttribute("style"));
+    Assert.Null(_scrubs[^1]);
+  }
+
+  [Fact]
+  public async Task Relative_DragDuringACommit_StartsFromWhatTheBarShows()
+  {
+    TaskCompletionSource landed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    var cut = RenderComponent<SeekBar>(p => p
+      .Add(x => x.Fraction, 0.4)
+      .Add(x => x.RelativeDragSlop, 0.03)
+      .Add(x => x.OnSeek, EventCallback.Factory.Create<double>(this, () => landed.Task)));
+
+    await cut.Instance.OnDragMove(0.4);
+    await cut.Instance.OnDragMove(0.6);
+    Task commit = cut.Instance.OnDragEnd(0.6);
+
+    await cut.Instance.OnDragMove(0.2);
+    await cut.Instance.OnDragMove(0.3);
+
+    Assert.Contains("width:70%", cut.Find(".seek-bar-fill").GetAttribute("style"));
+
+    landed.SetResult();
+    await commit;
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData(0.03)]
+  public async Task DisabledDuringADrag_DoesNotSeekOnRelease(double? slop)
+  {
+    var cut = Render(fraction: 0.4, slop: slop);
+    await cut.Instance.OnDragMove(0.4);
+    await cut.Instance.OnDragMove(0.6);
+
+    cut.SetParametersAndRender(p => p.Add(x => x.Disabled, true));
+    await cut.Instance.OnDragEnd(0.6);
+
+    Assert.Empty(_seeks);
+    Assert.Null(_scrubs[^1]);
+    Assert.DoesNotContain("is-dragging", cut.Find(".seek-bar").ClassName);
   }
 
   [Fact]
