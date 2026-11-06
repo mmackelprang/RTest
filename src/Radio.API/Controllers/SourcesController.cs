@@ -523,7 +523,7 @@ public class SourcesController : ControllerBase
   /// </summary>
   /// <remarks>
   /// Returns a list of subdirectory names for folder-based navigation.
-  /// Use this to browse different categories of sounds (e.g., "alarm", "notify", "ring").
+  /// The listing starts at NotificationSounds:Directory.
   /// Pass the subdirectory name to subsequent calls to navigate deeper.
   /// </remarks>
   /// <param name="subdirectory">Optional current subdirectory path to list subdirectories from.</param>
@@ -559,7 +559,7 @@ public class SourcesController : ControllerBase
   ///
   /// Supported formats: .mp3, .wav, .ogg, .flac
   /// </remarks>
-  /// <param name="subdirectory">Optional subdirectory to search in (e.g., "alarm", "notify").</param>
+  /// <param name="subdirectory">Optional subdirectory of NotificationSounds:Directory to search in.</param>
   /// <returns>List of notification sound files with absolute paths.</returns>
   [HttpGet("events/sounds")]
   [ProducesResponseType(typeof(List<NotificationSoundDto>), StatusCodes.Status200OK)]
