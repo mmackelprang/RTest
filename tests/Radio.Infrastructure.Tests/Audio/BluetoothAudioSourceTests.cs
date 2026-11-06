@@ -1666,6 +1666,273 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     }
   }
 
+  // --- M7: an inactive source stays out of the mixer -----------------------------------------
+  //
+  // Only one primary source may be audible. Before this, a connect routed the phone's capture into
+  // the mixer whatever was active, so the phone played over the radio while the UI showed radio.
+
+  private BluetoothAudioSource BuildSourceWithActive(
+    Mock<IBluetoothService> btMock,
+    Func<IAudioSource?> getActiveSource,
+    Radio.Infrastructure.Audio.SoundFlow.SoundFlowPlaybackService? playback = null) =>
+    new(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      btMock.Object,
+      _options,
+      identificationService: null,
+      metricsCollector: _metricsMock.Object,
+      playbackService: playback,
+      getActiveSource: getActiveSource);
+
+  private static void RaiseCaptureNode(Mock<IBluetoothService> btMock) =>
+    btMock.Raise(
+      b => b.CaptureNodeAvailable += null,
+      new CaptureNodeAvailableEventArgs { DeviceAddress = "AA:BB:CC:DD:EE:FF", PipeWireSerial = 1 });
+
+  private static void RaiseCaptureStall(Mock<IBluetoothService> btMock) =>
+    btMock.Raise(
+      b => b.CaptureStreamStalled += null,
+      new CaptureStreamStalledEventArgs
+      {
+        DeviceAddress = "AA:BB:CC:DD:EE:FF",
+        ElapsedMsSinceLastCallback = 6000,
+        ConsecutiveStalledChecks = 3
+      });
+
+  private Task WaitForStallRecoveryAsync() =>
+    WaitForAsync(() => _loggerMock.Invocations.ToArray().Any(i =>
+      i.Arguments.Count > 2 && i.Arguments[2]?.ToString()?.Contains("capture pipeline recreated") == true));
+
+  [Fact]
+  public async Task DeviceConnected_WhileAnotherSourceIsActive_AcquiresNothing()
+  {
+    var radio = new Mock<IAudioSource>().Object;
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(NewSoundComponentMock(), probe);
+    await using var source = BuildSourceWithActive(btMock, () => radio);
+
+    RaiseDeviceConnected(btMock);
+
+    // TryAcquireAudioCaptureAsync reaches the mocked acquisition synchronously, so this is not a
+    // race: on the old code the count is already 1 here. The switch does the acquiring now.
+    Assert.Equal(0, probe.Calls);
+    Assert.Equal(AudioSourceState.Created, source.State);
+  }
+
+  [Fact]
+  public async Task CaptureRecovered_WhileAnotherSourceIsActive_AcquiresNothing()
+  {
+    // The pipeline monitor's own recovery reaches the same acquisition by a second door.
+    var radio = new Mock<IAudioSource>().Object;
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(NewSoundComponentMock(), probe);
+    await using var source = BuildSourceWithActive(btMock, () => radio);
+
+    btMock.Raise(b => b.CaptureStreamRecovered += null, EventArgs.Empty);
+
+    Assert.Equal(0, probe.Calls);
+  }
+
+  [Fact]
+  public async Task AvrcpPlaying_WhileAnotherSourceIsActive_DoesNotClaimPlaying_SoTheSwitchStillStartsIt()
+  {
+    // ⚠ This is the trap in M7, and why gating the routing alone would be wrong. SwitchSourceAsync
+    // only calls PlayAsync when State != Playing. A source AVRCP promoted while inactive would be
+    // skipped by the switch and never routed: the takeover would silence the radio and play nothing.
+    IAudioSource? active = new Mock<IAudioSource>().Object;
+    var capture = NewSoundComponentMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 1);
+    await using var source = BuildSourceWithActive(btMock, () => active);
+    await source.InitializeAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Ready, source.State);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+
+    Assert.Equal(AudioSourceState.Ready, source.State);
+
+    // The switch publishes the source first, then starts it because it does not read Playing.
+    active = source;
+    await source.PlayAsync(CancellationToken.None);
+
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    AssertArmTaken("SoundComponent", source, capture);
+  }
+
+  [Fact]
+  public async Task Initialize_WhilePhonePlaysAndAnotherSourceIsActive_StaysReady()
+  {
+    // The other way to read a stale Playing: the catch-up in InitializeAsync.
+    IAudioSource? active = new Mock<IAudioSource>().Object;
+    var btMock = BuildBtMock(capture: null, new CaptureAcquisitionProbe());
+    await using var source = BuildSourceWithActive(btMock, () => active);
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+
+    await source.InitializeAsync(CancellationToken.None);
+
+    Assert.Equal(AudioSourceState.Ready, source.State);
+  }
+
+  [Fact]
+  public async Task StallRecovery_WhileAnotherSourceIsActive_DoesNotRouteTheCapture()
+  {
+    // The door the connect gate does not cover: stall recovery runs PlayCoreAsync directly.
+    // A device-free service reports no engine, and in that state the routing path's first act is
+    // to start the capture device, which makes "routing was entered" observable from here.
+    var radio = new Mock<IAudioSource>().Object;
+    var capture = (global::SoundFlow.Abstracts.Devices.AudioCaptureDevice)NewCaptureDeviceMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe);
+    using var playback = Radio.Infrastructure.Tests.Audio.SoundFlow.DeviceFreePlaybackService.Create();
+    await using var source = BuildSourceWithActive(btMock, () => radio, playback);
+    await source.InitializeAsync(CancellationToken.None);
+    Assert.Equal(1, probe.Calls);
+
+    RaiseCaptureStall(btMock);
+    await WaitForStallRecoveryAsync();
+
+    Mock.Get(capture).Verify(d => d.Start(), Times.Never);
+  }
+
+  [Fact]
+  public async Task StallRecovery_WhileThisSourceIsActive_StillRoutesTheCapture()
+  {
+    // The control for the test above: the same path with the gate open does reach routing, so the
+    // Never there is a statement about the gate and not about a path that never runs.
+    IAudioSource? active = null;
+    var capture = (global::SoundFlow.Abstracts.Devices.AudioCaptureDevice)NewCaptureDeviceMock();
+    var btMock = BuildBtMock(capture, new CaptureAcquisitionProbe());
+    using var playback = Radio.Infrastructure.Tests.Audio.SoundFlow.DeviceFreePlaybackService.Create();
+    await using var source = BuildSourceWithActive(btMock, () => active, playback);
+    active = source;
+    await source.InitializeAsync(CancellationToken.None);
+
+    RaiseCaptureStall(btMock);
+    await WaitForStallRecoveryAsync();
+
+    Mock.Get(capture).Verify(d => d.Start(), Times.AtLeastOnce);
+  }
+
+  // --- H1: a node that appears late is bound ------------------------------------------------
+  //
+  // The connect's own search gives up after about 20 s, an unbound A2DP node lives about 4 s
+  // (AUD-10), and only a PARKED capture used to be re-bound when a node appeared. So Bluetooth
+  // already active, phone connected idle, play pressed 30 s later: the node appeared, nothing
+  // bound it, and the phone dropped the stream.
+
+  [Theory]
+  [MemberData(nameof(CaptureKinds))]
+  public async Task NodeAppears_WhileActiveWithNoCapture_BindsIt(string kind)
+  {
+    var capture = NewCaptureMock(kind);
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 1);
+    await using var source = BuildSource(btMock);
+
+    RaiseDeviceConnected(btMock);   // the connect's search finds nothing, as with an idle phone
+    await WaitForAsync(() => probe.Calls == 1);
+
+    RaiseCaptureNode(btMock);
+
+    await WaitForAsync(() => probe.Calls == 2);
+    await WaitForAsync(() => source.State == AudioSourceState.Ready);
+    AssertArmTaken(kind, source, capture);
+  }
+
+  [Fact]
+  public async Task NodeAppears_AfterAvrcpPlayingWasDiscardedInStopped_LandsPlaying()
+  {
+    // M2's stuck shape: a reconnect leaves the source Stopped with no capture, so the phone's
+    // Playing edge is refused. Binding the node re-derives Playing from that recorded edge.
+    var capture = NewSoundComponentMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 3);
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);       // two acquisitions, both empty
+    RaiseDeviceDisconnected(btMock);
+    await WaitForAsync(() => source.State == AudioSourceState.Stopped);
+    RaiseDeviceConnected(btMock);                         // the third, also empty
+    await WaitForAsync(() => probe.Calls == 3);
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+
+    RaiseCaptureNode(btMock);
+
+    await WaitForAsync(() => source.State == AudioSourceState.Playing);
+    AssertArmTaken("SoundComponent", source, capture);
+  }
+
+  [Fact]
+  public async Task NodeAppears_WhileCaptureIsHeld_AcquiresNothingNew()
+  {
+    // A parked capture keeps its generator here, and AUD-10's re-bind owns that case: a fresh
+    // acquisition would build a generator nothing is routing and abandon the parked one.
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(NewSoundComponentMock(), probe);
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+    var calls = probe.Calls;
+
+    RaiseCaptureNode(btMock);
+
+    // Bounded negative check: starvation can only weaken it (CLAUDE.md § Test Timing).
+    await Task.Delay(100);
+    Assert.Equal(calls, probe.Calls);
+  }
+
+  [Fact]
+  public async Task NodeAppears_WhileAnotherSourceIsActive_LeavesItToTheSwitch()
+  {
+    var radio = new Mock<IAudioSource>().Object;
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(NewSoundComponentMock(), probe);
+    await using var source = BuildSourceWithActive(btMock, () => radio);
+
+    RaiseCaptureNode(btMock);
+
+    await Task.Delay(100);   // bounded negative check, as above
+    Assert.Equal(0, probe.Calls);
+  }
+
+  [Fact]
+  public async Task NodeAppears_AfterTheOwnerPressedStop_StaysStopped()
+  {
+    // Stop on the console leaves Bluetooth active and the phone connected. A pause and resume on
+    // the phone must not bring audio back against that Stop.
+    var capture = NewSoundComponentMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe);
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+    await source.StopAsync(CancellationToken.None);
+    var calls = probe.Calls;
+
+    RaiseCaptureNode(btMock);
+
+    await Task.Delay(100);   // bounded negative check, as above
+    Assert.Equal(calls, probe.Calls);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+  }
+
+  [Fact]
+  public async Task NodeAppears_AfterStopThenReconnect_BindsAgain()
+  {
+    // That Stop belonged to the session that ended; the next phone session starts clean.
+    var capture = NewSoundComponentMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe);
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+    await source.StopAsync(CancellationToken.None);
+    RaiseDeviceDisconnected(btMock);
+    var calls = probe.Calls;
+
+    RaiseCaptureNode(btMock);
+
+    await WaitForAsync(() => probe.Calls > calls);
+  }
+
   [Theory]
   [MemberData(nameof(CaptureKinds))]
   public async Task DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady(string kind)

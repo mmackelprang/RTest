@@ -1906,9 +1906,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
   /// <summary>
   /// Handler for <see cref="PipeWireRegistryListener.NodeAppeared"/>. Surfaces
-  /// the appearance as <see cref="CaptureNodeAvailable"/> for the existing
-  /// downstream consumers (Plan B autoswitch gate), then queues the AUD-10 re-bind
-  /// of a parked capture.
+  /// the appearance as <see cref="CaptureNodeAvailable"/> for its consumers (the Plan B
+  /// autoswitch gate, and BluetoothAudioSource when it is active with no capture),
+  /// then queues the AUD-10 re-bind of a parked capture.
   /// </summary>
   /// <remarks>
   /// ⚠ AUD-10 §1.2: this used to publish the registry global id as <c>PipeWireSerial</c>, under a

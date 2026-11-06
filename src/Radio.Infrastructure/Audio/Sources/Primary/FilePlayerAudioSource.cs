@@ -57,6 +57,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private Task? _playbackMonitorTask;
   private bool _trackEndedNaturally;
   private long _pendingSeekMs;
+  private string? _pendingSeekFile;   // The file _pendingSeekMs is a position in.
+  private bool _keepPlaceOnNextStop;  // See KeepPlaceOnNextStop.
 
   // AUD-98: queue-state writes go through this gate one at a time; a snapshot whose generation is no
   // longer the newest is skipped (see SaveQueueStateAsync). _lastQueueSave is the most recent write.
@@ -939,7 +941,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
 
         // ⛔ AUD-24 — OWNER RULING, 2026-09-10. `_pendingSeekMs = prefs.SongPositionMs;` used to
-        // sit here, and PlayCoreAsync still consumes it. It is deliberately not assigned.
+        // sit here, and ApplyPendingSeekAsync still consumes it. It is deliberately not assigned.
         //
         // Repairing SeekCoreAsync would otherwise have made resume-where-you-left-off start
         // working on every restart — a startup behaviour change nobody asked for, riding along on
@@ -1049,30 +1051,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       // Successful playback start — reset consecutive skip counter
       _consecutiveSkipCount = 0;
 
-      // Restore persisted playback position if this is the first play after queue restoration.
-      //
-      // ⛔ AUD-24 — DORMANT BY THE OWNER'S RULING, 2026-09-10, and deliberately kept rather than
-      // deleted. InitializeAsync no longer assigns _pendingSeekMs (see the ruling recorded there),
-      // and nothing else writes it, so this branch cannot currently be entered. It is the whole
-      // consumer half of resume-where-you-left-off: restoring that feature is one line there, and
-      // this block is what it would feed. Deleting it would make that a rewrite instead.
-      //
-      // ⚠ Before this row, the branch DID run and was a second silent no-op — SeekCoreAsync moved
-      // a field and called nothing, under a log line reading "Restored playback position to {Ms}ms".
-      // SeekCoreAsync is fixed, so if the assignment is ever restored this now works.
-      if (_pendingSeekMs > 0)
-      {
-        try
-        {
-          await SeekAsync(TimeSpan.FromMilliseconds(_pendingSeekMs), cancellationToken);
-          Logger.LogInformation("🎵 FILE PLAYER: Restored playback position to {Ms}ms", _pendingSeekMs);
-        }
-        catch (Exception ex)
-        {
-          Logger.LogWarning(ex, "Failed to seek to persisted position {Ms}ms", _pendingSeekMs);
-        }
-        _pendingSeekMs = 0;
-      }
+      await ApplyPendingSeekAsync(cancellationToken);
 
       Logger.LogInformation(
         "🎵 FILE PLAYER AUDIO FLOW STARTED: \"{FileName}\" routed to SoundFlow (PlaybackId={PlaybackId})",
@@ -1084,6 +1063,53 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     else
     {
       Logger.LogWarning("🎵 FILE PLAYER: SoundFlow playback service not available, playback simulation only");
+      await ApplyPendingSeekAsync(cancellationToken);
+    }
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Only a Bluetooth takeover asks for this. AudioManager's switch stops the old source and has no
+  /// way to pause it, and a stop zeroes the position, so this is what makes a takeover a pause for the
+  /// one source with a place to keep. It holds for the life of the process and resumes when the owner
+  /// next presses play: nothing resumes the file on its own when the phone disconnects.
+  /// </remarks>
+  internal override void KeepPlaceOnNextStop() => _keepPlaceOnNextStop = true;
+
+  /// <summary>
+  /// Moves a just-started file to the place a takeover kept, once, if that file is still the current
+  /// one. A file the owner chose instead starts from the top.
+  /// </summary>
+  /// <remarks>
+  /// ⛔ AUD-24 — OWNER'S RULING, 2026-09-10. InitializeAsync still does not assign _pendingSeekMs, so
+  /// a restart does not resume, and restoring that is one line there. Only
+  /// <see cref="StopCoreAsync"/> writes it, for a takeover.
+  ///
+  /// The log reports where the file landed rather than claiming the seek worked:
+  /// <see cref="SeekCoreAsync"/> returns normally when the player refuses.
+  /// </remarks>
+  private async Task ApplyPendingSeekAsync(CancellationToken cancellationToken)
+  {
+    long seekMs = _pendingSeekMs;
+    string? seekFile = _pendingSeekFile;
+    _pendingSeekMs = 0;
+    _pendingSeekFile = null;
+
+    if (seekMs <= 0 || seekFile != _currentFile)
+    {
+      return;
+    }
+
+    try
+    {
+      await SeekAsync(TimeSpan.FromMilliseconds(seekMs), cancellationToken);
+      Logger.LogInformation(
+        "🎵 FILE PLAYER: asked to resume at {Ms}ms after a takeover; position is now {Position}",
+        seekMs, _position);
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+      Logger.LogWarning(ex, "Failed to seek to the kept position {Ms}ms", seekMs);
     }
   }
 
@@ -1185,6 +1211,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // branch with _position == 0 and overwrite a good resume point with zero.
     var hadLivePlayback = _playbackId != null;
 
+    // Read and cleared on every stop: the request covers this stop, live or not.
+    var keepPlace = _keepPlaceOnNextStop;
+    _keepPlaceOnNextStop = false;
+
     // Cancel playback monitoring
     _playbackCts?.Cancel();
 
@@ -1207,6 +1237,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       _preferences.CurrentValue.LastSongPlayed = _currentFile;
       _preferences.CurrentValue.SongPositionMs = (long)_position.TotalMilliseconds;
+
+      if (keepPlace)
+      {
+        _pendingSeekMs = (long)_position.TotalMilliseconds;
+        _pendingSeekFile = _currentFile;
+      }
     }
 
     _position = TimeSpan.Zero;

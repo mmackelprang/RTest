@@ -458,6 +458,97 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   [Fact]
+  public async Task TakeoverStop_ThenPlay_ResumesTheSameFileWhereItWas()
+  {
+    // AudioManager's switch stops the old source, so a Bluetooth takeover used to send a file back
+    // to its start. The takeover asks for the place to be kept; nothing else does.
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.FromMinutes(2.5), source.Position);
+  }
+
+  [Fact]
+  public async Task TakeoverStop_KeptPlaceIsUsedOnce()
+  {
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    await source.PlayAsync();
+    await source.StopAsync();
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task OrdinaryStop_ThenPlay_StillStartsFromTheTop()
+  {
+    // Hand switches and the Stop button stay as they were. AUD-24's ruling declined
+    // resume-where-you-left-off as a behaviour nobody asked for; this row is a takeover, not that.
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    await source.StopAsync();
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task TakeoverStop_ThenADifferentFile_StartsThatFileFromTheTop()
+  {
+    // The owner comes back and picks something else: the kept place belongs to the old file.
+    var source = CreateSource();
+    CreateTestFile("one.mp3");
+    CreateTestFile("two.mp3");
+    await source.LoadFileAsync("one.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    await source.LoadFileAsync("two.mp3");
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task KeepPlace_AppliesToOneStopOnly_EvenWhenThatStopHadNothingLive()
+  {
+    // A stop with nothing playing has no place to keep, and must not leave the request armed for
+    // some later, ordinary stop.
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+
+    source.KeepPlaceOnNextStop();
+    await source.StopAsync();
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+    await source.StopAsync();
+    await source.PlayAsync();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
   public async Task DisposeAsync_AfterStop_DoesNotClobberSavedResumePosition()
   {
     // AudioManager.DisposeAsync stops the source and THEN disposes it, so the
