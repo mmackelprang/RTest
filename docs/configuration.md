@@ -763,7 +763,7 @@ policy behaves: [fingerprinting.md § Call policy](fingerprinting.md#call-policy
 | `DefaultFMStepMHz` | `double` | `0.1` | Default FM frequency step in MHz (typical: 0.1 or 0.2) |
 | `MinFMFrequencyMHz` | `double` | `87.5` | Minimum FM frequency in MHz |
 | `MaxFMFrequencyMHz` | `double` | `108.0` | Maximum FM frequency in MHz |
-| `ScanStopThreshold` | `int` | `50` | Signal strength threshold for scan stop (0-100) |
+| `ScanStopThreshold` | `int` | `14` | Signal strength threshold for a live seek to stop (0-100). Suits a 30 dB `TunerGainDb`; a fresh band map bypasses it |
 | `ScanStepDelayMs` | `int` | `100` | Time to wait between frequency steps during scanning (milliseconds) |
 | `DefaultDeviceVolume` | `int` | `50` | Default device volume (0-100) |
 | `AutoGain` | `bool` | `false` | Whether the SDR tuner starts on automatic gain. Off because automatic gain overloaded the device on strong FM stations. Applies to every tuner band, not AM or Shortwave. The panel's switch lasts until the next restart |

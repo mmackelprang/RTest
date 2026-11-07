@@ -50,10 +50,13 @@ public class RadioOptions
   /// </summary>
   /// <remarks>
   /// The signal strength has two scales (AUD-101). On FM, Weather, VHF and Aircraft it is linear
-  /// wideband RMS, so 50 means half of full scale. On AM and Shortwave it is the in-channel level
-  /// in dB, <c>−60 + 0.6 × threshold</c> dBFS, so 50 means −30 dBFS in the channel.
+  /// wideband RMS, so 14 means 14% of full scale. On AM and Shortwave it is the in-channel level
+  /// in dB, <c>−60 + 0.6 × threshold</c> dBFS, so 14 means −51.6 dBFS in the channel. The default
+  /// suits the default <see cref="TunerGainDb"/>: signal strength follows the gain, and at 30 dB a
+  /// station can read well under the 50 this used to be. A fresh band map bypasses this value,
+  /// because Scan then hops the map instead of seeking live.
   /// </remarks>
-  public int ScanStopThreshold { get; set; } = 50;
+  public int ScanStopThreshold { get; set; } = 14;
 
   /// <summary>
   /// Gets or sets the scan step delay in milliseconds.
