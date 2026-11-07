@@ -1121,7 +1121,7 @@ Starts scanning for stations in the specified direction.
 
 **Behavior:**
 - Continuously steps frequency in the specified direction
-- Stops automatically when a strong signal is found (threshold: 50%)
+- Pauses on each signal over the band's threshold (`ScanStopThreshold`, or `HfScanStopThreshold` on AM and Shortwave), then carries on
 - Can be manually stopped with `/api/radio/scan/stop`
 
 **Response:** 200 OK - Returns updated `RadioStateDto` with `isScanning: true`

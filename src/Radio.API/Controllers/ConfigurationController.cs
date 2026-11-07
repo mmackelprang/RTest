@@ -424,19 +424,18 @@ public class ConfigurationController : ControllerBase
   {
     if (string.Equals(section, "radio", StringComparison.OrdinalIgnoreCase))
     {
-      if (data.TryGetValue("ScanStopThreshold", out var rawValue))
+      foreach (string key in new[] { "ScanStopThreshold", "HfScanStopThreshold" })
       {
-        if (TryReadInt(rawValue, out var pct))
+        // The Web client posts camelCase and data is case-sensitive.
+        object? rawValue = data.FirstOrDefault(kv => string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
+        if (TryReadInt(rawValue, out var pct) && (pct < 0 || pct > 100))
         {
-          if (pct < 0 || pct > 100)
+          return new BadRequestObjectResult(new
           {
-            return new BadRequestObjectResult(new
-            {
-              error = "ScanStopThreshold must be between 0 and 100 (percent).",
-              field = "ScanStopThreshold",
-              value = pct
-            });
-          }
+            error = $"{key} must be between 0 and 100 (percent).",
+            field = key,
+            value = pct
+          });
         }
       }
     }

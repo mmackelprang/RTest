@@ -69,7 +69,8 @@ public interface IRadioControl
 
   /// <summary>
   /// Starts scanning for stations in the specified direction.
-  /// Scanning will continue until a strong signal is found or <see cref="StopScanAsync"/> is called.
+  /// Scanning pauses on each signal and carries on until it has gone round the band, the band
+  /// changes, or <see cref="StopScanAsync"/> is called.
   /// </summary>
   /// <param name="direction">The direction to scan (up or down).</param>
   /// <param name="cancellationToken">Cancellation token.</param>
@@ -94,7 +95,8 @@ public interface IRadioControl
   ScanDirection? ScanDirection { get; }
 
   /// <summary>
-  /// Gets the signal strength threshold (0-100) at which the scan pauses on a signal.
+  /// Gets the signal strength threshold (0-100) at which the scan pauses on a signal, for the
+  /// current band.
   /// </summary>
   /// <remarks>
   /// Compared with <see cref="SignalStrength"/>, so it has that property's two scales: on FM,
