@@ -139,6 +139,61 @@ public sealed class SDRRadioAudioSourceScanTests : IAsyncDisposable
     Assert.True(Snapshot().Length > 2, "a live seek steps through the band");
   }
 
+  // The signal strength is on a different scale on the HF bands, so the threshold is a different
+  // setting there, and the panel's indicator reads the one in force.
+  [Theory]
+  [InlineData(BandType.FM, 92_300_000, 14)]
+  [InlineData(BandType.Aircraft, 120_000_000, 14)]
+  [InlineData(BandType.AM, 1_000_000, 50)]
+  [InlineData(BandType.Shortwave, 6_000_000, 50)]
+  public void TheThresholdInForce_FollowsTheBandsScale(BandType band, long frequencyHz, int expected)
+  {
+    _radioOptions.ScanStopThreshold = 14;
+    _radioOptions.HfScanStopThreshold = 50;
+    SDRRadioAudioSource source = CreateSource(_map.Object);
+
+    Assert.True(_receiver.SetBand(band, frequencyHz));
+
+    Assert.Equal(expected, source.ScanStopThreshold);
+  }
+
+  [Fact]
+  public async Task ALiveSeekOnAm_UsesTheHfThreshold()
+  {
+    TaskCompletionSource firstStop = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    _map.Setup(m => m.RecordSeekStation("AM", It.IsAny<long>(), It.IsAny<float>()))
+      .Callback(() => firstStop.TrySetResult());
+    MapReturns(null, BandMapService.ScanReasonStale);
+    _radioOptions.ScanStopThreshold = 100;
+    _radioOptions.HfScanStopThreshold = 0;   // every step is a stop, on this setting alone
+    Assert.True(_receiver.SetBand(BandType.AM, 1_000_000));
+    SDRRadioAudioSource source = CreateSource(_map.Object);
+
+    await source.StartScanAsync(ScanDirection.Up);
+    await firstStop.Task.WaitAsync(FailSafe);
+
+    await source.StopScanAsync();
+  }
+
+  // A tune into another band does not cancel a seek, and the seek's threshold is on the old band's
+  // scale. This seek would otherwise go on forever: it can never come back to its start frequency.
+  [Fact]
+  public async Task ATuneIntoAnotherBand_EndsALiveSeek()
+  {
+    TaskCompletionSource seeking = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    _receiver.FrequencyChanged += (_, _) => seeking.TrySetResult();
+    MapReturns(null, BandMapService.ScanReasonStale);
+    _radioOptions.ScanStopThreshold = 100;
+    SDRRadioAudioSource source = CreateSource(_map.Object);
+
+    await source.StartScanAsync(ScanDirection.Up);
+    await seeking.Task.WaitAsync(FailSafe);
+    Assert.True(_receiver.SetFrequency(1_000_000));
+
+    await _scanEnded.Task.WaitAsync(FailSafe);
+    Assert.Equal(BandType.AM, _receiver.CurrentBand.Type);
+  }
+
   private long[] Snapshot()
   {
     lock (_tunes)

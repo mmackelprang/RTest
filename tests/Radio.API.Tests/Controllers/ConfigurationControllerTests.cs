@@ -158,6 +158,19 @@ public class ConfigurationControllerTests : IClassFixture<CustomWebApplicationFa
     Assert.Contains("ScanStopThreshold", body);
   }
 
+  [Theory]
+  [InlineData("HfScanStopThreshold")]
+  [InlineData("hfScanStopThreshold")]
+  [InlineData("scanStopThreshold")]
+  public async Task UpdateRadioSection_EitherThresholdOutOfRange_InEitherCase_ReturnsBadRequest(string key)
+  {
+    var sectionPayload = new Dictionary<string, object> { [key] = 500 };
+
+    var response = await _client.PostAsJsonAsync("/api/configuration/radio", sectionPayload);
+
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
   [Fact]
   public async Task UpdateRadioSection_ScanStopThresholdNegative_ReturnsBadRequest()
   {

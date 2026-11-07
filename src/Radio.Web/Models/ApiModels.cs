@@ -917,7 +917,7 @@ public class RadioConfigDto
   /// </summary>
   [System.ComponentModel.DataAnnotations.Range(0, 100,
     ErrorMessage = "ScanStopThreshold must be between 0 and 100 (percent).")]
-  public int ScanStopThreshold { get; set; } = 50;
+  public int ScanStopThreshold { get; set; } = 14;
 
   public int ScanStepDelayMs { get; set; } = 100;
   public int DefaultDeviceVolume { get; set; } = 50;

@@ -14,6 +14,7 @@ using Radio.Configuration.Models;
 using Radio.Metrics;
 using Radio.Fingerprinting.Services;
 using RTLSDRCore;
+using RTLSDRCore.Bands;
 using RTLSDRCore.Enums;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
@@ -105,6 +106,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     var options = _radioOptions.CurrentValue;
     _frequencyStep = Frequency.FromMegahertz(options.DefaultFMStepMHz);
     _deviceVolume = options.DefaultDeviceVolume;
+
+    // The receiver applies these to the device when it starts. They are read once, so a change on
+    // the panel lasts until the next restart.
+    _radioReceiver.Gain = options.TunerGainDb;
+    _radioReceiver.AutoGainEnabled = options.AutoGain;
+    _radioReceiver.SquelchThreshold = options.SquelchThreshold;
 
     // Subscribe to RTLSDRCore events and translate to Radio.Core events
     _radioReceiver.FrequencyChanged += OnRTLSDRFrequencyChanged;
@@ -458,7 +465,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public ScanDirection? ScanDirection => _scanDirection;
 
   /// <inheritdoc/>
-  public int ScanStopThreshold => _radioOptions.CurrentValue.ScanStopThreshold;
+  public int ScanStopThreshold => HfBands.Requires(_radioReceiver.CurrentBand.Type)
+    ? _radioOptions.CurrentValue.HfScanStopThreshold
+    : _radioOptions.CurrentValue.ScanStopThreshold;
 
   /// <inheritdoc/>
   public Task StartScanAsync(ScanDirection direction, CancellationToken cancellationToken = default)
@@ -501,7 +510,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
           ascending ? "up" : "down", _radioReceiver.CurrentFrequency, band, whyNot);
 
         // Convert ScanStopThreshold (0-100 UI scale) to 0.0-1.0 for RadioReceiver
-        var threshold = _radioOptions.CurrentValue.ScanStopThreshold / 100.0f;
+        var threshold = ScanStopThreshold / 100.0f;
         if (ascending)
         {
           _radioReceiver.ScanFrequencyUp(_frequencyStep.Hertz, threshold);
