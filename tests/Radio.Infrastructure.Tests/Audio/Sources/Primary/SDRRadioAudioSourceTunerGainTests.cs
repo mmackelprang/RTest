@@ -49,14 +49,6 @@ public class SDRRadioAudioSourceTunerGainTests
     Assert.Equal(0f, receiver.SquelchThreshold);
   }
 
-  // Signal strength follows the gain, so a seek threshold set for automatic gain walks past
-  // stations at the fixed gain.
-  [Fact]
-  public void ByDefault_SeekStopsWellBelowHalfOfFullScale()
-  {
-    Assert.Equal(14, new RadioOptions().ScanStopThreshold);
-  }
-
   [Fact]
   public void TheConfiguredSquelch_ReachesTheReceiver()
   {

@@ -2440,7 +2440,7 @@ namespace RTLSDRCore;
           // AUD-101: the in-channel dB scale on the HF bands (AM, Shortwave) only. Aircraft keeps
           // the wideband RMS even though its audio goes through the AM chain: under automatic gain
           // the tuner's AGC holds the noise high, and on the box an empty Aircraft channel read
-          // -18 to -26 dBFS in the channel, over the -30 dBFS that the 50 % seek stop means on the
+          // -18 to -26 dBFS in the channel, over the -30 dBFS that a seek stop of 50 means on the
           // dB scale and far over the -54 dBFS of the 0.1 squelch.
           _lastSignalStrength = am != null && hfBand ? am.Strength : WidebandSignalStrength(samples);
 

@@ -94,7 +94,8 @@ public interface IRadioControl
   ScanDirection? ScanDirection { get; }
 
   /// <summary>
-  /// Gets the signal strength threshold (0-100) at which the scan pauses on a signal.
+  /// Gets the signal strength threshold (0-100) at which the scan pauses on a signal, for the
+  /// current band.
   /// </summary>
   /// <remarks>
   /// Compared with <see cref="SignalStrength"/>, so it has that property's two scales: on FM,

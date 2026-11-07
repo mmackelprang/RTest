@@ -763,12 +763,13 @@ policy behaves: [fingerprinting.md § Call policy](fingerprinting.md#call-policy
 | `DefaultFMStepMHz` | `double` | `0.1` | Default FM frequency step in MHz (typical: 0.1 or 0.2) |
 | `MinFMFrequencyMHz` | `double` | `87.5` | Minimum FM frequency in MHz |
 | `MaxFMFrequencyMHz` | `double` | `108.0` | Maximum FM frequency in MHz |
-| `ScanStopThreshold` | `int` | `14` | Signal strength threshold for a live seek to stop (0-100). Suits a 30 dB `TunerGainDb`; a fresh band map bypasses it |
+| `ScanStopThreshold` | `int` | `14` | Signal strength (0-100, linear) at which a live seek pauses on FM, Weather, VHF and Aircraft. Set for a 30 dB `TunerGainDb`: automatic gain or a higher gain can lift empty channels over it. A fresh band map bypasses it |
+| `HfScanStopThreshold` | `int` | `50` | The same on AM and Shortwave, on their dB scale: `−60 + 0.6 × value` dBFS. These bands bypass the tuner, and 14 would be under their measured floor |
 | `ScanStepDelayMs` | `int` | `100` | Time to wait between frequency steps during scanning (milliseconds) |
 | `DefaultDeviceVolume` | `int` | `50` | Default device volume (0-100) |
 | `AutoGain` | `bool` | `false` | Whether the SDR tuner starts on automatic gain. Off because automatic gain overloaded the device on strong FM stations. Applies to every tuner band, not AM or Shortwave. The panel's switch lasts until the next restart |
-| `TunerGainDb` | `float` | `30` | SDR tuner gain in dB when `AutoGain` is false. Signal readings scale with it, so a change moves every station against `ScanStopThreshold` and `SquelchThreshold` |
-| `SquelchThreshold` | `float` | `0` | Squelch threshold (0-1), on the signal strength's linear scale. 0 leaves it open. A closed squelch is exact digital silence, and at a fixed gain weak stations read low |
+| `TunerGainDb` | `float` | `30` | SDR tuner gain in dB when `AutoGain` is false. Signal readings on the tuner bands scale with it, so a change moves their stations against `ScanStopThreshold` and `SquelchThreshold` |
+| `SquelchThreshold` | `float` | `0` | Squelch threshold (0-1), on the tuner bands' linear signal strength scale; AM and Shortwave never apply one. 0 leaves it open. A closed squelch is exact digital silence, and at a fixed gain weak stations read low |
 
 ---
 
