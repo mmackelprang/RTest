@@ -871,7 +871,7 @@ namespace RTLSDRCore;
               RadioBand seekBand = _currentBand;
               bool BandChanged()
               {
-                  if (ReferenceEquals(_currentBand, seekBand))
+                  if (_currentBand.Type == seekBand.Type)
                   {
                       return false;
                   }
