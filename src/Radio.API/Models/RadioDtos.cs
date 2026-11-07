@@ -130,7 +130,7 @@ public class RadioStateDto
   public ushort? RdsPi { get; set; }
 
   /// <summary>
-  /// Gets or sets the dBu threshold at which scan pauses on a signal.
+  /// Gets or sets the dBu threshold at which scan pauses on a signal, for the current band.
   /// Re-typed from <c>int</c> (percent) to <c>double</c> (dBu) in PR 1 of the
   /// Radio Controller Polish arc so the threshold matches the dBu semantics
   /// of <see cref="RssiDbu"/>. Greenfield project — no back-compat shim.

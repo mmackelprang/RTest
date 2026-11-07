@@ -764,7 +764,7 @@ policy behaves: [fingerprinting.md § Call policy](fingerprinting.md#call-policy
 | `MinFMFrequencyMHz` | `double` | `87.5` | Minimum FM frequency in MHz |
 | `MaxFMFrequencyMHz` | `double` | `108.0` | Maximum FM frequency in MHz |
 | `ScanStopThreshold` | `int` | `14` | Signal strength (0-100, linear) at which a live seek pauses on FM, Weather, VHF and Aircraft. Set for a 30 dB `TunerGainDb`: automatic gain or a higher gain can lift empty channels over it. A fresh band map bypasses it |
-| `HfScanStopThreshold` | `int` | `50` | The same on AM and Shortwave, on their dB scale: `−60 + 0.6 × value` dBFS. These bands bypass the tuner, and 14 would be under their measured floor |
+| `HfScanStopThreshold` | `int` | `50` | The same on AM and Shortwave, on their dB scale: `−60 + 0.6 × value` dBFS. These bands bypass the tuner, and 14 (−51.6 dBFS) would be under the −49 to −51.5 dBFS floor measured on AM. At 50 a live seek here passes every signal measured so far |
 | `ScanStepDelayMs` | `int` | `100` | Time to wait between frequency steps during scanning (milliseconds) |
 | `DefaultDeviceVolume` | `int` | `50` | Default device volume (0-100) |
 | `AutoGain` | `bool` | `false` | Whether the SDR tuner starts on automatic gain. Off because automatic gain overloaded the device on strong FM stations. Applies to every tuner band, not AM or Shortwave. The panel's switch lasts until the next restart |

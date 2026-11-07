@@ -49,6 +49,16 @@ public class SDRRadioAudioSourceTunerGainTests
     Assert.Equal(0f, receiver.SquelchThreshold);
   }
 
+  // Measured on the box (AUD-101): the AM floor reaches −49 dBFS, so a default under that pauses a
+  // live seek on empty channels.
+  [Fact]
+  public void ByDefault_TheHfSeekThresholdIsAboveTheMeasuredAmFloor()
+  {
+    double thresholdDbfs = -60 + (0.6 * new RadioOptions().HfScanStopThreshold);
+
+    Assert.True(thresholdDbfs > -49, $"{thresholdDbfs} dBFS");
+  }
+
   [Fact]
   public void TheConfiguredSquelch_ReachesTheReceiver()
   {

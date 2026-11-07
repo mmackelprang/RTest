@@ -175,6 +175,25 @@ public sealed class SDRRadioAudioSourceScanTests : IAsyncDisposable
     await source.StopScanAsync();
   }
 
+  // A tune into another band does not cancel a seek, and the seek's threshold is on the old band's
+  // scale. This seek would otherwise go on forever: it can never come back to its start frequency.
+  [Fact]
+  public async Task ATuneIntoAnotherBand_EndsALiveSeek()
+  {
+    TaskCompletionSource seeking = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    _receiver.FrequencyChanged += (_, _) => seeking.TrySetResult();
+    MapReturns(null, BandMapService.ScanReasonStale);
+    _radioOptions.ScanStopThreshold = 100;
+    SDRRadioAudioSource source = CreateSource(_map.Object);
+
+    await source.StartScanAsync(ScanDirection.Up);
+    await seeking.Task.WaitAsync(FailSafe);
+    Assert.True(_receiver.SetFrequency(1_000_000));
+
+    await _scanEnded.Task.WaitAsync(FailSafe);
+    Assert.Equal(BandType.AM, _receiver.CurrentBand.Type);
+  }
+
   private long[] Snapshot()
   {
     lock (_tunes)

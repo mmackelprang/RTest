@@ -426,7 +426,9 @@ public class ConfigurationController : ControllerBase
     {
       foreach (string key in new[] { "ScanStopThreshold", "HfScanStopThreshold" })
       {
-        if (data.TryGetValue(key, out var rawValue) && TryReadInt(rawValue, out var pct) && (pct < 0 || pct > 100))
+        // The Web client posts camelCase and data is case-sensitive.
+        object? rawValue = data.FirstOrDefault(kv => string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
+        if (TryReadInt(rawValue, out var pct) && (pct < 0 || pct > 100))
         {
           return new BadRequestObjectResult(new
           {

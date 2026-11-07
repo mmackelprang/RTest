@@ -865,8 +865,27 @@ namespace RTLSDRCore;
               // Track start frequency to detect full-sweep completion
               var startFrequency = _currentFrequencyHz;
 
+              // The threshold and step belong to the band the seek started on, and the signal
+              // strength has another scale on the HF bands. A tune into another band does not
+              // cancel a seek, so a band change ends it.
+              RadioBand seekBand = _currentBand;
+              bool BandChanged()
+              {
+                  if (ReferenceEquals(_currentBand, seekBand))
+                  {
+                      return false;
+                  }
+                  Logger.Information("Seek ended: the band changed to {Band}", _currentBand.Name);
+                  return true;
+              }
+
               while (!_scanCts.Token.IsCancellationRequested)
               {
+                  if (BandChanged())
+                  {
+                      break;
+                  }
+
                   // Calculate next frequency with band-edge wrap-around
                   var nextFreq = ascending
                       ? _currentFrequencyHz + stepHz
@@ -903,6 +922,11 @@ namespace RTLSDRCore;
                   if (_scanCts.Token.WaitHandle.WaitOne(dwellTimeMs))
         {
           break; // Cancelled during dwell
+        }
+
+        if (BandChanged())
+        {
+          break;
         }
 
         float strength = _lastSignalStrength;
@@ -1517,7 +1541,8 @@ namespace RTLSDRCore;
       /// scale 121.5 MHz read 0.25 and the channels a seek passed 0.22-0.25, also above 0.1: under
       /// automatic gain the squelch was open on empty channels either way (see
       /// archive/queue/AUD-101.md, box UAT). The appliance now starts at a fixed gain, with the
-      /// squelch set from <c>RadioOptions.SquelchThreshold</c>, so those readings are history.
+      /// squelch set from <c>RadioOptions.SquelchThreshold</c>, so those readings apply again only
+      /// if automatic gain is switched back on.
       /// </para>
       /// </remarks>
       private bool SquelchApplies => !HfBands.Requires(Volatile.Read(ref _currentBand).Type);
