@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, x64, appserver]
+    runs-on: ubuntu-latest  # 2026-11-14: public repos leave the appserver (homelab H7)
     steps:
       - uses: actions/checkout@v4
       - name: Install native audio libraries
