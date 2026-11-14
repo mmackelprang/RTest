@@ -48,7 +48,7 @@ concurrency:
 
 jobs:
   llm-review:
-    runs-on: [self-hosted, linux, x64, appserver]
+    runs-on: ubuntu-latest  # 2026-11-14: public repos leave the appserver (homelab H7)
     continue-on-error: true
     timeout-minutes: 25
     steps:

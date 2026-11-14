@@ -35,7 +35,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, x64, appserver]
+    runs-on: ubuntu-latest  # 2026-11-14: public repos leave the appserver (homelab H7)
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
