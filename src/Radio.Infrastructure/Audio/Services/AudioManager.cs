@@ -263,6 +263,12 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
         try
         {
+          // Only here: this is what makes a replaced source different from a stopped one.
+          if (oldSource is PrimaryAudioSourceBase replacedSource)
+          {
+            await replacedSource.PrepareForSwitchAwayAsync();
+          }
+
           if (oldSource is IPrimaryAudioSource oldPrimary)
           {
             await oldPrimary.StopAsync(cancellationToken);

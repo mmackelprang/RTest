@@ -225,6 +225,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
       _playbackService.GeneratorStalled += OnGeneratorStalled;
     }
 
+    _silentPlaybackTimer = _timeProvider.CreateTimer(
+      _ => _ = CheckForSilentPlaybackAsync(), null, SilentPlaybackTick, SilentPlaybackTick);
+
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified += OnTrackIdentified;
@@ -375,9 +378,63 @@ public class BluetoothAudioSource : USBAudioSourceBase
     await base.StopAsync(cancellationToken);
   }
 
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Owner's ruling, 2026-11-06: picking another source pauses the phone. Otherwise it plays on with
+  /// nobody hearing it. Only a phone we know to be playing is asked, and a pause the console already
+  /// asked for is the owner's, so that this records only a pause of ours. PauseCoreAsync is not reused:
+  /// it throws when the phone cannot be reached, and nothing here may stop the switch.
+  /// </remarks>
+  internal override async Task PrepareForSwitchAwayAsync()
+  {
+    if (!_avrcpReportsPlaying || _pausedByConsole)
+    {
+      return;
+    }
+
+    try
+    {
+      var paused = await _bluetoothService.PauseMediaAsync().WaitAsync(PhoneCommandTimeout, _timeProvider);
+
+      // A disconnect during that await already ended the session this pause belonged to.
+      _pausedBySwitch = paused && _bluetoothService.ConnectedDevice != null;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "BluetoothAudioSource: could not pause the phone for a source switch; switching anyway");
+    }
+  }
+
+  /// <summary>
+  /// Resumes the phone if a switch away paused it. Only then, so picking Bluetooth never starts a phone
+  /// its owner stopped. Not while inactive: stall recovery runs PlayCoreAsync too, and that is not
+  /// the owner coming back.
+  /// </summary>
+  private async Task ResumePauseOfOursAsync()
+  {
+    if (!_pausedBySwitch || !IsActiveSource)
+    {
+      return;
+    }
+
+    _pausedBySwitch = false;
+    try
+    {
+      if (!await _bluetoothService.PlayMediaAsync().WaitAsync(PhoneCommandTimeout, _timeProvider))
+      {
+        Logger.LogInformation("BluetoothAudioSource: could not resume the phone after a source switch");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "BluetoothAudioSource: could not resume the phone after a source switch");
+    }
+  }
+
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
     _stopRequested = false;
+    await ResumePauseOfOursAsync();
 
     // Platform manages audio routing — nothing to start locally
     if (_bluetoothService.IsAudioManagedByPlatform)
@@ -437,6 +494,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
   // phone would bring the audio back: OnCaptureNodeAvailable would see an active source with no
   // capture, which is exactly what it binds.
   private volatile bool _stopRequested;
+
+  // True from a pause this source sent for a switch away until the phone next plays, the source
+  // resumes it, or the device session ends. Not the same fact as _pausedByConsole, which the owner
+  // asked for and which a return to Bluetooth must not undo.
+  private volatile bool _pausedBySwitch;
+
+  // Both commands hold up AudioManager's switch, so a phone that does not answer gets this long.
+  private static readonly TimeSpan PhoneCommandTimeout = TimeSpan.FromSeconds(2);
+
+  // The silent-playback line. Longer than a node takes to appear; rate limited because journald
+  // volume matters on this box, and a Warning because LOG-2 holds everything below it here.
+  private static readonly TimeSpan SilentPlaybackTick = TimeSpan.FromSeconds(15);
+  private static readonly TimeSpan SilentPlaybackThreshold = TimeSpan.FromSeconds(30);
+  private static readonly TimeSpan SilentPlaybackReportEvery = TimeSpan.FromMinutes(5);
+  private readonly ITimer _silentPlaybackTimer;
+  private DateTimeOffset? _silentSince;
+  private DateTimeOffset? _silentReportedAt;
 
   protected override async Task PauseCoreAsync(CancellationToken cancellationToken)
   {
@@ -511,8 +585,53 @@ public class BluetoothAudioSource : USBAudioSourceBase
     await _bluetoothService.PreviousTrackAsync(cancellationToken);
   }
 
+  /// <summary>
+  /// Says when this source is active and the phone reports Playing, but no capture has been running
+  /// for a while. Seen once on the box, 2026-11-06: AVRCP titles arrived with the transport idle and
+  /// no node, and nothing above the LOG-2 hold said so. Only the transport can tell a phone that never
+  /// started streaming from a stream this console lost, so that is what the line carries.
+  /// </summary>
+  private async Task CheckForSilentPlaybackAsync()
+  {
+    try
+    {
+      // Inactive is a pipeline that reports nothing, as on Windows, not one that is broken. A stop the
+      // owner asked for leaves the phone playing, and that silence is not a fault.
+      var pipeline = _bluetoothService.PipelineStatus;
+      if (!IsActiveSource || !_avrcpReportsPlaying || _stopRequested
+          || _bluetoothService.ConnectedDevice == null
+          || pipeline is BluetoothPipelineStatus.Healthy or BluetoothPipelineStatus.Inactive
+          || _bluetoothService.IsAudioManagedByPlatform)
+      {
+        _silentSince = null;
+        return;
+      }
+
+      var now = _timeProvider.GetUtcNow();
+      _silentSince ??= now;
+      var silentFor = now - _silentSince.Value;
+      if (silentFor < SilentPlaybackThreshold
+          || now - _silentReportedAt < SilentPlaybackReportEvery)
+      {
+        return;
+      }
+
+      _silentReportedAt = now;
+      var transport = await _bluetoothService.GetMediaTransportStateAsync();
+      Logger.LogWarning(
+        "BluetoothAudioSource: the phone reports Playing but no audio is arriving, for {Seconds:F0} s: " +
+        "transport {Transport}, pipeline {Pipeline}",
+        silentFor.TotalSeconds, transport ?? "unknown", pipeline);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "BluetoothAudioSource: silent-playback check failed");
+    }
+  }
+
   protected override async ValueTask DisposeAsyncCore()
   {
+    _silentPlaybackTimer.Dispose();
     StopCaptureRetryLoop();
 
     if (_captureDevice != null)
@@ -601,6 +720,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     MetadataInternal["DeviceAddress"] = e.Device.Address;
     NeedsFingerprintingLookup = true;
 
+    // A connect is a new session, even if its disconnect was never reported.
+    _pausedBySwitch = false;
+
     // Attempt to acquire audio capture device now that a device is connected
     _ = TryAcquireAudioCaptureAsync();
   }
@@ -617,9 +739,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
   }
 
   /// <summary>
-  /// H1: binds a node that appears when this source is active and holds no capture. An idle phone has
-  /// no node until it plays, so without this the node of a phone played later was bound by nothing
-  /// and the phone dropped it after about 4 s (AUD-10). The 30 s pipeline monitor is too slow for that.
+  /// H1: binds a node that appears when this source is active and holds no capture. A phone connected
+  /// idle often has no node until it plays, so without this the node of a phone played later was bound
+  /// by nothing and the phone dropped it after about 4 s (AUD-10). The 30 s pipeline monitor is too slow
+  /// for that. ⚠ Not always: on 2026-11-06 a node appeared about 1 s after a connect with AVRCP Paused.
   /// </summary>
   /// <remarks>
   /// <see cref="TryAcquireAudioCaptureAsync"/> decides the two cases that are not this one. A capture
@@ -1059,8 +1182,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// Acquires the capture, without searching for a node that a connected phone does not have yet.
   /// </summary>
   /// <remarks>
-  /// A takeover at the connect starts this source with the phone idle, so "no node" is the ordinary
-  /// answer here. The service's acquisition would search for one, about 20 reads of pw-cli over 20 s,
+  /// A takeover at the connect starts this source with the phone usually idle, so "no node" is an
+  /// ordinary answer here. The service's acquisition would search for one, about 20 reads of pw-cli over 20 s,
   /// and <c>AudioManager</c> holds its switch lock across this source's start, so no one could pick a
   /// source meanwhile. One probe answers it, and <see cref="OnCaptureNodeAvailable"/> binds the node
   /// when the phone plays. With no phone this falls through, because the service reports that itself.
@@ -1151,6 +1274,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
       // placement was chosen for. Recorded, deliberately, rather than half-fixed.
       _avrcpReportsPlaying = false;
       _pausedByConsole = false;
+      _pausedBySwitch = false;
       _stopRequested = false;
 
       SetPositionAnchor(TimeSpan.Zero);
@@ -1728,6 +1852,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       case BluetoothPlaybackStatus.Playing:
         _pausedByConsole = false;
+        _pausedBySwitch = false;
         // ⚠ Stopped joined this accept set in AUD-12, and the guard on it is not
         // decoration. AUD-10 (the A2DP transport dies on pause) drives this source
         // to Stopped routinely, and before AUD-12 an AVRCP Playing arriving in that

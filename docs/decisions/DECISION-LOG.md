@@ -1255,8 +1255,10 @@ or its last disconnect does not take over again. A PBAP sync can drop the link a
 later, expected to report `LocalHost`, not measured, and a flap reports a timeout. A disconnect made on
 the console or by the phone ending the link (`Remote`) ends the connection at once.
 
-**Capture:** for an idle phone the node does not exist yet, and the Bluetooth source binds it from the
-node event once it is active. For a phone already streaming the settle has passed, so its node can
+**Capture:** for an idle phone the node usually does not exist yet, and the Bluetooth source binds it
+from the node event once it is active. ⚠ Not always: on 2026-11-06 a node appeared about 1 s after a
+connect with AVRCP `Paused`, and its transport stayed `active` through pauses. Nothing here depends on
+the idle case having no node: a node that exists at the connect is bound, as for a streaming phone. For a phone already streaming the settle has passed, so its node can
 exist, and FM's stop can last as long as an unbound node does. So a node that exists after the settle
 is bound before the stop, and one that appears during the stop is bound as it appears. A failed bind
 does not call the takeover off on this path, because the connect decided it. The source now probes
@@ -1290,6 +1292,18 @@ the phone reconnects.
 **The station** is `Radio:LastBand` and `Radio:LastFrequency`, which the radio restores on its first play.
 These were saved only every 30 s and only while radio was active, so `SDRRadioAudioSource` now also
 saves them as it stops. ⚠ This is the last band too: if the radio was last on AM, it restarts on AM.
+
+### Ruling 4, 2026-11-06: picking another source pauses the phone
+
+**Decision:** A switch away from Bluetooth sends AVRCP Pause, if the phone reports Playing and the
+console has not already paused it. A failed, refused or unanswered pause never holds up the switch: the
+command gets 2 s. It is only for a source switch: not a disconnect, and not console Stop, which leaves
+the phone alone as it always has.
+
+**On return:** picking Bluetooth resumes the phone only if that pause was ours. The phone playing again
+ends it, and so does a disconnect or a new connect, so a reconnect never starts a phone. A pause made on
+the phone or from the console stays paused. ⚠ The phone reporting Stopped does not end it, because
+that can be the echo of our own pause, so an app closed while the console was away still gets a Play.
 
 ---
 
